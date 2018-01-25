@@ -417,6 +417,7 @@ class Decadac(VisaInstrument, DacReader):
 
         self.connect_message()
 
+
     def set_all(self, volt):
         """
         Set all dac channels to a specific voltage. If channels are set to ramp then the ramps
