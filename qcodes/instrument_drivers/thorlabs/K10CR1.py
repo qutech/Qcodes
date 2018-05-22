@@ -1,6 +1,6 @@
-# from qcodes.instrument.base import Instrument
-# from qcodes.instrument.parameter import Parameter
-# from qcodes.utils.validators import Numbers
+from qcodes.instrument.base import Instrument
+from qcodes.instrument.parameter import Parameter
+from qcodes.utils.validators import Numbers
 
 try:
     import thorlabs_apt as apt
@@ -8,26 +8,13 @@ try:
 except ImportError as err:
     raise ImportError('This driver requires thorlabs_apt. You can find it at https://github.com/qpit/thorlabs_apt')
 
-# devices = apt.list_available_devices()
-# print(devices)
-#
-# if (50, 55001014) not in devices:
-#     raise RuntimeError('Could not find device')
-
-# motor = apt.Motor(55001014)
-#
-# # set default values
-# motor.acceleration = 10.
-# motor.move_home_velocity = 10.
-#
-# motor.move_to(30, True)
-# # motor.move_home(True)
 
 def getHWList():
     return apt.list_available_devices()
 
 def getHWinfo(serial_number):
     return apt.hardware_info(serial_number)
+
 
 class RotaryMount(Instrument):
 
@@ -38,14 +25,14 @@ class RotaryMount(Instrument):
         self.blocking = blocking
         self.reference = reference
 
-        #Initialize Motor
+        #### Initialize Motor
         self.mt = apt.Motor(self.serial_number)
         self.mt.acceleration = 10.
         self.mt.move_home_velocity = 10.
         # self.mt.minimum_velocity = 0. #does not seem necessary, the speed is adjusted depending on the angle to travel
         # self.mt.maximum_velocity = 10.
 
-        #Create parameters
+        #### Create parameter
         self.add_parameter('angle',
                            get_cmd = self._get_angle,
                            set_cmd = self._set_angle,
@@ -77,7 +64,7 @@ class RotaryMount(Instrument):
         return self.mt.is_in_motion
 
     @property
-    def homing_completed(self):
+    def is_homing_completed(self):
         return self.mt.has_homing_been_completed
 
     def _get_angle(self):
@@ -99,6 +86,3 @@ class RotaryMount(Instrument):
 
     def move_home(self):
         self.mt.move_home(self.blocking)
-
-
-mount = RotaryMount('mount13', 55001014)
