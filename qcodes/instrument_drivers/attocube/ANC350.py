@@ -1,5 +1,11 @@
-from ANC350_Python_library.PyANC350v4 import Positioner
 from qcodes import (Instrument, Parameter)
+
+try:
+    from ANC350_Python_library.PyANC350v4 import Positioner
+except ImportError as err:
+    raise ImportError('This driver requires the ANC350-Python-library. ' +
+                      'You can find it at https://github.com/Laukei/attocube-ANC350-Python-library.')
+
 
 
 class Attocube_ANC350(Instrument):
@@ -110,17 +116,3 @@ class AttocubeAmplitudeParameter(AttocubeParameter):
 
     def set(self, value):
         self._positioner.setAmplitude(self.direction, value)
-
-
-
-if __name__ == '__main__':
-    ANC = Attocube_ANC350('AlfaNovemberCharlie')
-    for pos in ('x', 'y', 'z'):
-        print('{} position:'.format(pos), ANC.get('pos_{}'.format(pos)))
-        print('{} frequency:'.format(pos), ANC.get('freq_{}'.format(pos)))
-        print('{} amplitude:'.format(pos), ANC.get('amp_{}'.format(pos)))
-        # print(ANC.set('pos_{}'.format(pos), 1e-7))
-        # print('{} position:'.format(pos), ANC.get('pos_{}'.format(pos)))
-
-    ANC.positioner.disconnect()
-    ANC.close()
