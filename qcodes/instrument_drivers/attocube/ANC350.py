@@ -45,10 +45,10 @@ class Attocube_ANC350(Instrument):
         value.
 
         Parameters
-            devNo	  Sequence number of the device. Must be smaller than the
-                   devCount from the last ANC_discover call. Default: 0
+            dev_no  Sequence number of the device. Must be smaller than the
+                    dev_count from the last ANC_discover call. Default: 0
         Returns
-            devType     Output: Type of the ANC350 device. {0: Anc350Res,
+            dev_type    Output: Type of the ANC350 device. {0: Anc350Res,
                                 1:Anc350Num, 2:Anc350Fps, 3:Anc350None}
             id          Output: programmed hardware ID of the device
             serial_no   Output: The device's serial number. The string buffer
@@ -74,8 +74,8 @@ class Attocube_ANC350(Instrument):
             moving      Output: If the axis is moving.
             target      Output: If the target is reached in automatic
                                 positioning
-            eotFwd      Output: If end of travel detected in forward direction.
-            eotBwd      Output: If end of travel detected in backward
+            eot_fwd     Output: If end of travel detected in forward direction.
+            eot_bwd     Output: If end of travel detected in backward
                                 direction.
             error	       Output: If the axis' sensor is in error state.
         """
@@ -88,7 +88,7 @@ class Attocube_ANC350(Instrument):
         Parameters
             axis_no         Axis number (0 ... 2)
             enable          Enables (1) or disables (0) the voltage output.
-            autoDisable     If the voltage output is to be deactivated
+            auto_disable    If the voltage output is to be deactivated
                             automatically when end of travel is detected.
         Returns
             None
