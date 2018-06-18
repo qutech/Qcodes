@@ -1,4 +1,28 @@
-from qcodes import (Instrument, Parameter)
+"""
+This module implements a driver for the attocube ANC350 nanopositioner in
+qcodes using the ANC350-python-library found at 
+https://github.com/Laukei/attocube-ANC350-Python-library.
+
+The main functions are the get- and set methods for amplitude (voltage),
+frequency, and position in all three directions. The latter first sets the
+target position and then initiates the start_auto_move method (both of which
+can also be done manually). The corresponding set method has an additional
+keyword argument mode which toggles relative or absolute movement.
+
+An example workflow:
+
+>>> from qcodes.instrument_drivers.attocube.ANC350 import Attocube_ANC350
+>>> ANC = Attocube_ANC350('foo')    # device named foo
+>>> ANC.pos_x()                     # gets the current x-position
+>>> ANC.pos_z(1e-7)                 # sets y-pos. to 100nm and starts movement
+>>> ANC.freq_y()                    # gets the current y-frequency
+>>> ANC.amp_x(2)                    # sets the voltage in x-direction to 2V
+>>> ANC.disconnect()                # only one ANC can be connected at a time
+>>> ANC.close()                     # tidy up
+"""
+
+from qcodes import Instrument, Parameter
+from qcodes.utils.validators import Numbers
 
 try:
     from ANC350_Python_library.PyANC350v4 import Positioner
@@ -7,6 +31,8 @@ except ImportError:
                       'You can find it at https://github.com/Laukei/' +
                       'attocube-ANC350-Python-library.')
 
+__all__ = ["Attocube_ANC350", "AttocubePositionParameter",
+           "AttocubeFrequencyParameter", "AttocubeAmplitudeParameter"]
 
 class Attocube_ANC350(Instrument):
     def __init__(self, name, **kwargs):
@@ -28,14 +54,42 @@ class Attocube_ANC350(Instrument):
                                positioner=self.positioner,
                                parameter_class=AttocubeFrequencyParameter,
                                direction=direction,
+                               vals=Numbers(1, 5e3),
                                label='Frequency in {}'.format(direction),
                                unit='Hz')
             self.add_parameter('amp_{}'.format(direction),
                                positioner=self.positioner,
                                parameter_class=AttocubeAmplitudeParameter,
                                direction=direction,
+                               vals=Numbers(0, 70),
                                label='Amplitude in {}'.format(direction),
                                unit='V')
+
+    def _parse_direction_arg(self, direction):
+        """
+        A convenience function to allow for strings such as 'x' as arguments
+        for the direction (instead of just the axis numbers 0, 1, 2)
+        
+        Parameters
+            direction   One of {'x', 'y', 'z', 0, 1, 2}
+        Returns
+            axis_no     The axis id, e.g 0 if input was 'x'
+        """
+        from string import ascii_lowercase
+
+        if direction is not None:
+            if isinstance(direction, int):
+                # direction correct format
+                axis_no = direction
+            elif isinstance(direction, str) and len(direction) == 1:
+                # direction string, convert to int (x is 23rd in the alphabet)
+                axis_no = ascii_lowercase.index(direction) - 23
+            else:
+                raise TypeError('Direction "{}" not a valid axis!'.format(
+                        direction))
+        else:
+            raise ValueError('No direction provided!')
+        return axis_no
 
     def get_device_info(self):
         """
@@ -62,12 +116,12 @@ class Attocube_ANC350(Instrument):
         """
         return self.positioner.getDeviceInfo()
 
-    def get_axis_status(self, axis_no):
+    def get_axis_status(self, direction):
         """
         Reads status information about an axis of the device.
 
         Parameters
-            axis_no     Axis number (0 ... 2)
+            direction   Axis number (0 ... 2) or string ('x', 'y', 'z')
         Returns
             connected   Output: If the axis is connected to a sensor.
             enabled     Output: If the axis voltage output is enabled.
@@ -79,96 +133,119 @@ class Attocube_ANC350(Instrument):
                                 direction.
             error	       Output: If the axis' sensor is in error state.
         """
+        axis_no = self._parse_direction_arg(direction)
         return self.positioner.getAxisStatus(axis_no)
 
-    def set_axis_output(self, axis_no, enable, auto_disable):
+    def set_axis_output(self, direction, enable, auto_disable):
         """
         Enables or disables the voltage output of an axis.
 
         Parameters
-            axis_no         Axis number (0 ... 2)
+            direction       Axis number (0 ... 2) or string ('x', 'y', 'z')
             enable          Enables (1) or disables (0) the voltage output.
             auto_disable    If the voltage output is to be deactivated
                             automatically when end of travel is detected.
         Returns
             None
         """
+        axis_no = self._parse_direction_arg(direction)
         self.positioner.setAxisOutput(axis_no, enable, auto_disable)
 
-    def set_dc_voltage(self, axis_no, voltage):
+    def set_dc_voltage(self, direction, voltage):
         """
         Sets the DC level on the voltage output when no sawtooth based motion
         is active.
 
             Parameters
-            axis_no     Axis number (0 ... 2)
+            direction   Axis number (0 ... 2) or string ('x', 'y', 'z')
             voltage     DC output voltage [V], internal resolution is 1 mV
         Returns
             None
         """
+        axis_no = self._parse_direction_arg(direction)
         self.positioner.setDcVoltage(axis_no, voltage)
 
-    def start_single_step(self, axis_no, backward):
+    def start_single_step(self, direction, backward):
         """
         Triggers a single step in desired direction.
 
         Parameters
-            axis_no     Axis number (0 ... 2)
+            direction   Axis number (0 ... 2) or string ('x', 'y', 'z')
             backward    If the step direction is forward (0) or backward (1)
         Returns
             None
         """
+        axis_no = self._parse_direction_arg(direction)
         self.positioner.startSingleStep(axis_no, backward)
 
-    def start_continuous_move(self, axis_no, start, backward):
+    def start_continuous_move(self, direction, start, backward):
         """
         Starts or stops continous motion in forward direction. Other kinds of
         motions are stopped.
 
         Parameters
-            axis_no     Axis number (0 ... 2)
+            direction   Axis number (0 ... 2) or string ('x', 'y', 'z')
             start       Starts (1) or stops (0) the motion
             backward    If the move direction is forward (0) or backward (1)
         Returns
             None
         """
+        axis_no = self._parse_direction_arg(direction)
         self.positioner.startContinuousMove(axis_no, start, backward)
 
-    def start_auto_move(self, axis_no, enable, relative):
+    def start_auto_move(self, direction, enable, relative):
         """
         Switches automatic moving (i.e. following the target position) on or
         off
 
         Parameters
-            axis_no     Axis number (0 ... 2)
+            direction   Axis number (0 ... 2) or string ('x', 'y', 'z')
             enable      Enables (1) or disables (0) automatic motion
             relative    If the target position is to be interpreted absolute
                         (0) or relative to the current position (1)
         Returns
             None
         """
+        axis_no = self._parse_direction_arg(direction)
         self.positioner.startAutoMove(axis_no, enable, relative)
 
-    def set_target_range(self, axis_no, target_rg):
+    def set_target_position(self, direction, target):
+        """
+        Sets the target position for automatic motion, see start_auto_move. For
+        linear type actuators the position unit is m, for goniometers and
+        rotators it is degree.
+
+        Parameters
+            direction   Axis number (0 ... 2) or string ('x', 'y', 'z')
+            target      Target position [m] or [°]. Internal resulution is 1 nm or
+                        1 µ°.
+        Returns
+            None
+        """
+        axis_no = self._parse_direction_arg(direction)
+        self.positioner.setTargetPosition(axis_no, target)
+
+    def set_target_range(self, direction, target_rg):
         """
         Defines the range around the target position where the target is
         considered to be reached.
 
         Parameters
-            axis_no     Axis number (0 ... 2)
+            direction   Axis number (0 ... 2) or string ('x', 'y', 'z')
             target_rg   Target range [m] or [°]. Internal resulution is 1 nm or
                         1 µ°.
         Returns
             None
         """
+        axis_no = self._parse_direction_arg(direction)
         self.positioner.setTargetRange(axis_no, target_rg)
 
-    def select_actuator(self, axis_no, actuator):
+    def select_actuator(self, direction, actuator):
         """
         Selects the actuator to be used for the axis from actuator presets.
 
         Parameters
-            axis_no     Axis number (0 ... 2)
+            direction   Axis number (0 ... 2) or string ('x', 'y', 'z')
             actuator    Actuator selection (0 ... 255)
                 0: ANPg101res
                 1: ANGt101res
@@ -185,20 +262,22 @@ class Attocube_ANC350(Instrument):
         Returns
             None
         """
+        axis_no = self._parse_direction_arg(direction)
         self.positioner.selectActuator(axis_no, actuator)
 
-    def get_actuator_name(self, axis_no):
+    def get_actuator_name(self, direction):
         """
         Get the name of the currently selected actuator
 
         Parameters
-            axis_no     Axis number (0 ... 2)
+            direction   Axis number (0 ... 2) or string ('x', 'y', 'z')
         Returns
             name    Name of the actuator
         """
+        axis_no = self._parse_direction_arg(direction)
         return self.positioner.getActuatorName(axis_no)
 
-    def measureCapacitance(self, axis_no):
+    def measure_capacitance(self, direction):
         """
         Performs a measurement of the capacitance of the piezo motor and
         returns the result. If no motor is connected, the result will be 0.
@@ -206,13 +285,14 @@ class Attocube_ANC350(Instrument):
         will take a few seconds of time.
 
         Parameters
-            axis_no     Axis number (0 ... 2)
+            direction   Axis number (0 ... 2) or string ('x', 'y', 'z')
         Returns
             cap     Output: Capacitance [F]
         """
+        axis_no = self._parse_direction_arg(direction)
         return self.positioner.measureCapacitance(axis_no)
 
-    def saveParams(self):
+    def save_params(self):
         """
         Saves parameters to persistent flash memory in the device. They will be
         present as defaults after the next power-on. The following parameters
@@ -225,6 +305,17 @@ class Attocube_ANC350(Instrument):
             None
         """
         self.positioner.saveParams()
+
+    def disconnect(self):
+        """
+        Closes the connection to the device. The device handle becomes invalid.
+
+        Parameters
+            None
+        Returns
+            None
+        """
+        self.positioner.disconnect()
 
 
 class AttocubeParameter(Parameter):
@@ -260,7 +351,7 @@ class AttocubePositionParameter(AttocubeParameter):
         # Initialize the parent AttocubeParameter instance
         super().__init__(positioner=positioner, direction=direction, **kwargs)
 
-    def get(self):
+    def get_raw(self):
         """
         Retrieves the current actuator position. For linear type actuators the
         position unit is m; for goniometers and rotators it is degree.
@@ -272,7 +363,7 @@ class AttocubePositionParameter(AttocubeParameter):
         """
         return self._positioner.getPosition(self.direction)
 
-    def set(self, value, mode=0):
+    def set_raw(self, value, mode=0):
         """
         Starts automatic motion with the target position value. For linear type
         actuators the position unit is m, for goniometers and rotators it is
@@ -311,11 +402,10 @@ class AttocubePositionParameter(AttocubeParameter):
 
 class AttocubeFrequencyParameter(AttocubeParameter):
     def __init__(self, positioner=None, direction=None, **kwargs):
-        print(direction, positioner)
         # Initialize the parent AttocubeParameter instance
         super().__init__(positioner=positioner, direction=direction, **kwargs)
 
-    def get(self):
+    def get_raw(self):
         """
         Reads back the frequency parameter of the axis.
 
@@ -326,7 +416,7 @@ class AttocubeFrequencyParameter(AttocubeParameter):
         """
         return self._positioner.getFrequency(self.direction)
 
-    def set(self, value):
+    def set_raw(self, value):
         """
         Sets the frequency parameter for the axis
 
@@ -343,7 +433,7 @@ class AttocubeAmplitudeParameter(AttocubeParameter):
         # Initialize the parent AttocubeParameter instance
         super().__init__(positioner=positioner, direction=direction, **kwargs)
 
-    def get(self):
+    def get_raw(self):
         """
         Reads back the amplitude parameter of the axis.
 
@@ -354,7 +444,7 @@ class AttocubeAmplitudeParameter(AttocubeParameter):
         """
         return self._positioner.getAmplitude(self.direction)
 
-    def set(self, value):
+    def set_raw(self, value):
         """
         Sets the amplitude parameter for the axis
 
