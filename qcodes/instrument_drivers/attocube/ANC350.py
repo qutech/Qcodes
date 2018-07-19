@@ -54,7 +54,7 @@ class Attocube_ANC350(Instrument):
                                positioner=self.positioner,
                                parameter_class=AttocubeFrequencyParameter,
                                direction=direction,
-                               vals=Numbers(1, 5e3),
+                               vals=Numbers(1, 2e3),
                                label='Frequency in {}'.format(direction),
                                unit='Hz')
             self.add_parameter('amp_{}'.format(direction),
@@ -370,7 +370,7 @@ class AttocubePositionParameter(AttocubeParameter):
         degree.
 
         Parameters
-            value   	Target position [m] or [°]. Internal resulution is 1 nm or
+            value   Target position [m] or [°]. Internal resulution is 1 nm or
                     1 µ°.
             mode    If the target position is to be interpreted absolute (0) or
                     relative to the current position (1). Also takes the
