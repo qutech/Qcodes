@@ -25,7 +25,7 @@ from qcodes import Instrument, Parameter
 from qcodes.utils.validators import Numbers
 
 try:
-    from ANC350_Python_library.PyANC350v4 import Positioner
+    from attocube_ANC350_Python_library.PyANC350v4 import Positioner
 except ImportError:
     raise ImportError('This driver requires the ANC350-Python-library. ' +
                       'You can find it at https://github.com/Laukei/' +
