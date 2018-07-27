@@ -292,11 +292,11 @@ class Runner:
         for func, args in self.exitactions:
             func(*args)
 
-        self.ds.unsubscribe_all()
-
         # and finally mark the dataset as closed, thus
         # finishing the measurement
         self.ds.mark_complete()
+
+        self.ds.unsubscribe_all()
 
 
 class Measurement:
@@ -420,10 +420,9 @@ class Measurement:
         name = str(parameter)
         my_setpoints: Optional[Sequence[Union[str, _BaseParameter]]]
         if isinstance(parameter, ArrayParameter):
-            parameter = cast(ArrayParameter, parameter)
             spname_parts = []
-            if parameter.root_instrument is not None:
-                inst_name = parameter.root_instrument.name
+            if parameter._instrument is not None:
+                inst_name = parameter._instrument.name
                 if inst_name is not None:
                     spname_parts.append(inst_name)
             if parameter.setpoint_names is not None:
