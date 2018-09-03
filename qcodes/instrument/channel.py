@@ -28,14 +28,16 @@ class InstrumentChannel(InstrumentBase):
           channel. Usually populated via ``add_function``
     """
 
-    def __init__(self, parent: Instrument, name: str, **kwargs) -> None:
+    def __init__(self,
+                 parent: Union[Instrument, 'InstrumentChannel'],
+                 name: str,
+                 **kwargs) -> None:
         # Initialize base classes of Instrument. We will overwrite what we
         # want to do in the Instrument initializer
         super().__init__(name=name, **kwargs)
 
         self.name = "{}_{}".format(parent.name, str(name))
         self.short_name = str(name)
-        self._meta_attrs = ['name']
 
         self._parent = parent
 
@@ -72,6 +74,7 @@ class InstrumentChannel(InstrumentBase):
         name_parts = self._parent.name_parts
         name_parts.append(self.short_name)
         return name_parts
+
 
 class MultiChannelInstrumentParameter(MultiParameter):
     """
@@ -121,6 +124,7 @@ class MultiChannelInstrumentParameter(MultiParameter):
         """
 
         return self.names
+
 
 class ChannelList(Metadatable):
     """
