@@ -7,10 +7,9 @@
 # Date:   July 2018
 
 
-import serial
 from qcodes import  InstrumentChannel, ChannelList
 from qcodes.utils import validators as vals
-from qcodes.instrument.base import InstrumentBase
+from qcodes.instrument.visa import VisaInstrument
 
 
 class DACException(Exception):
@@ -530,7 +529,7 @@ class DacSlot(InstrumentChannel, DacBase):
         return self._parent._read(obj, buf_size)
 
 
-class Decadac(InstrumentBase):
+class Decadac(VisaInstrument):
 
     _DEFAULT_RESET    = False
     _DEFAULT_BAUDRATE = 9600
@@ -557,73 +556,13 @@ class Decadac(InstrumentBase):
             channels (ChannelList): list of all channels
         """
 
-        super().__init__(name, **kwargs)
-
-        self._address = address
-        self._reset = reset
-        self._baudrate = baudrate
-        self._timeout = timeout
-
-        self._device = None
+        super().__init__(name, address=address, timeout=timeout, **kwargs)
 
         self.current_slot = None
         self.current_channel = None
         
         self.open()
     
-    
-    def __enter__(self):
-        """
-        Entering a with-section
-        """
-        if self._device == None:
-            self.open()
-        
-        return self
-    
-    
-    def __exit__(self, type, value, traceback):
-        """
-        Leaving a with-section
-        """
-        if self._device != None:
-            self.close()
-        
-        return False
-        
-    
-    def open(self, address=None, reset=None, baudrate=None, timeout=None):
-        """
-        Open the device connection
-        
-        Arguments:
-            address (str):  address of the device (e.g. /dev/ttyUSB0)
-            reset (bool):   if "True", set all voltages to zero, set trigger mode to "always update" and stop ramps. If "False" only the upper and lower limit is reset.
-            baudrate (int): baud rate of ASCII protocol
-            timeout (int):  seconds to allow for responses. Default 5
-            
-            Not given arguments are replaced by the last used value
-        """
-        if address != None:
-            self._address = address
-        if reset != None:
-            self._reset = reset
-        if baudrate != None:
-            self._baudrate = baudrate
-        if timeout != None:
-            self._timeout = timeout
-        
-        if Decadac._device_connected:
-            raise DACException("Device \"{}\" ({}) is already in use.".format(self.name, self._address))
-
-        try:
-            print("Connecting to \"{}\" ({}) ...".format(self.name, self._address))
-            self._device = serial.Serial(self._address, self._baudrate, timeout=self._timeout)
-            Decadac._device_connected = True
-            print("Connected successfully.")
-        except:
-            raise DACException("Faild to connect to \"{}\" ({}).".format(self.name, self._address))
-
         self.current_slot = None
         self.current_channel = None
         
@@ -640,9 +579,9 @@ class Decadac(InstrumentBase):
         self.add_submodule("slots", slots)
         self.add_submodule("channels", channels)
         
-        if self._reset:
+        if reset:
             self.reset()
-            
+
 
     def close(self):
         """
@@ -653,11 +592,7 @@ class Decadac(InstrumentBase):
         
         self.submodules.clear()
         
-        print("Closing the device \"{}\" ...".format(self.name))
-        self._device.close()
-        self._device = None
-        Decadac._device_connected = False
-        print("Closed successfully.")
+        super().close()
 
     
     def reset(self):
@@ -727,7 +662,7 @@ class Decadac(InstrumentBase):
             elif isinstance(obj, DacChannel):
                 self._set_channel(obj._parent, obj)
         
-        self._device.write(str.encode(cmd))
+        super().write_raw(cmd)
         
         if Decadac.enable_output:
             print("Decadac._write(\"{}\")".format(cmd))
@@ -749,7 +684,7 @@ class Decadac(InstrumentBase):
             elif isinstance(obj, DacChannel):
                 self._set_channel(obj._parent, obj)
         
-        result = self._device.read(buf_size).decode()
+        result = super().ask_raw(buf_size)
         
         if Decadac.enable_output:
             print("Decadac._read({}) = \"{}\"".format(buf_size, result))
