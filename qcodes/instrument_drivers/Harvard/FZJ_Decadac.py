@@ -556,13 +556,11 @@ class Decadac(VisaInstrument):
             channels (ChannelList): list of all channels
         """
 
-        super().__init__(name, address=address, timeout=timeout, **kwargs)
+        super().__init__(name, address, timeout=timeout, **kwargs)
 
         self.current_slot = None
         self.current_channel = None
         
-        self.open()
-    
         self.current_slot = None
         self.current_channel = None
         
