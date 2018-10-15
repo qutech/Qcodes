@@ -6,7 +6,7 @@ Created on Wed Sep 19 10:17:25 2018
 @author: l.lankes
 """
 
-from typing import Callable
+from typing import Callable, Union, Iterable
 import numpy as np
 
 from qcodes.instrument.base import Instrument
@@ -14,8 +14,7 @@ from qcodes.instrument.parameter import ArrayParameter, BufferedParameter
 import qcodes.utils.validators as vals
 from qupulse.pulses.pulse_template import PulseTemplate
 from qupulse.pulses import ForLoopPT, MappingPT, plotting
-from qupulse.expressions import Expression
-from qupulse.hardware.setup import HardwareSetup
+from qupulse.hardware.setup import HardwareSetup, ChannelID, _SingleChannel, MeasurementMask
 
 
 class QuPulseArrayParameter(ArrayParameter):
@@ -40,8 +39,6 @@ class QuPulseParameters(Instrument):
         """
         super().__init__(name, **kwargs)
         
-        self.sweep_values = None
-        
     def set_parameters(self, pulse_parameters,
                        sweep_parameter_cmd=None,
                        send_buffer_cmd=None):
@@ -63,20 +60,20 @@ class QuPulseParameters(Instrument):
             result[p] = self.parameters[p].get()
         
         return result
-
+        
 
 class QuPulseInstrument(Instrument):
     
     def __init__(self,
                  name: str,
-                 pt: PulseTemplate,
-                 hardware_setup: HardwareSetup,
+                 program_name: str,
+                 pulse_template: PulseTemplate=None,
                  **kwargs) -> None:
         """
         """
         super().__init__(name, **kwargs);
         
-        self._hardware_setup = hardware_setup
+        self.program_name = program_name
         
         self.add_parameter("template",
                            get_cmd=self._get_template,
@@ -88,19 +85,49 @@ class QuPulseInstrument(Instrument):
                            shape=(1,),
                            get_cmd=self._get_output,
                            label="Output data")
-        self.add_parameter("channel_mapping",
-                           )
         self.add_submodule("template_parameters",
                            QuPulseParameters(self.name + "_template_parameters"))
 
-        self.template.set(pt)
+        if pulse_template:
+            self.template.set(pulse_template)
+        
+        self._hardware_setup = HardwareSetup()
         
         self._output_counter = 0 # TODO Test
         self._send_counter = 0 # TODO Test
         self._build_counter = 0 # TODO Test
         self._reset_counter = 0 # TODO Test
         
+        
+    def set_channel(self, identifier: ChannelID,
+                    single_channel: Union[_SingleChannel, Iterable[_SingleChannel]],
+                    allow_multiple_registration: bool=False) -> None:
+        """
+        HardwareSetup.set_channel
+        """
+        return self._hardware_setup.set_channel(identifier,
+                                                single_channel,
+                                                allow_multiple_registration=allow_multiple_registration)
 
+
+    def set_measurement(self, measurement_name: str,
+                        measurement_mask: Union[MeasurementMask, Iterable[MeasurementMask]],
+                        allow_multiple_registration: bool=False):
+        """
+        HardwareSetup.set_measurement
+        """
+        return self._hardware_setup.set_measurement(measurement_name,
+                                                    measurement_mask,
+                                                    allow_multiple_registration=allow_multiple_registration)
+        
+        
+    def rm_channel(self, identifier: ChannelID) -> None:
+        """
+        HardwareSetup.rm_channel
+        """
+        return self._hardware_setup.rm_channel(identifier)
+        
+        
     def _get_template(self):
         """
         Gets the PulseTemplate
@@ -165,15 +192,28 @@ class QuPulseInstrument(Instrument):
         
         program = pt.create_program(parameters=params)
         
-        print(program.get_measurement_windows())
         
-        # Test
-        plotting.plot(pt, params, sample_rate=100)
         
-        program_name = self.name + "_program"
+        self._hardware_setup.register_program(self.program_name, program, update=True)
         
-        self._hardware_setup.register_program(program_name, program, update=True)
-        self._hardware_setup.run_program(program_name)
+        awg = next(iter(self._hardware_setup.known_awgs)) # TODO
+        dac = next(iter(self._hardware_setup.known_dacs)) # TODO
+        
+        awg._device.set_chan_state([False, False, True, True])
+        
+        self._hardware_setup.arm_program(self.program_name)
+        
+        awg.run_current_program()
+        
+        self.scanline_data = dac.card.extractNextScanline()
+        
+        for measurement in self._hardware_setup._measurement_map:
+            
+            self.DS_C = self.scanline_data.operationResults['DS_C'].getAsVoltage(dac.config.inputConfiguration[2].inputRange)
+            self.DS_D = self.scanline_data.operationResults['DS_D'].getAsVoltage(dac.config.inputConfiguration[2].inputRange)
+        
+        self.DS_C = self.DS_C.reshape((40, 40))
+        self.DS_D = self.DS_D.reshape((40, 40))
         
         # resetting loops because the buffer is already at the hardware
         self._loops.clear()
@@ -184,7 +224,7 @@ class QuPulseInstrument(Instrument):
         """
         """
         self._output_counter += 1 # TODO Test
-        print("QuPulseTemplate._get_output() called ({}); parameters: {}.".format(self._output_counter, self.template_parameters.to_dict())) # TODO Test
+        #print("QuPulseTemplate._get_output() called ({}); parameters: {}.".format(self._output_counter, self.template_parameters.to_dict())) # TODO Test
         
         # TODO
         # first call: measure all values and resturn the first

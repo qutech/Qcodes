@@ -1044,7 +1044,10 @@ class BufferedActiveLoop(ActiveLoop):
         """
         if self._is_most_outer_loop:
             self._set_buffered_sweep()
-            self._send_buffer()
+            self._send_buffer() # TODO Measurement windows
+            # TODO send meas.win. to measurement-instrument
+            # TODO arm measurement-inst
+            
         
         # at the beginning of the loop, the time to wait after setting
         # the loop parameter may be increased if an outer loop requested longer
