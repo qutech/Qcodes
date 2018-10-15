@@ -932,6 +932,26 @@ class Parameter(_BaseParameter):
         """
         return SweepFixedValues(self, start=start, stop=stop,
                                 step=step, num=num)
+        
+
+class BufferedParameter(Parameter):
+    
+    def __init__(self, name: str, instrument: 'Instrument',
+                 sweep_parameter_cmd: Optional[Callable]=None,
+                 send_buffer_cmd: Optional[Callable]=None,
+                 *args, **kwargs):
+        super().__init__(name, instrument=instrument, *args, **kwargs)
+        
+        self._sweep_parameter_cmd = sweep_parameter_cmd
+        self._send_buffer_cmd = send_buffer_cmd
+        
+    def set_buffered(self, sweep_values):
+        if self._sweep_parameter_cmd is not None:
+            self._sweep_parameter_cmd(self, sweep_values)
+            
+    def send_buffer(self):
+        if self._send_buffer_cmd is not None:
+            self._send_buffer_cmd(self)
 
 
 class ArrayParameter(_BaseParameter):

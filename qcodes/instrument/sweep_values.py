@@ -62,6 +62,9 @@ class SweepValues(Metadatable):
             raise TypeError('parameter {} is not settable'.format(parameter))
 
         self.set = parameter.set
+        
+        if (getattr(parameter, 'set_buffered', None) and getattr(parameter, 'has_set_buffered', True)):
+            self.set_buffered = parameter.set_buffered
 
     def validate(self, values):
         """

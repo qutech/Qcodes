@@ -621,3 +621,23 @@ class Dict(Validator):
             return '<Dict>'
         else:
             return '<Dict {}>'.format(self.allowed_keys)
+
+
+class ObjectTypeValidator(Validator):
+    
+    def __init__(self, allowed_type=object):
+        """
+        Validator for objects
+        """
+        self._valid_values = [0]
+        self._allowed_type = allowed_type
+    
+    def validate(self, value, context=''):
+        if not isinstance(value, self._allowed_type):
+            raise TypeError('{} is a forbidden type; {}'.format(type(value), context))
+        
+    def __repr__(self):
+        if self._allowed_type is None:
+            return '<ObjectTypeValidator>'
+        else:
+            return '<ObjectTypeValidator {}>'.format(self._allowed_type)

@@ -56,6 +56,7 @@ from qcodes.data.data_set import new_data
 from qcodes.data.data_array import DataArray
 from qcodes.utils.helpers import wait_secs, full_class, tprint
 from qcodes.utils.metadata import Metadatable
+from qcodes.instrument.parameter import BufferedParameter
 
 from .actions import (_actions_snapshot, Task, Wait, _Measure, _Nest,
                       BreakIf, _QcodesBreak)
@@ -156,7 +157,34 @@ class Loop(Metadatable):
             out.nested_loop = Loop(sweep_values, delay)
 
         return out
+    
+    def buffered_loop(self, sweep_values, delay=0):
+        """
+        Nest another loop inside this one.
 
+        Args:
+            sweep_values ():
+            delay (int):
+
+        Examples:
+            >>> Loop(sv1, d1).buffered_loop(sv2, d2).each(*a)
+
+            is equivalent to:
+
+            >>> Loop(sv1, d1).each(BufferedLoop(sv2, d2).each(*a))
+
+        Returns: a new Loop object - the original is untouched
+        """
+        out = self._copy()
+
+        if out.nested_loop:
+            # nest this new loop inside the deepest level
+            out.nested_loop = out.nested_loop.buffered_loop(sweep_values, delay)
+        else:
+            out.nested_loop = BufferedLoop(sweep_values, delay)
+
+        return out
+    
     def _copy(self):
         out = Loop(self.sweep_values, self.delay,
                    progress_interval=self.progress_interval)
@@ -302,6 +330,64 @@ class Loop(Metadatable):
             'delay': self.delay,
             'then_actions': _actions_snapshot(self.then_actions, update)
         }
+
+
+class BufferedLoop(Loop):
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        
+    def _copy(self):
+        out = BufferedLoop(self.sweep_values, self.delay,
+                           progress_interval=self.progress_interval)
+        out.nested_loop = self.nested_loop
+        out.then_actions = self.then_actions
+        out.station = self.station
+        return out
+    
+    def loop(self, *args, **kwargs):
+        raise AttributeError('It is not supported to nest a \'normal\' Loop in a BufferedLoop.')
+    
+    def each(self, *actions):
+        return self._each(True, *actions)
+    
+    def _each(self, is_most_outer_loop: bool, *actions):
+        """
+        Perform a set of actions at each setting of this loop.
+        TODO(setting vs setpoints) ? better be verbose.
+
+        Args:
+            *actions (Any): actions to perform at each setting of the loop
+
+        Each action can be:
+
+        - a Parameter to measure
+        - a Task to execute
+        - a Wait
+        - another Loop or ActiveLoop
+
+        """
+        actions = list(actions)
+
+        # check for nested Loops, and activate them with default measurement
+        for i, action in enumerate(actions):
+            if isinstance(action, BufferedLoop):
+                default = Station.default.default_measurement
+                actions[i] = action.each(*default)
+            elif isinstance(action, Loop):
+                raise AttributeError('It is not supported to nest a \'normal\' Loop in a BufferedLoop.')
+
+        self.validate_actions(*actions)
+
+        if self.nested_loop:
+            # recurse into the innermost loop and apply these actions there
+            actions = [self.nested_loop._each(False, *actions)]
+        
+        return BufferedActiveLoop(is_most_outer_loop,
+                                  self.sweep_values, self.delay, *actions,
+                                  then_actions=self.then_actions, station=self.station,
+                                  progress_interval=self.progress_interval,
+                                  bg_task=self.bg_task, bg_final_task=self.bg_final_task, bg_min_delay=self.bg_min_delay)
 
 
 def _attach_then_actions(loop, actions, overwrite):
@@ -773,7 +859,7 @@ class ActiveLoop(Metadatable):
             measurement_group[:] = []
 
         return callables
-
+    
     def _compile_one(self, action, new_action_indices):
         if isinstance(action, Wait):
             return Task(self._wait, action.delay)
@@ -880,7 +966,158 @@ class ActiveLoop(Metadatable):
                     delay = 0
             except _QcodesBreak:
                 break
+            
+            # after the first setpoint, delay reverts to the loop delay
+            delay = self.delay
 
+            # now check for a background task and execute it if it's
+            # been long enough since the last time
+            # don't let exceptions in the background task interrupt
+            # the loop
+            # if the background task fails twice consecutively, stop
+            # executing it
+            if self.bg_task is not None:
+                t = time.time()
+                if t - last_task >= self.bg_min_delay:
+                    try:
+                        self.bg_task()
+                    except Exception:
+                        if self.last_task_failed:
+                            self.bg_task = None
+                        self.last_task_failed = True
+                        log.exception("Failed to execute bg task")
+
+                    last_task = t
+
+        # run the background task one last time to catch the last setpoint(s)
+        if self.bg_task is not None:
+            log.debug('Running the background task one last time.')
+            self.bg_task()
+
+        # the loop is finished - run the .then actions
+        #log.debug('Finishing loop, running the .then actions...')
+        for f in self._compile_actions(self.then_actions, ()):
+            #log.debug('...running .then action {}'.format(f))
+            f()
+
+        # run the bg_final_task from the bg_task:
+        if self.bg_final_task is not None:
+            log.debug('Running the bg_final_task')
+            self.bg_final_task()
+
+    def _wait(self, delay):
+        if delay:
+            finish_clock = time.perf_counter() + delay
+            t = wait_secs(finish_clock)
+            time.sleep(t)
+
+
+class BufferedActiveLoop(ActiveLoop):
+    
+    def __init__(self, is_most_outer_loop: bool, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        
+        self._is_most_outer_loop = is_most_outer_loop
+
+    def _set_buffered_sweep(self):
+        self.sweep_values.parameter.set_buffered(list(self.sweep_values))
+        
+        if len(self.actions) == 1 and isinstance(self.actions[0], BufferedActiveLoop):
+            self.actions[0]._set_buffered_sweep()
+
+    def _send_buffer(self):
+        self.sweep_values.parameter.send_buffer()
+
+    def _run_loop(self, first_delay=0, action_indices=(),
+                  loop_indices=(), current_values=(),
+                  **ignore_kwargs):
+        """
+        the routine that actually executes the loop, and can be called
+        from one loop to execute a nested loop
+
+        first_delay: any delay carried over from an outer loop
+        action_indices: where we are in any outer loop action arrays
+        loop_indices: setpoint indices in any outer loops
+        current_values: setpoint values in any outer loops
+        signal_queue: queue to communicate with main process directly
+        ignore_kwargs: for compatibility with other loop tasks
+        """
+        if self._is_most_outer_loop:
+            self._set_buffered_sweep()
+            self._send_buffer()
+        
+        # at the beginning of the loop, the time to wait after setting
+        # the loop parameter may be increased if an outer loop requested longer
+        delay = max(self.delay, first_delay)
+
+        callables = self._compile_actions(self.actions, action_indices)
+        n_callables = 0
+        for item in callables:
+            if hasattr(item, 'param_ids'):
+                n_callables += len(item.param_ids)
+            else:
+                n_callables += 1
+        t0 = time.time()
+        last_task = t0
+        imax = len(self.sweep_values)
+
+        self.last_task_failed = False
+
+        for i, value in enumerate(self.sweep_values):
+            if self.progress_interval is not None:
+                tprint('loop %s: %d/%d (%.1f [s])' % (
+                    self.sweep_values.name, i, imax, time.time() - t0),
+                    dt=self.progress_interval, tag='outerloop')
+                if i:
+                    tprint("Estimated finish time: %s" % (
+                        time.asctime(time.localtime(t0 + ((time.time() - t0) * imax / i)))),
+                           dt=self.progress_interval, tag="finish")
+
+            set_val = self.sweep_values.set(value)
+
+            new_indices = loop_indices + (i,)
+            new_values = current_values + (value,)
+            data_to_store = {}
+
+            if hasattr(self.sweep_values, "parameters"):  # combined parameter
+                set_name = self.data_set.action_id_map[action_indices]
+                if hasattr(self.sweep_values, 'aggregate'):
+                    value = self.sweep_values.aggregate(*set_val)
+                # below is useful but too verbose even at debug
+                # log.debug('Calling .store method of DataSet because '
+                #           'sweep_values.parameters exist')
+                self.data_set.store(new_indices, {set_name: value})
+                # set_val list of values to set [param1_setpoint, param2_setpoint ..]
+                for j, val in enumerate(set_val):
+                    set_index = action_indices + (j+n_callables, )
+                    set_name = (self.data_set.action_id_map[set_index])
+                    data_to_store[set_name] = val
+            else:
+                set_name = self.data_set.action_id_map[action_indices]
+                data_to_store[set_name] = value
+            # below is useful but too verbose even at debug
+            # log.debug('Calling .store method of DataSet because a sweep step'
+            #           ' was taken')
+            self.data_set.store(new_indices, data_to_store)
+
+            if not self._nest_first:
+                # only wait the delay time if an inner loop will not inherit it
+                self._wait(delay)
+
+            try:
+                for f in callables:
+                    # below is useful but too verbose even at debug
+                    # log.debug('Going through callables at this sweep step.'
+                    #           ' Calling {}'.format(f))
+                    f(first_delay=delay,
+                      loop_indices=new_indices,
+                      current_values=new_values)
+
+                    # after the first action, no delay is inherited
+                    delay = 0
+            except _QcodesBreak:
+                break
+            
             # after the first setpoint, delay reverts to the loop delay
             delay = self.delay
 
