@@ -56,7 +56,7 @@ from qcodes.data.data_set import new_data
 from qcodes.data.data_array import DataArray
 from qcodes.utils.helpers import wait_secs, full_class, tprint
 from qcodes.utils.metadata import Metadatable
-from qcodes.instrument.parameter import BufferedParameter
+from qcodes.instrument.parameter import _BaseParameter, BufferedSweepableParameter, BufferedReadableParameter
 
 from .actions import (_actions_snapshot, Task, Wait, _Measure, _Nest,
                       BreakIf, _QcodesBreak)
@@ -158,7 +158,7 @@ class Loop(Metadatable):
 
         return out
     
-    def buffered_loop(self, sweep_values, delay=0):
+    def buffered_loop(self, sweep_values):
         """
         Nest another loop inside this one.
 
@@ -179,9 +179,9 @@ class Loop(Metadatable):
 
         if out.nested_loop:
             # nest this new loop inside the deepest level
-            out.nested_loop = out.nested_loop.buffered_loop(sweep_values, delay)
+            out.nested_loop = out.nested_loop.buffered_loop(sweep_values)
         else:
-            out.nested_loop = BufferedLoop(sweep_values, delay)
+            out.nested_loop = BufferedLoop(sweep_values)
 
         return out
     
@@ -334,12 +334,14 @@ class Loop(Metadatable):
 
 class BufferedLoop(Loop):
     
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, sweep_values, station=None):
+        super().__init__(sweep_values, station=station)
+        
+        if not isinstance(sweep_values.parameter, BufferedSweepableParameter):
+            raise TypeError("The sweep values of a buffered loop must sweep a buffered parameter.")
         
     def _copy(self):
-        out = BufferedLoop(self.sweep_values, self.delay,
-                           progress_interval=self.progress_interval)
+        out = BufferedLoop(self.sweep_values)
         out.nested_loop = self.nested_loop
         out.then_actions = self.then_actions
         out.station = self.station
@@ -349,9 +351,6 @@ class BufferedLoop(Loop):
         raise AttributeError('It is not supported to nest a \'normal\' Loop in a BufferedLoop.')
     
     def each(self, *actions):
-        return self._each(True, *actions)
-    
-    def _each(self, is_most_outer_loop: bool, *actions):
         """
         Perform a set of actions at each setting of this loop.
         TODO(setting vs setpoints) ? better be verbose.
@@ -371,23 +370,26 @@ class BufferedLoop(Loop):
 
         # check for nested Loops, and activate them with default measurement
         for i, action in enumerate(actions):
+            print("XXX: {}".format(type(action)))
             if isinstance(action, BufferedLoop):
                 default = Station.default.default_measurement
                 actions[i] = action.each(*default)
             elif isinstance(action, Loop):
                 raise AttributeError('It is not supported to nest a \'normal\' Loop in a BufferedLoop.')
+            elif isinstance(action, _BaseParameter) and not isinstance(action, BufferedReadableParameter):
+                raise AttributeError("The measuring parameters in a buffered loop must be BufferedReadableParameters.")
 
         self.validate_actions(*actions)
 
         if self.nested_loop:
             # recurse into the innermost loop and apply these actions there
-            actions = [self.nested_loop._each(False, *actions)]
+            actions = [self.nested_loop.each(*actions)]
         
-        return BufferedActiveLoop(is_most_outer_loop,
-                                  self.sweep_values, self.delay, *actions,
+        return BufferedActiveLoop(self.sweep_values, *actions,
                                   then_actions=self.then_actions, station=self.station,
                                   progress_interval=self.progress_interval,
-                                  bg_task=self.bg_task, bg_final_task=self.bg_final_task, bg_min_delay=self.bg_min_delay)
+                                  bg_task=self.bg_task, bg_final_task=self.bg_final_task, 
+                                  bg_min_delay=self.bg_min_delay)
 
 
 def _attach_then_actions(loop, actions, overwrite):
@@ -1014,10 +1016,12 @@ class ActiveLoop(Metadatable):
 
 class BufferedActiveLoop(ActiveLoop):
     
-    def __init__(self, is_most_outer_loop: bool, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        
-        self._is_most_outer_loop = is_most_outer_loop
+    def __init__(self, sweep_values, *actions, then_actions=(),
+                 station=None, progress_interval=None, bg_task=None,
+                 bg_final_task=None, bg_min_delay=None):
+        super().__init__(sweep_values, 0, *actions, then_actions=then_actions,
+                         station=station, progress_interval=progress_interval, bg_task=bg_task,
+                         bg_final_task=bg_final_task, bg_min_delay=bg_min_delay)
 
     def _set_buffered_sweep(self):
         self.sweep_values.parameter.set_buffered(list(self.sweep_values))
@@ -1026,7 +1030,35 @@ class BufferedActiveLoop(ActiveLoop):
             self.actions[0]._set_buffered_sweep()
 
     def _send_buffer(self):
-        self.sweep_values.parameter.send_buffer()
+        mw = self.sweep_values.parameter.send_buffer()
+        if mw is None: mw = {}
+        
+        if len(self.actions) == 1 and isinstance(self.actions[0], BufferedActiveLoop):
+            mw_tmp = self.actions[0]._send_buffer()
+            
+            if mw_tmp is not None:
+                mw = {**mw, **mw_tmp}
+        
+        return mw
+    
+    def _configure_measurement(self, measurement_windows):
+        for action in self.actions:
+            if isinstance(action, BufferedReadableParameter): # Measurement
+                measurement_windows = action.configure_measurement(measurement_windows)
+        
+        if len(self.actions) == 1 and isinstance(self.actions[0], BufferedActiveLoop):
+            measurement_windows = self.actions[0]._configure_measurement(measurement_windows)
+        
+        return measurement_windows
+    
+    def _arm_measurement(self):
+        for action in self.actions:
+            if isinstance(action, BufferedReadableParameter): # Measurement
+                action.arm_measurement()
+        
+        if len(self.actions) == 1 and isinstance(self.actions[0], BufferedActiveLoop):
+            self.actions[0]._arm_measurement()
+            
 
     def _run_loop(self, first_delay=0, action_indices=(),
                   loop_indices=(), current_values=(),
@@ -1042,9 +1074,16 @@ class BufferedActiveLoop(ActiveLoop):
         signal_queue: queue to communicate with main process directly
         ignore_kwargs: for compatibility with other loop tasks
         """
-        if self._is_most_outer_loop:
+        
+        if self._nest_first:
             self._set_buffered_sweep()
-            self._send_buffer() # TODO Measurement windows
+            measurement_windows = self._send_buffer()
+            remaining_measurement_windows = self._configure_measurement(measurement_windows)
+            
+            if remaining_measurement_windows:
+                raise AttributeError("The following measurement windows have no corresponding channel on the instrument: {}".format(measurement_windows.keys()))
+            
+            self._arm_measurement()
             # TODO send meas.win. to measurement-instrument
             # TODO arm measurement-inst
             

@@ -932,26 +932,6 @@ class Parameter(_BaseParameter):
         """
         return SweepFixedValues(self, start=start, stop=stop,
                                 step=step, num=num)
-        
-
-class BufferedParameter(Parameter):
-    
-    def __init__(self, name: str, instrument: 'Instrument',
-                 sweep_parameter_cmd: Optional[Callable]=None,
-                 send_buffer_cmd: Optional[Callable]=None,
-                 *args, **kwargs):
-        super().__init__(name, instrument=instrument, *args, **kwargs)
-        
-        self._sweep_parameter_cmd = sweep_parameter_cmd
-        self._send_buffer_cmd = send_buffer_cmd
-        
-    def set_buffered(self, sweep_values):
-        if self._sweep_parameter_cmd is not None:
-            self._sweep_parameter_cmd(self, sweep_values)
-            
-    def send_buffer(self):
-        if self._send_buffer_cmd is not None:
-            self._send_buffer_cmd(self)
 
 
 class ArrayParameter(_BaseParameter):
@@ -1758,3 +1738,63 @@ class ScaledParameter(Parameter):
 
         self._save_val(value)
         self._wrapped_parameter.set(instrument_value)
+
+
+class BufferedSweepableParameter(Parameter):
+    
+    def __init__(self, name: str, instrument: 'Instrument',
+                 sweep_parameter_cmd: Optional[Callable]=None,
+                 send_buffer_cmd: Optional[Callable]=None,
+                 *args, **kwargs):
+        super().__init__(name, instrument=instrument, *args, **kwargs)
+        
+        self._sweep_parameter_cmd = sweep_parameter_cmd
+        self._send_buffer_cmd = send_buffer_cmd
+        
+    def set_buffered(self, sweep_values):
+        if self._sweep_parameter_cmd is not None:
+            return self._sweep_parameter_cmd(self, sweep_values)
+        else:
+            return None
+            
+    def send_buffer(self):
+        if self._send_buffer_cmd is not None:
+            return self._send_buffer_cmd(self)
+        else:
+            return None
+        
+
+class BufferedReadableParameter(ArrayParameter):
+    
+    def __init__(self, name: str,
+                 get_buffered_cmd: Callable,
+                 config_meas_cmd: Optional[Callable]=None,
+                 arm_meas_cmd: Optional[Callable]=None,
+                 **kwargs):
+        """
+        """
+        super().__init__(name, (1,), **kwargs)
+        
+        self._get_buffered_cmd = get_buffered_cmd
+        self._config_meas_cmd = config_meas_cmd
+        
+    def get_raw(self):
+        """
+        """
+        return self._get_buffered_cmd(self)
+        
+    def configure_measurement(self, measurement_windows):
+        """
+        """
+        if self._config_meas_cmd is not None and self.name in measurement_windows:
+            self._config_meas_cmd(self, measurement_windows.pop(self.name))
+        
+        return measurement_windows
+        
+    def arm_measurement(self, measurement_windows):
+        """
+        """
+        if self._arm_meas_cmd is not None:
+            self._arm_meas_cmd(self)
+        
+        return measurement_windows

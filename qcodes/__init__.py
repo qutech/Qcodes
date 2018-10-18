@@ -60,7 +60,8 @@ from qcodes.instrument.channel import InstrumentChannel, ChannelList
 from qcodes.instrument.function import Function
 from qcodes.instrument.parameter import (
     Parameter,
-    BufferedParameter,
+    BufferedSweepableParameter,
+    BufferedReadableParameter,
     ArrayParameter,
     MultiParameter,
     StandardParameter,
