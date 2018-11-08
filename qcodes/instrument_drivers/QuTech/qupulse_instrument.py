@@ -6,34 +6,59 @@ Created on Wed Sep 19 10:17:25 2018
 @author: l.lankes
 """
 
-from typing import Callable, Union, Iterable
+from typing import Callable, Union, Iterable, Optional, Dict
 from collections import defaultdict
 import numpy as np
+import warnings
 
 from qcodes.instrument.base import Instrument
-from qcodes.instrument.parameter import ArrayParameter, BufferedSweepableParameter, BufferedReadableParameter
+from qcodes.instrument.parameter import BufferedSweepableParameter, BufferedReadableParameter
 import qcodes.utils.validators as vals
+
 from qupulse.pulses.pulse_template import PulseTemplate
-from qupulse.pulses import ForLoopPT, MappingPT, plotting
-from qupulse.hardware.awgs.base import AWG
 from qupulse.hardware.dacs import DAC
-from qupulse.hardware.setup import HardwareSetup, ChannelID, _SingleChannel, PlaybackChannel, MarkerChannel, MeasurementMask
-from qupulse._program._loop import MultiChannelProgram, Loop
-import warnings
+from qupulse.hardware.setup import ChannelID, _SingleChannel, PlaybackChannel, MarkerChannel, MeasurementMask
+from qupulse._program._loop import MultiChannelProgram
+
+from atsaverage.operations import OperationDefinition, Downsample
 
 
 class QuPulseTemplateParameters(Instrument):
+    """
+    Submodule for the QuPulseAWGInstrument. It automatically generates
+    QCoDeS-parameters from qupulse-template-parameters.
+    
+    Parameters:
+        All parameters of the parent-instruments PulseTemplate-parameters.
+    """
 
-    def __init__(self, name: str, **kwargs):
+    def __init__(self, name: str, **kwargs) -> None:
         """
+        Creates the a QuPulseTemplateParameters object.
+        
+        QuPulseTemplateParameters is a submodule for the QuPulseAWGInstrument.
+        It automatically generates QCoDeS-parameters from qupulse-template-
+        parameters.
+        
+        Args:
+            name: The name of this instrument
         """
         super().__init__(name, **kwargs)
 
 
-    def set_parameters(self, pulse_parameters,
-                       sweep_parameter_cmd=None,
-                       send_buffer_cmd=None):
+    def set_parameters(self, pulse_parameters: Iterable[str],
+                       sweep_parameter_cmd: Optional[Callable]=None,
+                       send_buffer_cmd: Optional[Callable]=None) -> None:
         """
+        Adds sweepable QCoDeS-parameters from qupulse-template-parameters.
+        
+        Args:
+            pulse_parameters: A set of all parameters of the PulseTemplate.
+            sweep_parameter_cmd: Function that should be called when a
+                parameter should be sweept in a buffered loop.
+            send_buffer_cmd: Function that should be called when all buffered
+                sweeps are set. This function sends the complete buffer to the
+                AWG.
         """
         self.parameters.clear()
         
@@ -45,7 +70,14 @@ class QuPulseTemplateParameters(Instrument):
                                    send_buffer_cmd=send_buffer_cmd)
 
 
-    def to_dict(self):
+    def to_dict(self) -> Dict:
+        """
+        Translates the parameters to a parameter-dictionary which can be used
+        to create the waveform program.
+        
+        Returns:
+            Dictionary of parameter names and values.
+        """
         result = {}
         
         for p in self.parameters:
@@ -54,112 +86,32 @@ class QuPulseTemplateParameters(Instrument):
         return result
 
 
-class QuPulseDACChannel(BufferedReadableParameter):
-
-    def __init__(self, name: str, get_buffered_cmd: Callable, config_meas_cmd: Callable,
-                 measurement_mask: Union[MeasurementMask, Iterable[MeasurementMask]],
-                 **kwargs):
-        super().__init__(name, get_buffered_cmd=get_buffered_cmd, config_meas_cmd=config_meas_cmd, **kwargs)
-        
-        self.measurement_mask = measurement_mask
-        self.ready = False
-
-
-class QuPulseDACInstrument(Instrument):
-
-    def __init__(self, name: str,
-                 **kwargs):
-        """
-        """
-        super().__init__(name, **kwargs)
-        
-        self.add_parameter("program_name",
-                           set_cmd=None,
-                           vals=vals.Strings(),
-                           label="Program name")
-        
-        self.program_name.set(self.name + "_program")
-        
-        self._measurements = defaultdict(dict)
-        self._data = None
-
-
-    def add_measurement(self, name: str,
-                        measurement_mask: Union[MeasurementMask, Iterable[MeasurementMask]]):
-        
-        if isinstance(measurement_mask, MeasurementMask):
-            if name in self.parameters:
-                warnings.warn(
-                    "You add a measurement mask to an already registered measurement name. This is deprecated and will be removed in a future version. Please add all measurement masks at once.",
-                    DeprecationWarning)
-                measurement_mask = self.parameters[name].measurement_mask | {measurement_mask}
-            else:
-                measurement_mask = {measurement_mask}
-        else:
-            try:
-                measurement_mask = set(measurement_mask)
-            except TypeError:
-                raise TypeError('Mask must be (a list) of type MeasurementMask')
-
-        for old_name, parameter in self.parameters.items():
-            if isinstance(parameter, QuPulseDACChannel) and (measurement_mask & parameter.measurement_mask):
-                raise ValueError('Measurement mask already registered for measurement "{}"'.format(old_name))
-        
-        if name in self.parameters:
-            self.parameters[name].measurement_mask = measurement_mask
-        else:
-            self.add_parameter(name, parameter_class=QuPulseDACChannel, get_buffered_cmd=self._get_buffered, config_meas_cmd=self._configure_measurement, arm_meas_cmd=self._arm_measurement, measurement_mask=measurement_mask)
-
-
-    def _configure_measurement(self, parameter, measurement_window):
-        print("QuPulseDACInstrument._configure_measurement({}, {})".format(parameter, measurement_window))
-        
-        if not parameter.ready:
-            self._measurements[parameter.measurement_mask.dac][parameter.name] = measurement_window
-        else:
-            raise AttributeError("It is not possible to define multiple measurement windows on one measurement channel ({}).".format(parameter.name))
-
-
-    def _arm_measurement(self, parameter):
-        parameter.ready = True
-        all_ready = True
-        
-        for p in self.parameters:
-            if not p.ready:
-                all_ready = False
-                break
-        
-        if all_ready:
-            for dac, dac_windows in self._measurements.items():
-                dac.register_window_measurement(self.program_name, dac_windows)
-            
-            for dac in self._measurements.keys():
-                dac.arm_program(self.program_name)
-
-
-    def _get_buffered(self, parameter):
-        if not self._data:
-            self._data = {}
-            for dac, dac_windows in self._measurements.items():
-                data = dac.measure_program()
-                if data:
-                    self._data = {**self._data, **data}
-        
-        # TODO
-        n = 1 # Count of measurement values, depends on Operation (e.g. Downsampling only produces one measurement per measurement-window)
-        
-        values = self._data[parameter.measurement_mask.mask_name][:n]
-        del self._data[parameter.measurement_mask.mask_name][:n]
-        
-        return values
-
-
 class QuPulseAWGInstrument(Instrument):
+    """
+    An instrument that wraps an qupulse-PulseTemplate and uses qupulse to send
+    it to an AWG.
+    
+    Parameters:
+        template: PulseTemplate taht is handled by this instrument.
+        program_name: Name of the program which will be send to the AWG.
+        channel_mapping: Channel-mapping for the PulseTemplate.
+        measurement_mapping: Channel-mapping for the measurement channels of
+            the PulseTemplate.
+        registered_channels: A dictionary of all channels on the AWG hardware.
+    
+    Submodules:
+        template_parameters: Automatically generated parameters from the
+            PulseTemplate
+    """
     
     def __init__(self, name: str,
-                 pulse_template: PulseTemplate=None,
                  **kwargs) -> None:
         """
+        Creates an QuPulseAWGInstrument that wraps an qupulse-PulseTemplate and
+        uses qupulse to send it to an AWG.
+        
+        Args:
+            name: Name of the instrument
         """
         super().__init__(name, **kwargs);
         
@@ -186,31 +138,25 @@ class QuPulseAWGInstrument(Instrument):
         self.add_submodule("template_parameters",
                            QuPulseTemplateParameters(self.name + "_template_parameters"))
 
-        if pulse_template:
-            self.template.set(pulse_template)
-        
         self.program_name.set(self.name + "_program")
         
         self._channel_map = {}
         
-        self._output_counter = 0 # TODO Test
-        self._send_counter = 0 # TODO Test
-        self._build_counter = 0 # TODO Test
-        self._reset_counter = 0 # TODO Test
         
-        
-    def _get_template(self):
+    def _get_template(self) -> PulseTemplate:
         """
-        Gets the PulseTemplate
+        Returns:
+            PulseTemplate
         """
         return self._template
     
     
-    def _set_template(self, value):
+    def _set_template(self, value: PulseTemplate) -> None:
         """
         Sets the PulseTemplate and extracts its parameters
         
-        template: PulseTemplate
+        Args:
+            value: PulseTemplate
         """
         self._template = value
         self._loops = []
@@ -221,9 +167,13 @@ class QuPulseAWGInstrument(Instrument):
         
         
     def set_channel(self, identifier: ChannelID,
-                    single_channel: Union[_SingleChannel, Iterable[_SingleChannel]],
-                    allow_multiple_registration: bool=False) -> None:
+                    single_channel: Union[_SingleChannel, Iterable[_SingleChannel]]) -> None:
         """
+        Adds a hardware channel to the instrument.
+        
+        Args:
+            identifier: Channel name
+            single_channel: Object (or set of objects) that represents the hardware channel
         """
         if isinstance(single_channel, (PlaybackChannel, MarkerChannel)):
             if identifier in self._channel_map:
@@ -239,11 +189,10 @@ class QuPulseAWGInstrument(Instrument):
             except TypeError:
                 raise TypeError('Channel must be (a list of) either a playback or a marker channel')
 
-        if not allow_multiple_registration:
-            for ch_id, channel_set in self._channel_map.items():
-                if single_channel & channel_set:
-                    raise ValueError('Channel already registered as {} for channel {}'.format(
-                        type(self._channel_map[ch_id]).__name__, ch_id))
+        for ch_id, channel_set in self._channel_map.items():
+            if single_channel & channel_set:
+                raise ValueError('Channel already registered as {} for channel {}'.format(
+                    type(self._channel_map[ch_id]).__name__, ch_id))
 
         for s_channel in single_channel:
             if not isinstance(s_channel, (PlaybackChannel, MarkerChannel)):
@@ -252,25 +201,32 @@ class QuPulseAWGInstrument(Instrument):
         self._channel_map[identifier] = single_channel
         
         
-    def remove_channel(self, identifier: ChannelID):
+    def remove_channel(self, identifier: ChannelID) -> None:
         """
+        Removes an existing hardware channel from the instrument object.
+        
+        Args:
+            identifier: Channel name
         """
         self._channel_map.pop(identifier)
         
         
-    def _get_registered_channels(self):
+    def _get_registered_channels(self) -> Dict:
         """
+        Returns:
+            A dictionary of all hardware channels.
         """
         return self._channel_map
 
 
-    def _sweep_parameter(self, parameter, sweep_values):
+    def _sweep_parameter(self, parameter, sweep_values) -> None:
         """
+        Adds the sweep information to a list, to build up a single buffer later
         
+        Args:
+            parameter: Parameter to sweep
+            sweep_values: Values the parameter should be swept over.
         """
-        self._build_counter += 1 # TODO Test
-        print("QuPulseTemplate._build_buffer({}, {}) called ({})".format(parameter, sweep_values, self._build_counter))
-        
         for l in self._loops:
             if l['parameter'] == parameter.name:
                 raise AttributeError('It is not supported to sweep the same parameter ({}) more than once.'.format(parameter))
@@ -284,13 +240,18 @@ class QuPulseAWGInstrument(Instrument):
         self._loops.append(loop)
         
         
-    def _send_buffer(self, parameter):
+    def _send_buffer(self, parameter) -> Dict:
         """
-        Sends the buffer to the device and the device waits for the trigger
-        """
-        self._send_counter += 1 # TODO Test
-        print("QuPulseTemplate._send_buffer({}) called ({})".format(parameter, self._send_counter)) # TODO Test
+        Waits until this function is called for all swept parameters. Then the 
+        buffer will be built and sent to the device.
         
+        Args:
+            parameter: The parameter that calls the function
+            
+        Returns:
+            Dictionary of the measurement windows if the function was called
+            the last parameter. If not it returns None.
+        """
         send = True
         
         for loop in self._loops:
@@ -304,11 +265,14 @@ class QuPulseAWGInstrument(Instrument):
         else:
             return None
         
-    def _really_send_buffer(self):
+    def _really_send_buffer(self) -> Dict:
         """
-        """
-        print("   --> Send") # TODO Test
+        Builts up and sends the buffer to the device and makes the device wait
+        for the trigger
         
+        Returns:
+            Dictionary of the measurement windows.
+        """
         parameter_mapping = {}
         params = self.template_parameters.to_dict()
         
@@ -324,38 +288,24 @@ class QuPulseAWGInstrument(Instrument):
         for loop in reversed(self._loops):
             pt = ForLoopPT(pt, loop['iterator'], range(len(loop['sweep_values'])))
         
-        program = pt.create_program(parameters=params, channel_mapping=self.channel_mapping.get())
+        program = pt.create_program(parameters=params,
+                                    channel_mapping=self.channel_mapping.get(),
+                                    measurement_mapping=self.measurement_mapping.get())
         
         measurement_windows = self._run_program(program)
-#        self._hardware_setup.register_program(self.program_name.get(), program, update=True)
-#        
-#        awg = next(iter(self._hardware_setup.known_awgs)) # TODO
-#        dac = next(iter(self._hardware_setup.known_dacs)) # TODO
-#        
-#        awg._device.set_chan_state([False, False, True, True])
-#        
-#        self._hardware_setup.arm_program(self.program_name.get())
-#        
-#        awg.run_current_program()
-#        
-#        self.scanline_data = dac.card.extractNextScanline()
-#        
-#        for measurement in self._hardware_setup._measurement_map:
-#            
-#            self.DS_C = self.scanline_data.operationResults['DS_C'].getAsVoltage(dac.config.inputConfiguration[2].inputRange)
-#            self.DS_D = self.scanline_data.operationResults['DS_D'].getAsVoltage(dac.config.inputConfiguration[2].inputRange)
-#        
-#        self.DS_C = self.DS_C.reshape((40, 40))
-#        self.DS_D = self.DS_D.reshape((40, 40))
-#        
-#        # resetting loops because the buffer is already at the hardware
-#        self._loops.clear()
-#        print("   --> Reset") # TODO Test
+        
         return measurement_windows
         
         
-    def _run_program(self, program, update=False):
+    def _run_program(self, program, update=True) -> Dict:
         """
+        Sends the buffer to the device and arms it.
+        
+        Args:
+            program: Program object
+        
+        Returns:
+            Dictionary of the measurement windows.
         """
         mcp = MultiChannelProgram(program)
         if mcp.channels - set(self._channel_map.keys()):
@@ -421,16 +371,238 @@ class QuPulseAWGInstrument(Instrument):
                 awg.arm(None)
         
         return measurement_windows
-        
-    def _get_output(self):
+
+
+class QuPulseDACChannel(BufferedReadableParameter):
+    """
+    A parameter for an operation on a measurement mask. These parameters can be
+    measured in a QCoDeS-loop.
+    
+    Parameters:
+        measurement_window: Measurement windows for this parameter.
+        operation: Operation that was executed on the measurement.
+        configured: True, if a measurement was configured for this parameter.
+        ready: True, if the parameter is ready to be armed and measured.
+    """
+    
+    def __init__(self, name: str,
+                 get_buffered_cmd: Callable,
+                 config_meas_cmd: Callable,
+                 arm_meas_cmd: Callable,
+                 operation: OperationDefinition,
+                 **kwargs) -> None:
         """
+        Creates a QuPulseDACChannel parameter for an operation on a measurement
+        mask. These parameters can be measured in a QCoDeS-loop.
+        
+        Args:
+            name: Name of the parameter
+            get_buffered_cmd: Function which is called when this parameter is
+                measured.
+            config_meas_cmd: Function which is called when a measurement is
+                configured for this parameter.
+            arm_meas_cmd: Function which is called when the parameter should be
+                armed.
+            operation: The operation which is executed on the measurement.
+                (Only Downsample operations are supported yet)
         """
-        self._output_counter += 1 # TODO Test
-        #print("QuPulseTemplate._get_output() called ({}); parameters: {}.".format(self._output_counter, self.template_parameters.to_dict())) # TODO Test
+        if isinstance(operation, Downsample):
+            shape = (1,)
+        else:
+            raise NotImplementedError('Operations of type {} are not supported yet.'.format(type(operation)))
+            
+        super().__init__(name,
+                         get_buffered_cmd=get_buffered_cmd,
+                         config_meas_cmd=config_meas_cmd,
+                         arm_meas_cmd=arm_meas_cmd,
+                         shape=shape,
+                         **kwargs)
         
-        # TODO
-        # first call: measure all values and resturn the first
-        # next calls: return next values until the list of return values is empty
-        # empty list: -> first call because it has to be a new measure
+        self.measurement_window = None, None
+        self.operation = operation
+        self.configured = False
+        self.ready = False
         
-        return 0 #np.array([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]])
+
+class QuPulseDACInstrument(Instrument):
+    """
+    An instrument that represents a DAC which supports buffered measurements.
+    
+    Parameters:
+        program_name: Name of the measurement program which will be sent to the
+            device.
+    """
+    
+    def __init__(self, name: str,
+                 **kwargs) -> None:
+        """
+        Creates a QuPulseDACInstrument which represents a DAC which supports#
+        buffered measurements.
+        
+        Args:
+            name: Name of the instrument
+        """
+        super().__init__(name, **kwargs)
+        
+        self.add_parameter("program_name",
+                           set_cmd=None,
+                           vals=vals.Strings(),
+                           label="Program name")
+        
+        self.program_name.set(self.name + "_program")
+        
+        self._measurement_masks = dict()
+        self._affected_dacs = None
+        self._data = None
+
+
+    def set_measurement(self, name: str,
+                        measurement_masks: Union[MeasurementMask, Iterable[MeasurementMask]]) -> None:
+        """
+        Adds a measurement mask (or a list of masks) to the instrument.
+        
+        Args:
+            name: Name of the mask
+            measurement_masks: MeasurementMask object (or a list of them)
+        """
+        if isinstance(measurement_masks, MeasurementMask):
+            if name in self._measurement_masks:
+                warnings.warn(
+                    "You add a measurement mask to an already registered measurement name. This is deprecated and will be removed in a future version. Please add all measurement masks at once.",
+                    DeprecationWarning)
+                measurement_masks = self._measurement_masks[name] | {measurement_masks}
+            else:
+                measurement_masks = {measurement_masks}
+        else:
+            try:
+                measurement_masks = set(measurement_masks)
+            except TypeError:
+                raise TypeError('Mask must be (a list) of type MeasurementMask')
+
+        for old_name, mask_set in self._measurement_masks.items():
+            if measurement_masks & mask_set:
+                raise ValueError('Measurement mask already registered for measurement "{}"'.format(old_name))
+        
+        self._measurement_masks[name] = measurement_masks
+        
+
+    def register_operations(self, dac: DAC, operations: Union[OperationDefinition, Iterable[OperationDefinition]]) -> None:
+        """
+        Register operations to the device. Each operation creates a parameter
+        which can be measured in a loop.
+        
+        Args:
+            dac: DAC hardware object
+            operations: Operations to add to the device.
+        """
+        if isinstance(operations, OperationDefinition):
+            operations = [operations]
+        
+        for op in operations:
+            if not op.identifier in self.parameters:
+                self.add_parameter(op.identifier,
+                                   parameter_class=QuPulseDACChannel,
+                                   get_buffered_cmd=self._get_buffered,
+                                   config_meas_cmd=self._configure_measurement,
+                                   arm_meas_cmd=self._arm_measurement,
+                                   operation=op)
+            
+        dac.register_operations(self.program_name, operations)
+
+
+    def _configure_measurement(self, parameter: QuPulseDACChannel,
+                               measurement_windows) -> None:
+        """
+        Configures a measurement to a parameter
+        
+        Args:
+            parameter: Parameter to measure
+            measurement_windows: Measurement windows
+        """
+        if parameter.configured:
+            raise Exception('It is not allowed to measure the same parameter ({}) twice.'.format(parameter))
+            
+        mask_name = parameter.operation.maskID
+        
+        for window_name, masks in self._measurement_masks.items():
+            for mask in masks:
+                if mask.mask_name == mask_name:
+                    if window_name in measurement_windows:
+                        parameter.measurement_window = window_name, measurement_windows[window_name]
+                        break
+                    else:
+                        raise Exception('Measurement window "{}" is not given.'.format(window_name))
+            else:
+                continue
+            
+            break
+        
+        parameter.configured = True
+
+
+    def _arm_measurement(self, parameter: QuPulseDACChannel) -> None:
+        """
+        Arms the measurement of a parameter
+        
+        Args:
+            parameter: Parameter whose measurements should be armed.
+        """
+        all_ready = True
+        parameter.ready = True
+        
+        for name, p in self.parameters.items():
+            if isinstance(p, QuPulseDACChannel) and p.configured:
+                if not p.ready:
+                    all_ready = False
+                    break
+        
+        if all_ready:
+            self._affected_dacs = defaultdict(dict)
+            
+            for p in self.parameters.values():
+                if isinstance(p, QuPulseDACChannel) and p.ready:
+                    window_name, window = p.measurement_window
+                    mask_name = p.operation.maskID
+                    masks = self._measurement_masks[window_name]
+                    for mask in masks:
+                        if mask.mask_name == mask_name:
+                            self._affected_dacs[mask.dac][mask.mask_name] = window
+                            break
+            
+            for dac, dac_windows in self._affected_dacs.items():
+                dac.register_measurement_windows(self.program_name, dac_windows)
+            
+            for dac in self._affected_dacs.keys():
+                dac.arm_program(self.program_name)
+
+
+    def _get_buffered(self, parameter: QuPulseDACChannel):
+        """
+        Measures all parameters on the first call and returns the measurement
+        value(s) of the current measurement step.
+        
+        Args:
+            parameter:  Parameter to measure.
+        
+        Returns:
+            The measurement value(s) of the current measurement step. The shape
+            of the value(s) depends on the operation.
+        """
+        if not self._data:
+            parameters = []
+            for p in self.parameters.values():
+                if isinstance(p, QuPulseDACChannel) and p.ready:
+                    parameters.append(p.name)
+            
+            self._data = {}
+            for dac in self._affected_dacs.keys():
+                data = dac.measure_program(parameters)
+                if data:
+                    self._data = {**self._data, **data}
+        
+        n = parameter.shape[0]
+        
+        values = self._data[parameter.name][:n]
+        del self._data[parameter.name][:n]
+        
+        return values

@@ -333,8 +333,18 @@ class Loop(Metadatable):
 
 
 class BufferedLoop(Loop):
+    """
+    A loop that sweeps the parameters in a buffer that is sent once to the
+    device. So the loop will be run on the hardware.
+    """
     
     def __init__(self, sweep_values, station=None):
+        """
+        Creates a BufferedLoop
+        
+        Args:
+            sweep_values: Sweep values of a BufferedSweepableParameter
+        """
         super().__init__(sweep_values, station=station)
         
         if not isinstance(sweep_values.parameter, BufferedSweepableParameter):
@@ -370,7 +380,6 @@ class BufferedLoop(Loop):
 
         # check for nested Loops, and activate them with default measurement
         for i, action in enumerate(actions):
-            print("XXX: {}".format(type(action)))
             if isinstance(action, BufferedLoop):
                 default = Station.default.default_measurement
                 actions[i] = action.each(*default)
@@ -1015,10 +1024,17 @@ class ActiveLoop(Metadatable):
 
 
 class BufferedActiveLoop(ActiveLoop):
-    
+    """
+    An ActiveLoop that sweeps the parameters in a buffer that is sent once to
+    the device. So the loop will be run on the hardware.
+    """
+
     def __init__(self, sweep_values, *actions, then_actions=(),
                  station=None, progress_interval=None, bg_task=None,
                  bg_final_task=None, bg_min_delay=None):
+        """
+        Creates a BufferedActiveLoop
+        """
         super().__init__(sweep_values, 0, *actions, then_actions=then_actions,
                          station=station, progress_interval=progress_interval, bg_task=bg_task,
                          bg_final_task=bg_final_task, bg_min_delay=bg_min_delay)
@@ -1044,13 +1060,11 @@ class BufferedActiveLoop(ActiveLoop):
     def _configure_measurement(self, measurement_windows):
         for action in self.actions:
             if isinstance(action, BufferedReadableParameter): # Measurement
-                measurement_windows = action.configure_measurement(measurement_windows)
+                action.configure_measurement(measurement_windows)
         
         if len(self.actions) == 1 and isinstance(self.actions[0], BufferedActiveLoop):
-            measurement_windows = self.actions[0]._configure_measurement(measurement_windows)
-        
-        return measurement_windows
-    
+            self.actions[0]._configure_measurement(measurement_windows)
+
     def _arm_measurement(self):
         for action in self.actions:
             if isinstance(action, BufferedReadableParameter): # Measurement
@@ -1058,7 +1072,6 @@ class BufferedActiveLoop(ActiveLoop):
         
         if len(self.actions) == 1 and isinstance(self.actions[0], BufferedActiveLoop):
             self.actions[0]._arm_measurement()
-            
 
     def _run_loop(self, first_delay=0, action_indices=(),
                   loop_indices=(), current_values=(),
@@ -1078,16 +1091,10 @@ class BufferedActiveLoop(ActiveLoop):
         if self._nest_first:
             self._set_buffered_sweep()
             measurement_windows = self._send_buffer()
-            remaining_measurement_windows = self._configure_measurement(measurement_windows)
-            
-            if remaining_measurement_windows:
-                raise AttributeError("The following measurement windows have no corresponding channel on the instrument: {}".format(measurement_windows.keys()))
+            self._configure_measurement(measurement_windows)
             
             self._arm_measurement()
-            # TODO send meas.win. to measurement-instrument
-            # TODO arm measurement-inst
             
-        
         # at the beginning of the loop, the time to wait after setting
         # the loop parameter may be increased if an outer loop requested longer
         delay = max(self.delay, first_delay)
