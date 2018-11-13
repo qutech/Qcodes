@@ -164,7 +164,6 @@ class Loop(Metadatable):
 
         Args:
             sweep_values ():
-            delay (int):
 
         Examples:
             >>> Loop(sv1, d1).buffered_loop(sv2, d2).each(*a)
@@ -345,7 +344,7 @@ class BufferedLoop(Loop):
         Args:
             sweep_values: Sweep values of a BufferedSweepableParameter
         """
-        super().__init__(sweep_values, station=station)
+        super().__init__(sweep_values, delay=0, station=station)
         
         if not isinstance(sweep_values.parameter, BufferedSweepableParameter):
             raise TypeError("The sweep values of a buffered loop must sweep a buffered parameter.")
@@ -1040,12 +1039,20 @@ class BufferedActiveLoop(ActiveLoop):
                          bg_final_task=bg_final_task, bg_min_delay=bg_min_delay)
 
     def _set_buffered_sweep(self):
+        """
+        Builds up the buffers on the instrument by setting the loop information
+        (sweep_values).
+        """
         self.sweep_values.parameter.set_buffered(list(self.sweep_values))
         
         if len(self.actions) == 1 and isinstance(self.actions[0], BufferedActiveLoop):
             self.actions[0]._set_buffered_sweep()
 
     def _send_buffer(self):
+        """
+        Lets the instrument(s) send the buffer(s) to the hardware (and arms the
+        hardware).
+        """
         mw = self.sweep_values.parameter.send_buffer()
         if mw is None: mw = {}
         
@@ -1058,6 +1065,10 @@ class BufferedActiveLoop(ActiveLoop):
         return mw
     
     def _configure_measurement(self, measurement_windows):
+        """
+        Configures the measurement on the instrument by setting the measurement
+        windows (measurement times).
+        """
         for action in self.actions:
             if isinstance(action, BufferedReadableParameter): # Measurement
                 action.configure_measurement(measurement_windows)
@@ -1066,6 +1077,9 @@ class BufferedActiveLoop(ActiveLoop):
             self.actions[0]._configure_measurement(measurement_windows)
 
     def _arm_measurement(self):
+        """
+        Arms the instruments hardware for the measurement
+        """
         for action in self.actions:
             if isinstance(action, BufferedReadableParameter): # Measurement
                 action.arm_measurement()
@@ -1088,12 +1102,19 @@ class BufferedActiveLoop(ActiveLoop):
         ignore_kwargs: for compatibility with other loop tasks
         """
         
+        # The most outer loop controls the buffered loop:
+        # - It lets the instrument(s) build up the buffer,
+        # - it registers the instruments program/buffer to the hardware,
+        # - it lets the instrument(s) send their buffers to the hardware,
+        # - (it arms the program on the instruments hardware),
+        # - it configures the measurement on the instrument and
+        # - it arms the measruement on the instruments hardware.
         if self._nest_first:
-            self._set_buffered_sweep()
-            measurement_windows = self._send_buffer()
-            self._configure_measurement(measurement_windows)
+            self._set_buffered_sweep() # builds up the buffer
+            measurement_windows = self._send_buffer() # sends the buffer to the hardware and arms the hardware
             
-            self._arm_measurement()
+            self._configure_measurement(measurement_windows) # configures the measurement windows
+            self._arm_measurement() # arms the hardware for the measurement
             
         # at the beginning of the loop, the time to wait after setting
         # the loop parameter may be increased if an outer loop requested longer

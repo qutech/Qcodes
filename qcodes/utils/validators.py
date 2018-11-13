@@ -624,10 +624,13 @@ class Dict(Validator):
 
 
 class ObjectTypeValidator(Validator):
+    """
+    This validator checks, if an object is an instance of a specific type.
+    """
     
     def __init__(self, *allowed_types: type):
         """
-        Validator for objects
+        Create an ObjectTypeValidator for validating objects of specific types
         """
         self._valid_values = [0]
         self._allowed_types = allowed_types

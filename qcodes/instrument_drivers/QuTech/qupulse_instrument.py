@@ -15,6 +15,7 @@ from qcodes.instrument.base import Instrument
 from qcodes.instrument.parameter import BufferedSweepableParameter, BufferedReadableParameter
 import qcodes.utils.validators as vals
 
+from qupulse.pulses import MappingPT, ForLoopPT
 from qupulse.pulses.pulse_template import PulseTemplate
 from qupulse.hardware.dacs import DAC
 from qupulse.hardware.setup import ChannelID, _SingleChannel, PlaybackChannel, MarkerChannel, MeasurementMask
@@ -141,6 +142,7 @@ class QuPulseAWGInstrument(Instrument):
         self.program_name.set(self.name + "_program")
         
         self._channel_map = {}
+        self._loops = []
         
         
     def _get_template(self) -> PulseTemplate:
@@ -159,7 +161,7 @@ class QuPulseAWGInstrument(Instrument):
             value: PulseTemplate
         """
         self._template = value
-        self._loops = []
+        self._loops.clear()
         
         self.template_parameters.set_parameters(self._template.parameter_names,
                                                 self._sweep_parameter,
@@ -294,6 +296,8 @@ class QuPulseAWGInstrument(Instrument):
         
         measurement_windows = self._run_program(program)
         
+        self._loops.clear()
+        
         return measurement_windows
         
         
@@ -418,8 +422,16 @@ class QuPulseDACChannel(BufferedReadableParameter):
                          shape=shape,
                          **kwargs)
         
-        self.measurement_window = None, None
         self.operation = operation
+        
+        self.reset()
+    
+    def reset(self):
+        """
+        Reset the parameter to its default state, so it can be used for another
+        measurement
+        """
+        self.measurement_window = None, None
         self.configured = False
         self.ready = False
         
@@ -593,6 +605,7 @@ class QuPulseDACInstrument(Instrument):
             for p in self.parameters.values():
                 if isinstance(p, QuPulseDACChannel) and p.ready:
                     parameters.append(p.name)
+                    p.reset()
             
             self._data = {}
             for dac in self._affected_dacs.keys():
@@ -605,4 +618,10 @@ class QuPulseDACInstrument(Instrument):
         values = self._data[parameter.name][:n]
         del self._data[parameter.name][:n]
         
+        if self._data[parameter.name] != None and not self._data[parameter.name]:
+            del self._data[parameter.name]
+        
+        if self._data != None and not self._data:
+            self._data = None
+            
         return values
