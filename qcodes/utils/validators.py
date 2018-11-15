@@ -623,29 +623,42 @@ class Dict(Validator):
             return '<Dict {}>'.format(self.allowed_keys)
 
 
-class ObjectTypeValidator(Validator):
+class NoneType(Validator):
+    """
+    This validator checks, if an object is None.
+    """
+    
+    def __init__(self):
+        """
+        Create an NoneType for validating objects that are None
+        """
+        self._valid_values = [None]
+    
+    def validate(self, value, context=''):
+        if value is not None:
+            raise TypeError('{} is not None; {}'.format(repr(value), context))
+        
+    def __repr__(self):
+        return '<NoneType>'
+
+class ObjectType(Validator):
     """
     This validator checks, if an object is an instance of a specific type.
     """
     
-    def __init__(self, *allowed_types: type):
+    def __init__(self, allowed_type: type):
         """
-        Create an ObjectTypeValidator for validating objects of specific types
+        Create an ObjectType validator for validating objects of specific types
         """
         self._valid_values = [0]
-        self._allowed_types = allowed_types
+        self._allowed_type = allowed_type
     
     def validate(self, value, context=''):
-        valid = False
-        for allowed_type in self._allowed_types:
-            if isinstance(value, allowed_type):
-                valid = True
-                break
-        if not valid:    
+        if not isinstance(value, self._allowed_type):
             raise TypeError('{} is a forbidden type; {}'.format(type(value), context))
         
     def __repr__(self):
-        if self._allowed_types is None:
-            return '<ObjectTypeValidator>'
+        if self._allowed_type is None:
+            return '<ObjectType>'
         else:
-            return '<ObjectTypeValidator {}>'.format(self._allowed_types)
+            return '<ObjectType: {}>'.format(self._allowed_type)
