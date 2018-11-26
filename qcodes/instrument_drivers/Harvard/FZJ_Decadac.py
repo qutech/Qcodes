@@ -155,7 +155,7 @@ class DacBase(object):
 
 class DacChannel(InstrumentChannel, DacBase):
 
-    def __init__(self, parent, name, channel):
+    def __init__(self, parent, name, channel, default_switch_pos=DacBase._DEFAULT_SWITCH_POS):
         """
         Initialize the channel
 
@@ -184,6 +184,9 @@ class DacChannel(InstrumentChannel, DacBase):
         self._volt_val = DacVoltValidator(self)
         self._volt_raw_val = vals.Ints(0, 65535)
         self._ramp_val = vals.Numbers(0, 10)
+        self._min_volt = None
+        self._max_volt = None
+        self._default_switch_pos = default_switch_pos
         
         # Channel parameters
         # Voltage
@@ -213,12 +216,13 @@ class DacChannel(InstrumentChannel, DacBase):
         Resets all parameters to default
         """
         self._volt = DacBase._DEFAULT_VOLT
-        self._switch_pos = DacBase._DEFAULT_SWITCH_POS
         self._lower_limit = DacBase._DEFAULT_LOWER_LIMIT
         self._upper_limit = DacBase._DEFAULT_UPPER_LIMIT
         self._update_period = DacBase._DEFAULT_UPDATE_PERIOD
         self._slope = DacBase._DEFAULT_SLOPE
         self._trig_mode = DacBase._DEFAULT_TRIG_MODE
+        
+        self.switch_pos.set(self._default_switch_pos)
         
         return (DacBase._COMMAND_SET_UPPER_LIMIT.format(self._upper_limit)
               + DacBase._COMMAND_SET_LOWER_LIMIT.format(self._lower_limit)
@@ -452,14 +456,17 @@ class DacVoltValidator(vals.Validator):
         """
         if not isinstance(value, vals.Numbers.validtypes):
             raise TypeError("{} is not an int or float.\n{}".format(repr(value), context))
-
+        
+        if self._parent._min_volt is None or self._parent._max_volt is None:
+            raise ValueError("No voltage interval is given for the Decadac instrument. Please set the switch_pos parameter.\n{}".format(context))
+        
         if not (self._parent._min_volt <= value <= self._parent._max_volt):
             raise ValueError("DacVoltValidator is invalid: must be between {} and {} inclusive.\n{}".format(self._parent._min_volt, self._parent._max_volt, context))
 
 
 class DacSlot(InstrumentChannel, DacBase):
 
-    def __init__(self, parent, name, slot):
+    def __init__(self, parent, name, slot, default_switch_pos=DacBase._DEFAULT_SWITCH_POS):
         """
         Initialize the slot
 
@@ -483,7 +490,7 @@ class DacSlot(InstrumentChannel, DacBase):
         channels = ChannelList(self, "Slot_Chans", DacChannel)
         
         for channel in range(4):
-            channels.append(DacChannel(self, "Chan{}".format(slot, channel), channel))
+            channels.append(DacChannel(self, "Chan{}".format(slot, channel), channel, default_switch_pos=default_switch_pos))
         
         self.add_submodule("channels", channels)
         
@@ -538,21 +545,27 @@ class Decadac(VisaInstrument):
     _device_connected = False
     enable_output = False
 
-    def __init__(self, name, address, reset=_DEFAULT_RESET, baudrate=_DEFAULT_BAUDRATE, timeout=_DEFAULT_TIMEOUT, **kwargs):
+    def __init__(self, name, address,
+                 reset=_DEFAULT_RESET,
+                 baudrate=_DEFAULT_BAUDRATE,
+                 timeout=_DEFAULT_TIMEOUT,
+                 default_switch_pos=DacBase._DEFAULT_SWITCH_POS,
+                 **kwargs):
         """
         Initialize the device
 
         Args:
-            name (str):             name of the device
-            address (str):          address of the device (e.g. /dev/ttyUSB0)
-            reset (bool):           if "True", set all voltages to zero, set trigger mode to "always update" and stop ramps. If "False" only the upper and lower limit is reset.
-            baudrate (int):         baud rate of ASCII protocol
-            timeout (int):          seconds to allow for responses. Default 5
+            name (str):               name of the device
+            address (str):            address of the device (e.g. /dev/ttyUSB0)
+            reset (bool):             if "True", set all voltages to zero, set trigger mode to "always update" and stop ramps. If "False" only the upper and lower limit is reset.
+            baudrate (int):           baud rate of ASCII protocol
+            timeout (int):            seconds to allow for responses. Default 5
+            default_switch_pos (int): default switch position (-1, 0 or 1) that is set when reset is called (default: 0)
 
         Attributes:
-            name (str):             name
-            slots (ChannelList):    list of all slots
-            channels (ChannelList): list of all channels
+            name (str):               name
+            slots (ChannelList):      list of all slots
+            channels (ChannelList):   list of all channels
         """
 
         super().__init__(name, address, timeout=timeout, **kwargs)
@@ -567,7 +580,7 @@ class Decadac(VisaInstrument):
         slots = ChannelList(self, "Slots", DacSlot)
 
         for slot in range(5):
-            slots.append(DacSlot(self, "Slot{}".format(slot), slot))
+            slots.append(DacSlot(self, "Slot{}".format(slot), slot, default_switch_pos=default_switch_pos))
             channels.extend(slots[slot].channels)
 
         slots.lock()
