@@ -231,8 +231,7 @@ class DacChannel(InstrumentChannel, DacBase):
         """
         Reads out the voltage of the channel as dac-code
         """
-        self._parent._write(self, DacBase._COMMAND_GET_VOLT)
-        buf = self._parent._read(self, self._BUF_SIZE)
+        buf = self._parent._read(self, DacBase._COMMAND_GET_VOLT)
         self._volt = int(buf[-self._BUF_SIZE+1:-1])
         
         return self._volt
@@ -665,16 +664,14 @@ class Decadac(VisaInstrument):
         if Decadac.enable_output:
             print("Decadac._write(\"{}\")".format(cmd))
 
-        return self._read(self, len(cmd))
 
-
-    def _read(self, obj, buf_size):
+    def _read(self, obj, cmd):
         """
         Read the buffer of the device
 
         Arguments:
-            obj (object):   object that wants to read something (needed to set the current slot and channel)
-            buf_size (int): size of the buffer to read
+            obj (object): object that wants to read something (needed to set the current slot and channel)
+            cmd (str):    command
         """
         if obj != None:
             if isinstance(obj, DacSlot):
@@ -682,9 +679,9 @@ class Decadac(VisaInstrument):
             elif isinstance(obj, DacChannel):
                 self._set_channel(obj._parent, obj)
         
-        result = super().ask_raw(buf_size)
+        result = super().write_raw(cmd)
         
         if Decadac.enable_output:
-            print("Decadac._read({}) = \"{}\"".format(buf_size, result))
-        
+            print("Decadac._read(\"{}\") = {}".format(cmd, result))
+
         return result
