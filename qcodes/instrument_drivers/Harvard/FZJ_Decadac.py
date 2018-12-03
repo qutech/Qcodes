@@ -11,6 +11,7 @@ from qcodes import  InstrumentChannel, ChannelList
 from qcodes.utils import validators as vals
 from qcodes.instrument.visa import VisaInstrument
 
+import warnings
 
 class DACException(Exception):
     pass
@@ -186,6 +187,7 @@ class DacChannel(InstrumentChannel, DacBase):
         self._ramp_val = vals.Numbers(0, 10)
         self._min_volt = None
         self._max_volt = None
+        self._switch_pos = None
         self._default_switch_pos = default_switch_pos
         
         # Channel parameters
@@ -224,6 +226,8 @@ class DacChannel(InstrumentChannel, DacBase):
         
         self.switch_pos.set(self._default_switch_pos)
         
+        warnings.warn('All parameters of the Dacadac "{}" have been reset to their defaults.'.format(self.name))
+        
         return (DacBase._COMMAND_SET_UPPER_LIMIT.format(self._upper_limit)
               + DacBase._COMMAND_SET_LOWER_LIMIT.format(self._lower_limit)
               + DacBase._COMMAND_SET_VOLT.format(self._volt)
@@ -253,6 +257,9 @@ class DacChannel(InstrumentChannel, DacBase):
         """
         Gets the switch_pos
         """
+        if self._switch_pos is None:
+            raise ValueError('The switch position has not been set.')
+        
         return self._switch_pos
 
 
