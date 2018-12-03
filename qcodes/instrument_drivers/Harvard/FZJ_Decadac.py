@@ -557,6 +557,7 @@ class Decadac(VisaInstrument):
                  baudrate=_DEFAULT_BAUDRATE,
                  timeout=_DEFAULT_TIMEOUT,
                  default_switch_pos=DacBase._DEFAULT_SWITCH_POS,
+                 terminator='\n',
                  **kwargs):
         """
         Initialize the device
@@ -575,7 +576,8 @@ class Decadac(VisaInstrument):
             channels (ChannelList):   list of all channels
         """
 
-        super().__init__(name, address, timeout=timeout, **kwargs)
+        super().__init__(name, address, timeout=timeout, terminator=terminator,
+                         **kwargs)
 
         self.current_slot = None
         self.current_channel = None
