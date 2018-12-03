@@ -699,7 +699,7 @@ class Decadac(VisaInstrument):
             elif isinstance(obj, DacChannel):
                 self._set_channel(obj._parent, obj)
         
-        result = super().write_raw(cmd)
+        result = super().ask_raw(cmd)
         
         if Decadac.enable_output:
             print("Decadac._read(\"{}\") = {}".format(cmd, result))

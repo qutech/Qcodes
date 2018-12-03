@@ -454,15 +454,12 @@ class Decadac(VisaInstrument, DacReader):
         channels = ChannelList(self, "Channels", self.DAC_CHANNEL_CLASS,
                                snapshotable=False)
         slots = ChannelList(self, "Slots", self.DAC_SLOT_CLASS)
-<<<<<<< HEAD
-        for i in range(4):  # Create the 4 DAC slots
-            slots.append(self.DAC_SLOT_CLASS(self, "Slot{}".format(i), i, min_val, max_val))
-=======
+        
         for i in range(5):  # Create the 6 DAC slots
             slots.append(self.DAC_SLOT_CLASS(self, "Slot{}".format(i), i,
                                              min_val, max_val))
->>>>>>> 1cfae35f96c8a471213e9af62ed9ebe9353640a1
             channels.extend(slots[i].channels)
+        
         slots.lock()
         channels.lock()
         self.add_submodule("slots", slots)
