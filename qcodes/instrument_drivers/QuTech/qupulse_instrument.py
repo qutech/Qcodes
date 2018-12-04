@@ -178,8 +178,6 @@ class QuPulseAWGInstrument(Instrument):
         self._template = value
         self._loops.clear()
         
-        
-        
         if self._template:
             self.template_parameters.set_parameters(self._template.parameter_names,
                                                     self._sweep_parameter,
@@ -399,6 +397,20 @@ class QuPulseAWGInstrument(Instrument):
 
     def snapshot_base(self, update: bool=False,
                       params_to_skip_update: Sequence[str]=None):
+        """
+        State of the instrument as a JSON-compatible dict.
+
+        Args:
+            update: If True, update the state by querying the
+                instrument. If False, just use the latest values in memory.
+            params_to_skip_update: List of parameter names that will be skipped
+                in update even if update is True. This is useful if you have
+                parameters that are slow to update but can be updated in a
+                different way (as in the qdac)
+
+        Returns:
+            dict: base snapshot
+        """
         if params_to_skip_update is None:
             params_to_skip_update = []
         
@@ -477,6 +489,20 @@ class QuPulseDACChannel(BufferedReadableParameter):
 
     def snapshot_base(self, update: bool=False,
                       params_to_skip_update: Sequence[str]=None):
+        """
+        State of the instrument as a JSON-compatible dict.
+
+        Args:
+            update: If True, update the state by querying the
+                instrument. If False, just use the latest values in memory.
+            params_to_skip_update: List of parameter names that will be skipped
+                in update even if update is True. This is useful if you have
+                parameters that are slow to update but can be updated in a
+                different way (as in the qdac)
+
+        Returns:
+            dict: base snapshot
+        """
         metadata = super().snapshot_base(update, params_to_skip_update)
         
         metadata['operation'] = {'__class__': full_class(self.operation),
@@ -698,6 +724,20 @@ class QuPulseDACInstrument(Instrument):
 
     def snapshot_base(self, update: bool=False,
                       params_to_skip_update: Sequence[str]=None):
+        """
+        State of the instrument as a JSON-compatible dict.
+
+        Args:
+            update: If True, update the state by querying the
+                instrument. If False, just use the latest values in memory.
+            params_to_skip_update: List of parameter names that will be skipped
+                in update even if update is True. This is useful if you have
+                parameters that are slow to update but can be updated in a
+                different way (as in the qdac)
+
+        Returns:
+            dict: base snapshot
+        """
         if params_to_skip_update is None:
             params_to_skip_update = []
         
