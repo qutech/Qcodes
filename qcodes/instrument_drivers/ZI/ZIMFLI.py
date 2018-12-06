@@ -1033,6 +1033,36 @@ class DIOChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'dios',
                                            channum-1, Mode.INT, 'output'),
                            vals=vals.Ints())
+                           
+class MDSChannel(InstrumentChannel):
+    """
+    Combines all the Parameters concerning the multi device sync
+    Parameters:
+            drive: Enables output of synch pulses on trigger output 1.
+            enable: Enables the mds module.
+            source: Select input source for mds synch signal.
+            timestamp: Used to set the resulting adjusted timestamp.
+            
+    TODO: what are possible values -> validate
+    """
+    def __init__(self, parent: 'MFLI', name: str):
+        super.__init__(parent, name)
+        self.add_parameter('drive',
+                           set_cmd=partial(self.setter, 'drive', Mode.INT),
+                           get_cmd=partial(self.getter, 'drive', Mode.INT),
+                           val_mapping={'ON': 1, 'OFF': 0})
+        self.add_parameter('enable',
+                           set_cmd=partial(self.setter, 'enable', Mode.INT),
+                           get_cmd=partial(self.getter, 'enable', Mode.INT),
+                           val_mapping={'ON': 1, 'OFF': 0})
+        self.add_parameter('source',
+                           set_cmd=partial(self.setter, 'source', Mode.INT),
+                           get_cmd=partial(self.getter, 'source', Mode.INT),
+                           vals=vals.Ints())
+        self.add_parameter('timestamp',
+                           set_cmd=partial(self.setter, 'timestamp', Mode.INT),
+                           get_cmd=partial(self.getter, 'timestamp', Mode.INT),
+                           vals=vals.Ints())
 
 class Sweep(MultiParameter):
     """
@@ -1691,6 +1721,10 @@ class ZIMFLI(Instrument):
         # digitial input/output submodule
         diochannel = DIOChannel(self, 'dio', 1)
         self.add_submodule(name, diochannel)
+        
+        # multi device sync submodule
+        mdschannel = MDSChannel(self, "mds")
+        self.add_submodule(mdschannel)
         ########################################
         # SWEEPER PARAMETERS
 
