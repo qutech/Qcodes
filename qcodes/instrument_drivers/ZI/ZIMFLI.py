@@ -957,6 +957,82 @@ class TriggerOutputChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'source'), 
                            val_mapping=sources,
                            vals=vals.Enum(*list(sources.keys())))
+                           
+class DIOChannel(InstrumentChannel):
+    """
+    Combines all the parameters concerning the digital input/output
+    Parameters:
+            decimation: Sets the decimation factor for DIO data streamed to the 
+                host computer.
+            drive: When on, the corresponding 8-bit bus is in output mode. 
+                When off, it is in input mode. Bit 0 corresponds to the least 
+                significant byte. For example, the value 1 drives the least significant
+                byte, the value 8 drives the most significant byte.
+                TODO: value 15 drives all 4 bytes, correct? 
+            extclk: OFF: internally clocked with a fixed frequency of 60 MHz
+                    ON:  externally clocked with a clock signal connected to DIO Pin 68.
+                         The available range is from 1 Hz up to the internal clock
+                         frequency
+            input: Gives the value of the DIO input for those bytes where drive 
+                is disabled.
+            mode: Manual: Manual setting of the DIO output value.
+                  Threshold unit: Enables setting of DIO output values by the 
+                      threshold unit.
+            output: Sets the value of the DIO output for those bytes where 'drive'
+                is enabled.
+    """    
+    def __init__(self, parent: 'ZIMFLI', name: str, channum: int):
+        """
+        Creates a new DIOChannel
+        Args:
+            parent (ZIMFLI): the parent instrument of this channel
+            name (str): the internal QCoDeS name of this channel
+            channum: the channelnumber of this channel
+        """
+        super().__init__(parent, name)
+        self.add_parameter('decimation',
+                           label='decimation factor',
+                           set_cmd=partial(self._parent._setter, 'dios',
+                                           channum-1, Mode.INT, 'decimation'),
+                           get_cmd=partial(self._parent._getter, 'dios',
+                                           channum-1, Mode.INT, 'decimation'),
+                           vals=vals.Ints() )
+        self.add_parameter('drive',
+                           label='drive',
+                           set_cmd=partial(self._parent._setter, 'dios',
+                                           channum-1, Mode.INT, 'drive'),
+                           get_cmd=partial(self._parent._getter, 'dios',
+                                           channum-1, Mode.INT, 'drive'),
+                           vals=vals.Ints(0, 15))
+        self.add_parameter('extclk',
+                           label='external clocking',
+                           set_cmd=partial(self._parent._setter, 'dios',
+                                           channum-1, Mode.INT, 'extclk'),
+                           get_cmd=partial(self._parent._getter, 'dios',
+                                           channum-1, Mode.INT, 'extclk'),
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           vals=vals.Enum('ON', 'OFF'))
+        self.add_parameter('input',
+                           label='DIO input',
+                           set_cmd=False,
+                           get_cmd=partial(self._parent._getter, 'dios',
+                                           channum-1, Mode.SAMPLE, 'input')
+                          )
+        self.add_parameter('mode',
+                           label='mode',
+                           set_cmd=partial(self._parent._setter, 'dios',
+                                           channum-1, Mode.INT, 'mode'),
+                           get_cmd=partial(self._parent._getter, 'dios',
+                                           channum-1, Mode.INT, 'mode'),
+                           val_mapping={'Manual': 0, 'Threshold unit': 3},
+                           vals=vals.Enum('Manual', 'Threshold unit'))
+        self.add_parameter('output',
+                           label='DIO output',
+                           set_cmd=partial(self._parent._setter, 'dios',
+                                           channum-1, Mode.INT, 'output'),
+                           get_cmd=partial(self._parent._getter, 'dios',
+                                           channum-1, Mode.INT, 'output'),
+                           vals=vals.Ints())
 
 class Sweep(MultiParameter):
     """
@@ -1610,6 +1686,11 @@ class ZIMFLI(Instrument):
             self.add_submodule(name, triggeroutchannel)
         triggeroutputchannels.lock()
         self.add_submodule('trigger_out_channels', triggeroutputchannels)
+        
+        ########################################
+        # digitial input/output submodule
+        diochannel = DIOChannel(self, 'dio', 1)
+        self.add_submodule(name, diochannel)
         ########################################
         # SWEEPER PARAMETERS
 
