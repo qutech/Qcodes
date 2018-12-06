@@ -204,6 +204,249 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, 1, 'value'),
                            set_cmd=False
                            )
+                           
+class DemodulatorChannel(InstrumentChannel):
+    """
+    Combines all parameters od the parent concerning the demodulators
+    Parameters:
+            bypass: Allows to bypass the demodulator low-pass filter, thus increasing
+                the bandwidth.
+            freq: Indicates the frequency used for demodulation and for output 
+                generation. The demodulation frequency is calculated with oscillator
+                frequency times the harmonic factor. When the MOD option is used
+                linear combinations of oscillator frequencies including the harmonic
+                factors define the demodulation frequencies.
+            order: Selects the filter roll off between 6 dB/oct and 48 dB/oct.
+                Allowed Values:
+                    1 1st order filter 6 dB/oct
+                    2 2nd order filter 12 dB/oct
+                    3 3rd order filter 18 dB/oct
+                    4 4th order filter 24 dB/oct
+                    5 5th order filter 30 dB/oct
+                    6 6th order filter 36 dB/oct
+                    7 7th order filter 42 dB/oct
+                    8 8th order filter 48 dB/oct
+            harmonic: Multiplies the demodulator's reference frequency by an integer
+                factor. If the demodulator is used as a phase detector in external 
+                reference mode (PLL), the effect is that the internal oscillator 
+                locks to the external frequency divided by the integer factor.
+            oscselect: Connects the demodulator with the supplied oscillator. 
+                Number of available oscillators depends on the installed options.
+            phaseadjust: Adjust the demodulator phase automatically in order to 
+                read 0 degrees.
+            phaseshift: Phase shift applied to the reference input of the demodulator.
+            timeconstant: Sets the integration time constant or in other words, 
+                the cutoff frequency of the demodulator low pass filter.
+            samplerate: Defines the demodulator sampling rate, the number of samples
+                that are sent to the host computer per second. A rate of about 7-10 
+                higher as compared to the filter bandwidth usually provides sufficient 
+                aliasing suppression. This is also the rate of data received by 
+                LabOne Data Server and saved to the computer hard disk. This setting
+                has no impact on the sample rate on the auxiliary outputs connectors.
+            sample: Contains streamed demodulator samples with sample interval defined 
+                by the demodulator data rate.
+            sinc: Enables the sinc filter. When the filter bandwidth is comparable to 
+                or larger than the demodulation frequency, the demodulator output 
+                may contain frequency components at the frequency of demodulation 
+                and its higher harmonics. The sinc is an additional filter that 
+                attenuates these unwanted components in the demodulator output.
+            signalinput: Selects the input signal for the demodulator.
+            streaming: Enables the data acquisition for the corresponding demodulator.
+            trigger: Selects the acquisition mode (i.e. triggering) or the demodulator.
+            x: get sample of x coordinate
+            y: get sample of y coordinate
+            R: get sample of absolute value of x+y*i
+            phi: get sample of angle of x+y*i
+    """
+    
+    def __init__(self, parent: 'ZIMFLI', name: str, channum: int) -> None:
+        """
+        Creates a new DemodulatorChannel
+        Args: 
+            parent: the Instrument the Channel belongs to, here 'ZIMFLI'
+            name: the internal QCoDeS name of the channel
+            channum: the channel number of the current channel, used as index
+                in the ChannelList of the DemodulatorChannels
+        """
+        super().__init__(parent, name)
+        self.add_parameter('bypass',
+                           label='bypass low-pass filter',
+                           get_cmd=partial(self._parent._getter, 'demods',
+                                           channum-1, Mode.INT, 'bypass'),
+                           set_cmd=partial(self._parent._setter, 'demods', 
+                                           channum-1, Mode.INT, 'bypass'),
+                           vals=vals.Ints() )
+                           
+        self.add_parameter('freq',
+                           label='frequency for demodulation',
+                           unit='Hz',
+                           get_cmd=partial(self._parent._getter, 'demods',
+                                           channum-1, Mode.DOUBLE, 'freq'),
+                           set_cmd=False)
+        
+        self.add_parameter('order',
+                           label='Filter order',
+                           get_cmd=partial(self._parent._getter, 'demods',
+                                           channum-1, 0, 'order'),
+                           set_cmd=partial(self._parent._setter, 'demods',
+                                           channum-1, 0, 'order'),
+                           vals=vals.Ints(1, 8) )
+
+        self.add_parameter('harmonic',
+                           label=('Reference frequency multiplication' +
+                                  ' factor'),
+                           get_cmd=partial(self._parent._getter, 'demods',
+                                           channum-1, 1, 'harmonic'),
+                           set_cmd=partial(self._parent._setter, 'demods',
+                                           channum-1, 1, 'harmonic'),
+                           vals=vals.Ints(1, 999) #why?
+                           )
+
+        self.add_parameter('oscselect',
+                           label='Select oscillator',
+                           get_cmd=partial(self._parent._getter, 'demods',
+                                           channum-1, Mode.INT, 'oscselect'),
+                           set_cmd=partial(self._parent._setter, 'demods',
+                                           channum-1, Mode.INT, 'oscselect'),
+                           vals=vals.Int(0, self._parent.no_oscs) )
+                           
+        self.add_parameter('phaseadjust',
+                           label='Phase adjustment',
+                           get_cmd=partial(self._parent._getter, 'demods',
+                                           channum-1, Mode.INT, 'phaseadjust'),
+                           set_cmd=partial(self._parent._setter, 'demods',
+                                           channum-1, Mode.INT, 'phaseadjust'),
+                           vals=vals.Int() )
+
+        self.add_parameter('phaseshift',
+                           label='Phase shift',
+                           unit='degrees',
+                           get_cmd=partial(self._parent._getter, 'demods',
+                                           channum-1, 1, 'phaseshift'),
+                           set_cmd=partial(self._parent._setter, 'demods',
+                                           channum-1, 1, 'phaseshift'),
+                           vals=vals.Numbers() )
+                           
+        self.add_parameter('timeconstant',
+                           label='Filter time constant',
+                           get_cmd=partial(self._parent._getter, 'demods',
+                                           channum-1, 1, 'timeconstant'),
+                           set_cmd=partial(self._parent._setter, 'demods',
+                                           channum-1, 1, 'timeconstant'),
+                           unit='s',
+                           vals=vals.Numbers() )
+
+        self.add_parameter('samplerate',
+                           label='Sampling rate',
+                           get_cmd=partial(self._parent._getter, 'demods',
+                                           channum-1, 1, 'rate'),
+                           set_cmd=partial(self._parent._setter, 'demods',
+                                           channum-1, 1, 'rate'),
+                           unit='1/s',
+                           vals=vals.Numbers(),
+                           docstring="""
+                                     Note: the value inserted by the user
+                                     may be approximated to the
+                                     nearest value supported by the
+                                     instrument.
+                                     """
+                            )
+                           
+        self.add_parameter('sample',
+                           label='Sample',
+                           get_cmd=partial(self._parent._getter, 'demods',
+                                           channum-1, Mode.SAMPLE, 'sample'),
+                           set_cmd=False,
+                           snapshot_value=False )
+                           
+        self.add_parameter('sinc',
+                           label='Sinc filter',
+                           get_cmd=partial(self._parent._getter, 'demods',
+                                           channum-1, 0, 'sinc'),
+                           set_cmd=partial(self._parent._setter, 'demods',
+                                           channum-1, 0, 'sinc'),
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           vals=vals.Enum('ON', 'OFF') )
+
+        # val_mapping for the demodX_signalin parameter
+        dmsigins = {'Sig In 1': 0,
+                    'Curr In 1': 1,
+                    'Trigger 1': 2,
+                    'Trigger 2': 3,
+                    'Aux Out 1': 4,
+                    'Aux Out 2': 5,
+                    'Aux Out 3': 6,
+                    'Aux Out 4': 7,
+                    'Aux In 1': 8,
+                    'Aux In 2': 9,
+                    'Constant input': 174
+                    }
+        
+        self.add_parameter('signalin',
+                           label='Signal input',
+                           get_cmd=partial(self._parent._getter, 'demods',
+                                           channum-1, 0,'adcselect'),
+                           set_cmd=partial(self._parent._setter, 'demods',
+                                           channum-1, 0, 'adcselect'),
+                           val_mapping=dmsigins,
+                           vals=vals.Enum(*list(dmsigins.keys())) )
+
+        self.add_parameter('streaming',
+                           label='Data streaming',
+                           get_cmd=partial(self._parent._getter, 'demods',
+                                           channum-1, 0, 'enable'),
+                           set_cmd=partial(self._parent._setter, 'demods',
+                                           channum-1, 0, 'enable'),
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           vals=vals.Enum('ON', 'OFF') )
+                           
+        dmtrigs = {'Continuous': 0,            #demodulator data is continuously streamed 
+                                               #to the host computer.
+                   'Trigger in 1 Rise': 1,     #rising edge triggered.
+                   'Trigger in 1 Fall': 2,     #falling edge triggered.
+                   'Trigger in 1 Both': 3,     #triggering on both rising and falling edge.
+                   'Trigger in 2 Rise': 4,     #rising edge triggered.
+                   'Trigger in 1|2 Rise': 5,   #rising edge triggered on either input.
+                   'Trigger in 2 Fall': 8,     #falling edge triggered.
+                   'Trigger in 1|2 Fall': 10,  #falling edge triggered on either input.
+                   'Trigger in 2 Both': 12,    #triggering on both rising and falling edge.
+                   'Trigger in 1|2 Both': 15,  #triggering on both rising and falling 
+                                               #edge or either trigger input.
+                   'Trigger in 1 Low': 16,     #demodulator data is streamed to the host
+                                               #computer when the level is low (TTL).
+                   'Trigger in 1 High': 32,    #demodulator data is streamed to the host
+                                               #computer when the level is high (TTL).
+                   'Trigger in 2 Low': 64,     #demodulator data is streamed to the host
+                                               #computer when the level is low (TTL).
+                   'Trigger in 1|2 Low': 80,   #demodulator data is streamed to the host 
+                                               #computer when either level is low (TTL).
+                   'Trigger in 2 High': 128,   #demodulator data is streamed to the host
+                                               #computer when the level is high (TTL).
+                   'Trigger in 1|2 High': 160, #demodulator data is streamed to the host
+                                               #computer when either level is high (TTL).
+                  }
+        
+        self.add_parameter('trigger',
+                           label='Trigger',
+                           get_cmd=partial(self._parent._getter, 'demods',
+                                           channum-1, 0, 'trigger'),
+                           set_cmd=partial(self._parent._setter, 'demods',
+                                           channum-1, 0, 'trigger'),
+                           val_mapping=dmtrigs,
+                           vals=vals.Enum(*list(dmtrigs.keys())) )
+        
+        for demod_param in ['x', 'y', 'R', 'phi']:
+            if demod_param in ('x', 'y', 'R'):
+                unit = 'V'
+            else:
+                unit = 'deg'
+            self.add_parameter('{}'.format(demod_param),
+                               label='{}'.format(demod_param),
+                               get_cmd=partial(self._parent._get_demod_sample,
+                                               channum - 1, demod_param),
+                               set_cmd=False, 
+                               snapshot_value=False,
+                               unit=unit)
 
 class Sweep(MultiParameter):
     """
@@ -775,149 +1018,18 @@ class ZIMFLI(Instrument):
 
         ########################################
         # DEMODULATOR PARAMETERS
-
-        for demod in range(1, 9):  # TODO
-            self.add_parameter('demod{}_order'.format(demod),
-                               label='Filter order',
-                               get_cmd=partial(self._getter, 'demods',
-                                               demod-1, 0, 'order'),
-                               set_cmd=partial(self._setter, 'demods',
-                                               demod-1, 0, 'order'),
-                               vals=vals.Ints(1, 8)
-                               )
-
-            self.add_parameter('demod{}_harmonic'.format(demod),
-                               label=('Reference frequency multiplication' +
-                                      ' factor'),
-                               get_cmd=partial(self._getter, 'demods',
-                                               demod-1, 1, 'harmonic'),
-                               set_cmd=partial(self._setter, 'demods',
-                                               demod-1, 1, 'harmonic'),
-                               vals=vals.Ints(1, 999)
-                               )
-
-            self.add_parameter('demod{}_timeconstant'.format(demod),
-                               label='Filter time constant',
-                               get_cmd=partial(self._getter, 'demods',
-                                               demod-1, 1, 'timeconstant'),
-                               set_cmd=partial(self._setter, 'demods',
-                                               demod-1, 1, 'timeconstant'),
-                               unit='s'
-                               )
-
-            self.add_parameter('demod{}_samplerate'.format(demod),
-                               label='Sample rate',
-                               get_cmd=partial(self._getter, 'demods',
-                                               demod-1, 1, 'rate'),
-                               set_cmd=partial(self._setter, 'demods',
-                                               demod-1, 1, 'rate'),
-                               unit='Sa/s',
-                               docstring="""
-                                         Note: the value inserted by the user
-                                         may be approximated to the
-                                         nearest value supported by the
-                                         instrument.
-                                         """)
-
-            self.add_parameter('demod{}_phaseshift'.format(demod),
-                               label='Phase shift',
-                               unit='degrees',
-                               get_cmd=partial(self._getter, 'demods',
-                                               demod-1, 1, 'phaseshift'),
-                               set_cmd=partial(self._setter, 'demods',
-                                               demod-1, 1, 'phaseshift')
-                               )
-
-            # val_mapping for the demodX_signalin parameter
-            dmsigins = {'Sig In 1': 0,
-                        'Sig In 2': 1,
-                        'Trigger 1': 2,
-                        'Trigger 2': 3,
-                        'Aux Out 1': 4,
-                        'Aux Out 2': 5,
-                        'Aux Out 3': 6,
-                        'Aux Out 4': 7,
-                        'Aux In 1': 8,
-                        'Aux In 2': 9,
-                        'Phi Demod 4': 10,
-                        'Phi Demod 8': 11}
-
-            self.add_parameter('demod{}_signalin'.format(demod),
-                               label='Signal input',
-                               get_cmd=partial(self._getter, 'demods',
-                                               demod-1, 0,'adcselect'),
-                               set_cmd=partial(self._setter, 'demods',
-                                               demod-1, 0, 'adcselect'),
-                               val_mapping=dmsigins,
-                               vals=vals.Enum(*list(dmsigins.keys()))
-                               )
-
-            self.add_parameter('demod{}_sinc'.format(demod),
-                               label='Sinc filter',
-                               get_cmd=partial(self._getter, 'demods',
-                                               demod-1, 0, 'sinc'),
-                               set_cmd=partial(self._setter, 'demods',
-                                               demod-1, 0, 'sinc'),
-                               val_mapping={'ON': 1, 'OFF': 0},
-                               vals=vals.Enum('ON', 'OFF')
-                               )
-
-            self.add_parameter('demod{}_streaming'.format(demod),
-                               label='Data streaming',
-                               get_cmd=partial(self._getter, 'demods',
-                                               demod-1, 0, 'enable'),
-                               set_cmd=partial(self._setter, 'demods',
-                                               demod-1, 0, 'enable'),
-                               val_mapping={'ON': 1, 'OFF': 0},
-                               vals=vals.Enum('ON', 'OFF')
-                               )
-
-            dmtrigs = {'Continuous': 0,
-                       'Trigger in 3 Rise': 1,
-                       'Trigger in 3 Fall': 2,
-                       'Trigger in 3 Both': 3,
-                       'Trigger in 3 High': 32,
-                       'Trigger in 3 Low': 16,
-                       'Trigger in 4 Rise': 4,
-                       'Trigger in 4 Fall': 8,
-                       'Trigger in 4 Both': 12,
-                       'Trigger in 4 High': 128,
-                       'Trigger in 4 Low': 64,
-                       'Trigger in 3|4 Rise': 5,
-                       'Trigger in 3|4 Fall': 10,
-                       'Trigger in 3|4 Both': 15,
-                       'Trigger in 3|4 High': 160,
-                       'Trigger in 3|4 Low': 80}
-
-            self.add_parameter('demod{}_trigger'.format(demod),
-                               label='Trigger',
-                               get_cmd=partial(self._getter, 'demods',
-                                               demod-1, 0, 'trigger'),
-                               set_cmd=partial(self._setter, 'demods',
-                                               demod-1, 0, 'trigger'),
-                               val_mapping=dmtrigs,
-                               vals=vals.Enum(*list(dmtrigs.keys()))
-                               )
-
-            self.add_parameter('demod{}_sample'.format(demod),
-                               label='Demod sample',
-                               get_cmd=partial(self._getter, 'demods',
-                                               demod - 1, 2, 'sample'),
-                               snapshot_value=False
-                               )
-
-            for demod_param in ['x', 'y', 'R', 'phi']:
-                if demod_param in ('x', 'y', 'R'):
-                    unit = 'V'
-                else:
-                    unit = 'deg'
-                self.add_parameter('demod{}_{}'.format(demod, demod_param),
-                                   label='Demod {} {}'.format(demod, demod_param),
-                                   get_cmd=partial(self._get_demod_sample,
-                                                   demod - 1, demod_param),
-                                   snapshot_value=False,
-                                   unit=unit
-                                   )
+        demodulatorchannels = ChannelList(self, "DemodulatorChannels", DemodulatorChannel,
+                                          snapshotable=False)
+        demodulator_no = 1
+        if 'MF-MD' in options:
+            demodulator_no = 4
+        for demodchannum in range(1, demodulator_no+1):
+            name = 'demod{}'.format(demodchannum)
+            demodchannel = DemodulatorChannel(self, name, demodchannum)
+            demodulatorchannels.append(demodchannel)
+            self.add_submodule(name, demodchannel)
+        demodulatorchannels.lock()
+        self.add_submodule('demodulator_channels', demodulatorchannels)
 
         ########################################
         # SIGNAL INPUTS
