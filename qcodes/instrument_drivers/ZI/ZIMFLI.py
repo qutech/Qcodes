@@ -447,6 +447,144 @@ class DemodulatorChannel(InstrumentChannel):
                                set_cmd=False, 
                                snapshot_value=False,
                                unit=unit)
+                               
+class SignalInputChannel(InstrumentChannel):
+    """
+    Combines all the Parameters from the parent concerning the signal input
+    Parameters: 
+            autorange: Automatic adjustment of the Range to about two times the maximum 
+                signal input amplitude measured over about 100 ms.
+            range: Defines the gain of the analog input amplifier. The range should 
+                exceed the incoming signal by roughly a factor two including a 
+                potential DC offset. The instrument selects the next higher available
+                range relative to a value inserted by the user. A suitable choice of
+                this setting optimizes the accuracy and signal-to-noise ratio by 
+                ensuring that the full dynamic range of the input ADC is used.
+            float: Switches the input between floating (ON) and connected to ground (OFF). 
+                This setting applies both to the voltage and the current input. It
+                is recommended to discharge the test device before connecting or to
+                enable this setting only after the signal source has been connected
+                to the Signal Input in grounded mode.
+            scaling: Applies the given scaling factor to the input signal.
+            AC: Defines the input coupling for the Signal Inputs. 
+                AC coupling inserts a high-pass filter. OFF means DC ccoupling
+            impedance: Switches between 50 Ohm (ON) and 10 M Ohm (OFF).
+            diff: Switches between single ended (OFF) and differential (ON) measurements.
+            max: Indicates the maximum measured value at the input.
+            min: Indicates the minimum measured value at the input.
+            on: Enables the signal input.
+            trigger: Switches to the next appropriate input range such that the range 
+                fits best with the measured input signal amplitude.
+    """
+    
+    def __init__(self, parent: 'ZIMFLI', name: str, channum) -> None:
+        """
+        Creates a new SignalInputChannel
+        Args: 
+            parent: the Instrument the Channel belongs to, in this case 'ZIMFLI'
+            name: the internal QCoDeS name of the channel
+            channum: the channel number of the current channel, used as index
+                in the ChannelList of the SignalInputChannels
+        """
+        super().__init__(parent, name)
+        self.add_parameter('autorange',
+                           label='Automatic Range adjustment',
+                           get_cmd=partial(self._parent._getter, 'sigins',
+                                           channum-1, Mode.INT, 'autorange'),
+                           set_cmd=partial(self._parent._setter, 'sigins',
+                                           channum-1, Mode.INT, 'autorange'),
+                           vals=vals.Ints() )
+
+        self.add_parameter('range',
+                           label='Input range',
+                           set_cmd=partial(self._parent._setter, 'sigins',
+                                           channum-1, 1, 'range'),
+                           get_cmd=partial(self._parent._getter, 'sigins',
+                                           channum-1, 1, 'range'),
+                           unit='V',
+                           vals=vals.Numbers() )
+                           
+        self.add_parameter('float',
+                           label='floating',
+                           get_cmd=partial(self._parent._getter, 'sigins', 
+                                           channum-1, Mode.INT, 'float'),
+                           set_cmd=partial(self._parent._setter, 'sigins', 
+                                           channum-1, Mode.INT, 'float'),
+                           val_mapping={'OFF': 0, 'ON': 1},
+                           vals=vals.Enum('OFF', 'ON') )
+
+        self.add_parameter('scaling',
+                           label='Input scaling',
+                           set_cmd=partial(self._parent._setter, 'sigins',
+                                           channum-1, 1, 'scaling'),
+                           get_cmd=partial(self._parent._getter, 'sigins',
+                                           channum-1, 1, 'scaling'),
+                           vals=vals.Numbers() )
+
+        self.add_parameter('AC',
+                           label='AC coupling',
+                           set_cmd=partial(self._parent._setter,'sigins',
+                                           channum-1, 0, 'ac'),
+                           get_cmd=partial(self._parent._getter, 'sigins',
+                                           channum-1, 0, 'ac'),
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           vals=vals.Enum('ON', 'OFF') )
+
+        self.add_parameter('impedance',
+                           label='Input impedance',
+                           set_cmd=partial(self._parent._setter, 'sigins',
+                                           channum-1, 0, 'imp50'),
+                           get_cmd=partial(self._parent._getter, 'sigins',
+                                           channum-1, 0, 'imp50'),
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           vals=vals.Enum('ON', 'OFF') )
+
+        self.add_parameter('diff',
+                           label='Differential measurements',
+                           set_cmd=partial(self._parent._setter, 'sigins',
+                                           channum-1, 0, 'diff'),
+                           get_cmd=partial(self._parent._getter, 'sigins',
+                                           channum-1, 0, 'diff'),
+                           val_mapping={'OFF': 0, 'ON': 1},
+                           vals=vals.Enum('OFF', 'ON') )
+                           
+        self.add_parameter('max',
+                           label='maximum measured value',
+                           get_cmd=partial(self._parent._getter, 'sigins',
+                                           channum-1, Mode.DOUBLE, 'max'),
+                           set_cmd=partial(self._parent._setter, 'sigins',
+                                           channum-1, Mode.DOUBLE, 'max'),
+                           #I am not sure if it is actually sensefull to be 
+                           #able to set this parameter 
+                           unit='V',
+                           vals=vals.Numbers() )
+                           
+        self.add_parameter('min',
+                           label='minimum measured value',
+                           get_cmd=partial(self._parent._getter, 'sigins',
+                                           channum-1, Mode.DOUBLE, 'min'),
+                           set_cmd=partial(self._parent._setter, 'sigins',
+                                           channum-1, Mode.DOUBLE, 'min'),
+                           #I am not sure if it is actually sensefull to be
+                           #able to set this parameter 
+                           unit='V',
+                           vals=vals.Numbers() )
+                           
+        self.add_parameter('on',
+                           label='Enable signal input',
+                           get_cmd=partial(self._parent._getter, 'sigins',
+                                           channum-1, Mode.INT, 'on'),
+                           set_cmd=partial(self._parent._setter, 'sigins',
+                                           channum-1, Mode.INT, 'on'),
+                           vals=vals.Ints() )
+        
+        self.add_parameter('trigger',
+                           label='Trigger',
+                           get_cmd=partial(self._parent._getter, 'sigins',
+                                           channum-1, Mode.INT, 'trigger'),
+                           set_cmd=partial(self._parent._setter, 'sigins',
+                                           channum-1, Mode.INT, 'trigger'),
+                           vals=vals.Ints() )
 
 class Sweep(MultiParameter):
     """
@@ -1032,56 +1170,16 @@ class ZIMFLI(Instrument):
         self.add_submodule('demodulator_channels', demodulatorchannels)
 
         ########################################
-        # SIGNAL INPUTS
-
-        for sigin in range(1, 3):  # TODO
-
-            self.add_parameter('signal_input{}_range'.format(sigin),
-                               label='Input range',
-                               set_cmd=partial(self._setter, 'sigins',
-                                               sigin-1, 1, 'range'),
-                               get_cmd=partial(self._getter, 'sigins',
-                                               sigin-1, 1, 'range'),
-                               unit='V')
-
-            self.add_parameter('signal_input{}_scaling'.format(sigin),
-                               label='Input scaling',
-                               set_cmd=partial(self._setter, 'sigins',
-                                               sigin-1, 1, 'scaling'),
-                               get_cmd=partial(self._getter, 'sigins',
-                                               sigin-1, 1, 'scaling'),
-                               )
-
-            self.add_parameter('signal_input{}_AC'.format(sigin),
-                               label='AC coupling',
-                               set_cmd=partial(self._setter,'sigins',
-                                               sigin-1, 0, 'ac'),
-                               get_cmd=partial(self._getter, 'sigins',
-                                               sigin-1, 0, 'ac'),
-                               val_mapping={'ON': 1, 'OFF': 0},
-                               vals=vals.Enum('ON', 'OFF')
-                               )
-
-            self.add_parameter('signal_input{}_impedance'.format(sigin),
-                               label='Input impedance',
-                               set_cmd=partial(self._setter, 'sigins',
-                                                sigin-1, 0, 'imp50'),
-                               get_cmd=partial(self._getter, 'sigins',
-                                               sigin-1, 0, 'imp50'),
-                               val_mapping={50: 1, 1000: 0},
-                               vals=vals.Enum(50, 1000)
-                               )
-
-            sigindiffs = {'Off': 0, 'Inverted': 1, 'Input 1 - Input 2': 2,
-                          'Input 2 - Input 1': 3}
-            self.add_parameter('signal_input{}_diff'.format(sigin),
-                               label='Input signal subtraction',
-                               set_cmd=partial(self._setter, 'sigins',
-                                                sigin-1, 0, 'diff'),
-                               get_cmd=partial(self._getter, 'sigins',
-                                               sigin-1, 0, 'diff'),
-                               val_mapping=sigindiffs,
-                               vals=vals.Enum(*list(sigindiffs.keys())))
+        #signal input submodules
+        signalinputchannels = ChannelList(self, "SignalInputChannels", SignalInputChannel,
+                                          snapshotable=False)
+        for sigin in range(1, 3):
+            name = 'signal_in{}'.format(sigin)
+            siginchannel = SignalInputChannel(self, name, sigin)
+            signalinputchannels.append(siginchannel)
+            self.add_submodule(name, siginchannel)
+        signalinputchannels.lock()
+        self.add_submodule('signal_input_channels', signalinputchannels)
                                
         #auxiliary input submodules
         auxinputchannels = ChannelList(self, "AUXInputChannels", AUXInputChannel,
