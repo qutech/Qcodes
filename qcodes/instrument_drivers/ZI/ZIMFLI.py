@@ -864,6 +864,99 @@ class SignalOutputChannel(InstrumentChannel):
         if setting in changing_param:
             for f in changing_param[setting]:
                 f()
+                
+class TriggerInputChannel(InstrumentChannel):
+    """
+    Combines all the Parameters concerning the TriggerInput
+    Parameters:
+            autothreshold: Automatically adjust the trigger threshold. The level
+                is adjusted to fall in the center of the applied transitions.
+            level: Trigger voltage level at which the trigger input toggles between
+                low and high. Use 50% amplitude for digital input and consider the
+                trigger hysteresis.
+    """
+    def __init__(self, parent: 'ZIMFLI', name: str, channum: int):
+        """
+        Creates a new TriggerInputChannel
+        Args:
+            parent (ZIMFLI): parent instrument of the TriggerInputChannel 
+            name (str): QCoDeS internal name for the channel
+            channum (int): number of the channel (1-based indexing)
+        """
+        super().__init__(parent, name)
+        self.add_parameter('autothreshold',
+                           label='autothreshold',
+                           set_cmd=partial(self._parent._setter, 'triggers/in',
+                                           channum-1, Mode.INT, 'autothreshold'),
+                           get_cmd=partial(self._parent._getter, 'triggers/in', 
+                                           channum-1, Mode.INT, 'autothreshold'),
+                           val_mapping={'ON': 1, 'OFF':0},
+                           vals=vals.Enum('ON', 'OFF'))
+                           
+        self.add_parameter('level', 
+                           label='trigger voltage level',
+                           set_cmd=partial(self._parent._setter, 'triggers/in',
+                                           channum-1, Mode.DOUBLE, 'level'),
+                           get_cmd=partial(self._parent._getter, 'triggers/in',
+                                           channum-1, Mode.DOUBLE, 'level'),
+                           unit='V',
+                           vals=vals.Numbers())
+                           
+class TriggerOutputChannel(InstrumentChannel):
+    """
+    Combines the parameters concerning the TriggerOutput
+    Parameters: 
+            pulsewidth: Defines the minimal pulse width for the case of Scope events
+                written to the trigger outputs of the device.
+            source: Select the signal assigned to the trigger output.
+                Possible values: 'disabled', 'osc phase of demod 2'(trigger output channel 1)
+                    'osc phase of demod 4'(trigger output channel 2), 
+                    'Threshold Logic Unit 1', 'Threshold Logic Unit 2',
+                    'Threshold Logic Unit 3', 'Threshold Logic Unit 4',
+                    'MDS Sync Out'
+                        
+    """
+    def __init__(self, parent: 'ZIMFLI', name: str, channum: int):
+        """
+        Creates a new TriggerOutputChannel
+        Args:
+            parent (ZIMFLI): parent instrument of the TriggerOutputChannel 
+            name (str): QCoDeS internal name for the channel
+            channum (int): number of the channel (1-based indexing)
+        """
+        super().__init__(parent, name)
+        self.add_parameter('pulsewidth',
+                           label='minimal pulse width',
+                           set_cmd=partial(self._parent._setter, 'triggers/out',
+                                           channum-1, Mode.DOUBLE, 'pulsewidth'),
+                           get_cmd=partial(self._parent._getter, 'triggers/out',
+                                           channum-1, Mode.DOUBLE, 'pulsewidth'),
+                           unit='s',
+                           vals=vals.Numbers(0, 0.149))
+                           
+        sources = {'disabled': 0, 
+                   'osc phase of demod 2' if channum == 1 else 'osc phase of demod 4': 1,
+                   #Requires DIG Option
+                   #'Scope Trigger': 2,
+                   #'Scope /Trigger': 3,
+                   #'Scope Armed': 4,
+                   #'Scope /Armed': 5,
+                   #'Scope Active': 6,
+                   #'Scope /Active': 7,
+                   'Threshold Logic Unit 1': 36,
+                   'Threshold Logic Unit 2': 37,
+                   'Threshold Logic Unit 3': 38,
+                   'Threshold Logic Unit 4': 39,
+                   'MDS Sync Out': 52}
+        
+        self.add_parameter('source',
+                           label='signal source',
+                           set_cmd=partial(self._parent._setter, 'triggers/out',
+                                           channum-1, Mode.INT, 'source'),
+                           get_cmd=partial(self._parent._getter, 'triggers/out',
+                                           channum-1, Mode.INT, 'source'), 
+                           val_mapping=sources,
+                           vals=vals.Enum(*list(sources.keys())))
 
 class Sweep(MultiParameter):
     """
@@ -1494,6 +1587,29 @@ class ZIMFLI(Instrument):
             self.add_submodule(name, auxchannel)
         auxoutputchannels.lock()
         self.add_submodule('aux_out_channels', auxoutputchannels)
+        
+        ########################################
+        # trigger input submodules
+        triggerinputchannels = ChannelList(self, "TriggerInputChannels", TriggerInputChannel,
+                                          snapshotable=False)
+        for triggerin in range(1,3):
+            name = 'trigger_in{}'.format(triggerin)
+            triggerinchannel = TriggerInputChannel(self, name, triggerin)
+            triggerinputchannels.append(triggerinchannel)
+            self.add_submodule(name, triggerinchannel)
+        triggerinputchannels.lock()
+        self.add_submodule('trigger_in_channels', triggerinputchannels)
+        
+        # trigger output submodules
+        triggeroutputchannels = ChannelList(self, "TriggerOutputChannels", TriggerOutputChannel,
+                                          snapshotable=False)
+        for triggerout in range(1,3):
+            name = 'trigger_out{}'.format(triggerout)
+            triggeroutchannel = TriggerOutputChannel(self, name, triggerout)
+            triggeroutputchannels.append(triggeroutchannel)
+            self.add_submodule(name, triggeroutchannel)
+        triggeroutputchannels.lock()
+        self.add_submodule('trigger_out_channels', triggeroutputchannels)
         ########################################
         # SWEEPER PARAMETERS
 
