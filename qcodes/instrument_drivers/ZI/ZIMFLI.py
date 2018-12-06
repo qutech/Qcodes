@@ -585,6 +585,285 @@ class SignalInputChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'sigins',
                                            channum-1, Mode.INT, 'trigger'),
                            vals=vals.Ints() )
+                           
+class SignalOutputChannel(InstrumentChannel):
+    """
+    Combines all the parameters concerning the signal output
+    Parameters:
+            add: The signal supplied to the Aux Input 1 is added to the signal 
+                output. For differential output the added signal is a common mode 
+                offset.
+            autorange: If enabled, selects the most suited output range automatically.
+            differential: Switch between single-ended output (OFF) and differential 
+                output (ON). In differential mode the signal swing is defined between 
+                Signal Output +V / -V.
+            imp50: Select the load impedance between 50 Ohm(ON) and HiZ(OFF). 
+                The impedance of the output is always 50 Ohm. For a load impedance
+                of 50 Ohm the displayed voltage is half the output voltage to 
+                reflect the voltage seen at the load.
+            offset: Defines the DC voltage that is added to the dynamic part of 
+                the output signal.
+            on: Enabling/Disabling the Signal Output. Corresponds to the blue 
+                LED indicator on the instrument front panel.
+            overloaded: Indicates that the signal output is overloaded.
+            range: Sets the output voltage range. Available ranges are 0.075, 0.15,
+                0.75 and 1.5
+            amplitude: Sets the peak amplitude that the oscillator assigned to 
+                the given demodulation channel contributes to the signal output.
+                TODO To the channum a certain amplitude number is given in 
+                outputamps, should it stay like that?
+            ampdef: the unit for the amplitude Vpk, Vrms or dBm, default is Vpk
+            enable: Enables individual output signal amplitude. When the MD 
+                option is used, it is possible to generate signals being the 
+                linear combination of the available demodulator frequencies.
+                TODO To the channum a certain amplitude number is given in 
+                outputampenable, should it stay like that?
+            
+    """
+    def __init__(self, parent: 'ZIMFLI', name: str, channum: int) -> None:
+        super().__init__(parent, name)
+        
+        outputamps = {1: 'amplitudes/3', 2: 'amplitudes/7'}#TODO why theses values?
+        outputampenable = {1: 'enables/3', 2: 'enables/7'}
+        
+        self.add_parameter('add',
+                           label='add signal from aux input',
+                           set_cmd=partial(self._setter,
+                                           Mode.INT, 'add'),
+                           get_cmd=partial(self._parent._getter,
+                                           channum-1, Mode.INT, 'add'),
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           vals=vals.Enum('ON', 'OFF') )
+
+        self.add_parameter('autorange',
+                           label='Enable signal output range.',
+                           set_cmd=partial(self._setter,
+                                           Mode.INT, 'autorange'),
+                           get_cmd=partial(self._sigout_getter,
+                                           channum-1, Mode.INT, 'autorange'),
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           vals=vals.Enum('ON', 'OFF') )
+                            
+        self.add_parameter('differential',
+                           label='single-ended(OFF) or differential(ON) output',
+                           set_cmd=partial(self._setter,
+                                           Mode.INT, 'diff'),
+                           get_cmd=partial(self._parent._getter,
+                                           channum-1, Mode.INT, 'diff'),
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           vals=vals.Enum('ON', 'OFF') )
+
+        self.add_parameter('imp50',
+                           label='Switch to turn on 50 Ohm impedance',
+                           set_cmd=partial(self._setter,
+                                           Mode.INT, 'imp50'),
+                           get_cmd=partial(self.parent._getter,
+                                           channum-1, Mode.INT, 'imp50'),
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           vals=vals.Enum('ON', 'OFF') )
+
+        self.add_parameter('offset',
+                           label='Signal output offset',
+                           set_cmd=partial(self._setter,
+                                           Mode.DOUBLE, 'offset'),
+                           get_cmd=partial(self.parent._getter,
+                                           channum-1, Mode.DOUBLE, 'offset'),
+                           vals=vals.Numbers(-1.5, 1.5), #why is this only between -1.5 and 1.5?
+                           unit='V')
+        
+        self.add_parameter('on',
+                           label='Turn signal output on and off.',
+                           set_cmd=partial(self._setter,
+                                           Mode.INT, 'on'),
+                           get_cmd=partial(self.parent._getter,
+                                           channum-1, Mode.INT, 'on'),
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           vals=vals.Enum('ON', 'OFF') )
+                           
+        self.add_parameter('overloaded',
+                           label='Overloaded',
+                           set_cmd=False,
+                           get_cmd=partial(self._parent._getter,
+                                           Mode.INT, 'over')
+                           )
+
+        self.add_parameter('range',
+                           label='Signal output range',
+                           set_cmd=partial(self._setter,
+                                           Mode.DOUBLE, 'range'),
+                           get_cmd=partial(self.parent._getter,
+                                           channum-1, Mode.DOUBLE, 'range'),
+                           vals=vals.Enum(0.075, 0.15, 0.75, 1.5) )
+                           #the instrument automatically selects the next higher
+                           #available range, so there not really a need to check
+                           #the range here
+
+        #TODO add a parameter for every amplitude the SignalOutputChannel has
+        #how many of them are there?
+        self.add_parameter('amplitude',
+                           label='Signal output amplitude',
+                           set_cmd=partial(self._setter,
+                                           Mode.DOUBLE, outputamps[channum]),
+                           get_cmd=partial(self.parent._getter,
+                                          channum-1, Mode.DOUBLE, outputamps[channum]),
+                           unit='V',
+                           vals=vals.Numbers() )
+
+        #is this needed here, as it does not belong to the instrument directly
+        self.add_parameter('ampdef',
+                           label="Signal output amplitude's definition",
+                           get_cmd=None, 
+                           set_cmd=None,
+                           initial_value='Vpk',
+                           vals=vals.Enum('Vpk','Vrms', 'dBm'))
+
+        #TODO add a parameter for every amplitude the SignalOutputChannel has
+        #how many are these?
+        self.add_parameter('enable',
+                           label="Enable signal output's amplitude.",
+                           set_cmd=partial(self._setter,
+                                           0, outputampenable[channum]),
+                           get_cmd=partial(self._sigout_getter,
+                                           channum-1, 0,
+                                           outputampenable[channum]),
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           vals=vals.Enum('ON', 'OFF') )
+                            
+    def _setter(self, mode: int, setting: str, value: Union[int, float]) -> None:
+        """
+        Function to set signal output's settings. A specific setter function is
+        needed as parameters depend on each other and need to be checked and
+        updated accordingly.
+        Args:
+            mode: Indicating whether we want to set an int (0) or double (1)
+            setting (str): The module's setting to set.
+            value (Union[int, float]): The value to set the setting to.
+        """
+
+        # convenient reference
+        params = self.parameters
+
+        #validation of the amplitude
+        def amp_valid():
+            nonlocal value
+            ampdef_val = params['ampdef'].get()
+            autorange_val = params['autorange'].get()
+
+            if autorange_val == 'ON':
+                imp50_val = params['imp50'].get()
+                imp50_dic = {'OFF': 1.5, 'ON': 0.75}
+                range_val = imp50_dic[imp50_val]
+
+            else:
+                so_range = params['range'].get()
+                range_val = round(so_range, 3)
+
+            amp_val_dict={'Vpk': lambda value: value,
+                          'Vrms': lambda value: value*sqrt(2),
+                          'dBm': lambda value: 10**((value-10)/20)
+                         }
+
+            if -range_val < amp_val_dict[ampdef_val](value) > range_val:
+                raise ValueError('Signal Output:'
+                                 + ' Amplitude too high for chosen range.')
+            value = amp_val_dict[ampdef_val](value)
+
+        #validation of the offset
+        def offset_valid():
+            nonlocal value
+            nonlocal number
+            range_val = params['range'].get()
+            range_val = round(range_val, 3)
+            amp_val = params['amplitude'].get()
+            amp_val = round(amp_val, 3)
+            if -range_val < value+amp_val > range_val:
+                raise ValueError('Signal Output: Offset too high for '
+                                 'chosen range.')
+
+        #validation of the range
+        def range_valid():
+            nonlocal value
+            nonlocal number
+            toget = params['autorange']
+            autorange_val = toget.get()
+            imp50_val = params['imp50'].get()
+            imp50_dic = {'OFF': [1.5, 0.15], 'ON': [0.75, 0.075]}
+
+            if autorange_val == "ON":
+                raise ValueError('Signal Output :'
+                                ' Cannot set range as autorange is turned on.')
+
+            if value not in imp50_dic[imp50_val]:
+                raise ValueError('Signal Output: Choose a valid range:'
+                                 '[0.75, 0.075] if imp50 is on, [1.5, 0.15]'
+                                 ' otherwise.')
+
+        #validation of the amplitude definition
+        def ampdef_valid():
+            # check which amplitude definition you can use.
+            # dBm is only possible with 50 Ohm imp ON
+            imp50_val = params['imp50'].get()
+            imp50_ampdef_dict = {'ON': ['Vpk','Vrms', 'dBm'],
+                                 'OFF': ['Vpk','Vrms']}
+            if value not in imp50_ampdef_dict[imp50_val]:
+                raise ValueError("Signal Output: Choose a valid amplitude "
+                                 "definition; ['Vpk','Vrms', 'dBm'] if imp50 is"
+                                 " on, ['Vpk','Vrms'] otherwise.")
+
+        dynamic_validation = {'range': range_valid,
+                              'ampdef': ampdef_valid,
+                              'amplitudes/3': amp_valid,
+                              'amplitudes/7': amp_valid,
+                              'offset': offset_valid}
+
+        #updates range, offset and amplitude value and checks if the range value
+        #fits the offset and amplitude value, also raises an error if that is not 
+        #the case
+        def update_range_offset_amp():
+            range_val = params['range'].get()
+            offset_val = params['offset'].get()
+            amp_val = params['amplitude'].get()
+            if -range_val < offset_val + amp_val > range_val:
+                #The GUI would allow higher values but it would clip the signal.
+                raise ValueError('Signal Output: Amplitude and/or '
+                                 'offset out of range.')
+
+        def update_offset():
+            self.parameters['offset'].get()
+
+        def update_amp():
+            self.parameters['amplitude'].get()
+
+        def update_range():
+            self.parameters['autorange'].get()
+
+        # parameters which will potentially change other parameters
+        changing_param = {'imp50': [update_range_offset_amp, update_range],
+                          'autorange': [update_range],
+                          'range': [update_offset, update_amp],
+                          'amplitudes/3': [update_range, update_amp],
+                          'amplitudes/7': [update_range, update_amp],
+                          'offset': [update_range]
+                         }
+
+        setstr = '/{}/sigouts/{}/{}'.format(self.parent.device, self.channum, setting)
+
+        #validates the setting. If it is not valid an error is raised
+        if setting in dynamic_validation:
+            dynamic_validation[setting]()
+
+        #sending the new settings to the device
+        if mode == 0:
+            self.daq.setInt(setstr, value)
+        if mode == 1:
+            self.daq.setDouble(setstr, value)
+
+        #updates the parameter, which also may be effected by the setting, so 
+        #that they have the correct current value
+        #is that necessary? Shouln't the value be updated by the instrument itself?
+        if setting in changing_param:
+            for f in changing_param[setting]:
+                f()
 
 class Sweep(MultiParameter):
     """
@@ -1155,7 +1434,7 @@ class ZIMFLI(Instrument):
                                vals=vals.Numbers(0, 600e6))
 
         ########################################
-        # DEMODULATOR PARAMETERS
+        #demodulator submodules
         demodulatorchannels = ChannelList(self, "DemodulatorChannels", DemodulatorChannel,
                                           snapshotable=False)
         demodulator_no = 1
@@ -1193,82 +1472,18 @@ class ZIMFLI(Instrument):
         self.add_submodule('aux_in_channels', auxinputchannels)
 
         ########################################
-        # SIGNAL OUTPUTS
-        outputamps = {1: 'amplitudes/3', 2: 'amplitudes/7'}
-        outputampenable = {1: 'enables/3', 2: 'enables/7'}
-
-        for sigout in range(1,3):  # TODO
-
-            self.add_parameter('signal_output{}_on'.format(sigout),
-                                label='Turn signal output on and off.',
-                                set_cmd=partial(self._sigout_setter,
-                                                sigout-1, 0, 'on'),
-                                get_cmd=partial(self._sigout_getter,
-                                                sigout-1, 0, 'on'),
-                                val_mapping={'ON': 1, 'OFF': 0},
-                                vals=vals.Enum('ON', 'OFF') )
-
-            self.add_parameter('signal_output{}_imp50'.format(sigout),
-                                label='Switch to turn on 50 Ohm impedance',
-                                set_cmd=partial(self._sigout_setter,
-                                                sigout-1, 0, 'imp50'),
-                                get_cmd=partial(self._sigout_getter,
-                                                sigout-1, 0, 'imp50'),
-                                val_mapping={'ON': 1, 'OFF': 0},
-                                vals=vals.Enum('ON', 'OFF') )
-
-            self.add_parameter('signal_output{}_amplitude'.format(sigout),
-                                label='Signal output amplitude',
-                                set_cmd=partial(self._sigout_setter,
-                                                sigout-1, 1, outputamps[sigout]),
-                                get_cmd=partial(self._sigout_getter,
-                                               sigout-1, 1, outputamps[sigout]),
-                                unit='V')
-
-            self.add_parameter('signal_output{}_ampdef'.format(sigout),
-                                get_cmd=None, set_cmd=None,
-                                initial_value='Vpk',
-                                label="Signal output amplitude's definition",
-                                unit='V',
-                                vals=vals.Enum('Vpk','Vrms', 'dBm'))
-
-            self.add_parameter('signal_output{}_range'.format(sigout),
-                                label='Signal output range',
-                                set_cmd=partial(self._sigout_setter,
-                                                sigout-1, 1, 'range'),
-                                get_cmd=partial(self._sigout_getter,
-                                                sigout-1, 1, 'range'),
-                                vals=vals.Enum(0.075, 0.15, 0.75, 1.5))
-
-            self.add_parameter('signal_output{}_offset'.format(sigout),
-                                label='Signal output offset',
-                                set_cmd=partial(self._sigout_setter,
-                                                sigout-1, 1, 'offset'),
-                                get_cmd=partial(self._sigout_getter,
-                                                sigout-1, 1, 'offset'),
-                                vals=vals.Numbers(-1.5, 1.5),
-                                unit='V')
-
-            self.add_parameter('signal_output{}_autorange'.format(sigout),
-                                label='Enable signal output range.',
-                                set_cmd=partial(self._sigout_setter,
-                                                sigout-1, 0, 'autorange'),
-                                get_cmd=partial(self._sigout_getter,
-                                                sigout-1, 0, 'autorange'),
-                                val_mapping={'ON': 1, 'OFF': 0},
-                                vals=vals.Enum('ON', 'OFF') )
-
-            self.add_parameter('signal_output{}_enable'.format(sigout),
-                                label="Enable signal output's amplitude.",
-                                set_cmd=partial(self._sigout_setter,
-                                                sigout-1, 0,
-                                                outputampenable[sigout]),
-                                get_cmd=partial(self._sigout_getter,
-                                                sigout-1, 0,
-                                                outputampenable[sigout]),
-                                val_mapping={'ON': 1, 'OFF': 0},
-                                vals=vals.Enum('ON', 'OFF') )
-
+        # signal output submodules
+        signaloutputchannels = ChannelList(self, "SignalOutputChannels", SignalOutputChannel,
+                                          snapshotable=False)
+        for sigout in range(1,3):
+            name = 'signal_out{}'.format(sigin)
+            sigoutchannel = SignalOutputChannel(self, name, sigout)
+            signaloutputchannels.append(sigoutchannel)
+            self.add_submodule(name, sigoutchannel)
+        signaloutputchannels.lock()
+        self.add_submodule('signal_output_channels', signaloutputchannels)
+        
+        #auxiliary output submodules
         auxoutputchannels = ChannelList(self, "AUXOutputChannels", AUXOutputChannel,
                                snapshotable=False)
 
