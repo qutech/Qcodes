@@ -3,6 +3,7 @@ import logging
 import numpy as np
 from functools import partial
 from math import sqrt
+from enum import IntEnum
 
 from typing import Callable, List, Union, cast
 
@@ -20,6 +21,66 @@ from qcodes.instrument.channel import InstrumentChannel, ChannelList
 from qcodes.utils import validators as vals
 
 log = logging.getLogger(__name__)
+
+class Mode(IntEnum):
+    """
+    Mapping the mode for the ZIMFLI._setter and ._getter methods
+    """
+    INT = 0
+    DOUBLE = 1
+    SAMPLE = 2
+
+class AUXInputChannel(InstrumentChannel):
+    """
+    Combines all parameters of the instrument concerning AUXInput
+    Parameters:
+            averaging: Defines the number of samples on the input to average as 
+                a power of two. Possible values are in the range [0, 16]. A value 
+                of 0 corresponds to the sampling rate of the auxiliary input's ADC.
+            sample: Voltage measured at the Auxiliary Input after averaging. 
+                The data rate depends on the averaging value. Note, if the instrument
+                has demodulator functionality, the auxiliary input values are
+                available as fields in a demodulator sample and are aligned by 
+                timestamp with the demodulator output.
+            value{1, 2}: Voltage measured at the Auxiliary Input after averaging. 
+                The value of this node is updated at a low rate (50 Hz); the 
+                streaming node auxins/n/sample is updated at a high rate defined 
+                by the averaging.
+    """
+    def __init__(self, parent:'ZIFMLI', name: str, channum: int) -> None:
+        """
+        Creates a new AUXInputChannel
+        Args:
+            parent: the internal QCoDeS name of the instrument the channel belongs to
+            name: the internal QCoDeS name of the channel itself
+            channum: the Index of the channel
+        """
+        super().__init__(parent, name)
+        
+        self.add_parameter('averaging',
+                           label='Number of samples to average',
+                           get_cmd=partial(self._parent._getter, 'auxins',
+                                           channum-1, Mode.INT, 'averaging'),
+                           set_cmd=partial(self._parent._getter, 'auxins',
+                                           channum-1, Mode.INT, 'averaging'),
+                           vals=vals.Ints(0, 16))
+                           
+        self.add_parameter('sample',
+                           label='Auxiliary Input sample',
+                           unit='V',
+                           get_cmd=partial(self._parent._getter, 'auxins',
+                                           channum-1, Mode.SAMPLE, 'sample'),
+                           set_cmd=False)
+                           
+        values_no = 2#the number of values the channel has, should be 2
+        #TODO is there a way to get this information from the instrument directly?
+        for i in range(0, values_no):          
+            self.add_parameter('value{}'.format(i+1),
+                               label='Value of input {}'.format(i+1),
+                               unit='V',
+                               get_cmd=partial(self._parent._getter, 'auxins',
+                                               channum-1, Mode.DOUBLE, 'values/{}'.format(i)),
+                               set_cmd=False)
 
 class AUXOutputChannel(InstrumentChannel):
 
@@ -871,6 +932,17 @@ class ZIMFLI(Instrument):
                                                sigin-1, 0, 'diff'),
                                val_mapping=sigindiffs,
                                vals=vals.Enum(*list(sigindiffs.keys())))
+                               
+        #auxiliary input submodules
+        auxinputchannels = ChannelList(self, "AUXInputChannels", AUXInputChannel,
+                                     snapshotable=False)
+        for auxinchannum in range(1, 3):
+            name = 'aux_in{}'.format(auxinchannum)
+            auxinchannel = AUXInputChannel(self, name, auxinchannum)
+            auxinputchannels.append(auxinchannel)
+            self.add_submodule(name, auxinchannel)
+        auxinputchannels.lock()
+        self.add_submodule('aux_in_channels', auxinputchannels)
 
         ########################################
         # SIGNAL OUTPUTS
