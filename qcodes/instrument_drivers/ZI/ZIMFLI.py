@@ -83,11 +83,33 @@ class AUXInputChannel(InstrumentChannel):
                                set_cmd=False)
 
 class AUXOutputChannel(InstrumentChannel):
+    """"
+    Combines all parameters of the instrument concerning the AUXOutput
+    Parameters:
+            scale: Multiplication factor to scale the signal. 
+            preoffset: Add a pre-offset to the signal before scaling is applied.
+            offset: Add the specified offset voltage to the signal after scaling.
+            limitlower: Lower limit for the signal at the Auxiliary Output. 
+                A smaller value will be clipped. Can have a value between -10 an 10 V.
+            limitupper: Upper limit for the signal at the Auxiliary Output. 
+            A larger value will be clipped. Can have a value between -10 an 10 V.
+            channel: channel according to the selected signal source
+            output: signal source of the signal to amplify 
+            value: Voltage present on the Auxiliary Output.
+                Auxiliary Output Value = (Signal+Preoffset)*Scale+Offset
+    """
 
     def __init__(self, parent: 'ZIMFLI', name: str, channum: int) -> None:
+        """
+        Creates a new AUXOutputChannel
+        Args: 
+            parent: the Instrument the Channel belongs to, in this case 'ZIMFLI'
+            name: the internal QCoDeS name of the channel
+            channum: the channel number of the current channel, used as index
+                in the ChannelList of the OutputChannels
+        """
         super().__init__(parent, name)
 
-        # TODO better validations of parameters
         self.add_parameter('scale',
                            label='scale',
                            unit='',
@@ -100,40 +122,42 @@ class AUXOutputChannel(InstrumentChannel):
 
         self.add_parameter('preoffset',
                            label='preoffset',
-                           unit='',
+                           unit='signal units',
                            get_cmd=partial(self._parent._getter, 'auxouts',
                                            channum - 1, 1, 'preoffset'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, 1, 'preoffset'),
                            vals=vals.Numbers()
                            )
+                           
         self.add_parameter('offset',
                            label='offset',
-                           unit='',
+                           unit='V',
                            get_cmd=partial(self._parent._getter, 'auxouts',
                                            channum - 1, 1, 'offset'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, 1, 'offset'),
                            vals=vals.Numbers()
                            )
+                           
         self.add_parameter('limitlower',
                            label='Lower limit',
-                           unit='',
+                           unit='V',
                            get_cmd=partial(self._parent._getter, 'auxouts',
                                            channum - 1, 1, 'limitlower'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, 1, 'limitlower'),
-                           vals=vals.Numbers()
+                           vals=vals.Numbers(-10, 10)
                            )
 
         self.add_parameter('limitupper',
                            label='Upper limit',
-                           unit='',
+                           unit='V',
                            get_cmd=partial(self._parent._getter, 'auxouts',
                                            channum - 1, 1, 'limitupper'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, 1, 'limitupper'),
-                           vals=vals.Numbers()
+                           vals=vals.Numbers(-10, 10)
                            )
 
         # TODO the validator does not catch that there are only
@@ -154,9 +178,14 @@ class AUXOutputChannel(InstrumentChannel):
                             'Demod Y': 1,
                             'Demod R': 2,
                             'Demod THETA': 3,
+                            'PID Out': 5,
                             'AU Cartesian': 7,
-                            'AU Polar': 8}
-
+                            'AU Polar': 8, #7 and 8 are not documented in the Manual, what are they?
+                            'PID Shift': 9,
+                            'PID Error': 10,
+                            'TU Filtered Value': 11,
+                            'TU Output Value': 13}
+        
         self.add_parameter('output',
                            label='Output',
                            unit='',
@@ -164,7 +193,16 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, 0, 'outputselect'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, 0, 'outputselect'),
-                           val_mapping=outputvalmapping
+                           val_mapping=outputvalmapping,
+                           vals=vals.Enum(*list(outputvalmapping.keys()))
+                           )
+                           
+        self.add_parameter('value',
+                           label='Value',
+                           unit='V',
+                           get_cmd=partial(self._parent._getter, 'auxouts',
+                                           channum - 1, 1, 'value'),
+                           set_cmd=False
                            )
 
 class Sweep(MultiParameter):
