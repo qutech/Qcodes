@@ -1063,6 +1063,310 @@ class MDSChannel(InstrumentChannel):
                            set_cmd=partial(self.setter, 'timestamp', Mode.INT),
                            get_cmd=partial(self.getter, 'timestamp', Mode.INT),
                            vals=vals.Ints())
+        
+class PIDChannel(InstrumentChannel):
+    """
+    Combines all parameters concerning the PIDs
+    These Parameters are only available if the MF-PID Quad PID/PLL Controller 
+    option is installed on the MFLI parent Instrument
+    Parameters:
+            center: Sets the center value for the PID output. After adding the
+                Center value, the signal is clamped to Center + Lower Limit and
+                Center + Upper Limit.
+            derivative_gain: PID derivative gain.
+            d_limit_time_constant: The cutoff of the low-pass filter for the D 
+                (derivative gain) limitation given as time constant. When set to
+                0, the lowpass filter is disabled.
+            enable: Enable the PID controller
+                Possible values: 'ON', 'OFF'
+            integral_gain: PID integral gain I
+            input: Select the input source of the PID controller and also 
+                select input channel of PID controller.
+                Possible values: 'Demod X <1, 2, ..., 8>' , 'Demod Y <1, 2, ..., 8>',
+                    'Demod R <1, 2, ..., 8>', 'Demod Theta <1, 2, ..., 8>',
+                    'Aux In <1, 2>', 'Aux Out <1, 2, 3, 4>'
+            limit_lower: Sets the lower limit for the PID output. After adding 
+                the Center value, the signal is clamped to Center + Lower Limit
+                and Center + Upper Limit.
+            limit_upper: Sets the upper limit for the PID output. After adding 
+                the Center value, the signal is clamped to Center + Lower Limit
+                and Center + Upper Limit.
+            mode: Sets the operation mode of the PID module.
+                Possible value: 'PID', 'PLL' (phase locked loop), 
+                    'ExtRef' (external reference)
+            output: Select the output of the PID controller
+                Possible values: 
+                    'Main signal Amps <1, 2>' (Feedback to the main signal 
+                                               output amplitudes),
+                    'Internal oscs <1, 2>' (Feedback to any of the internal
+                                            oscillator frequencies),
+                    'Demod phase <1, 2, ..., 8>' (Feedback to any of the 8 
+                                                  demodulator phase set points),
+                    'Aux Out <1, 2, 3, 4>' (Feedback to any of the 4 Auxiliary 
+                                            Output's Offset),
+                    'Main signal Offset <1, 2>' (Feedback to the main Signal 
+                                                 Output offset adjustment)
+            proportional_gain: PID Proportional gain
+            phaseunwrap: Enables the phase unwrapping to track phase errors past
+                the +/-180 degree boundary and increase PLL bandwidth.
+            rate: PID sampling rate and update rate of PID outputs. Needs to be
+                set substantially higher than the targeted loop filter bandwidth.
+            setpoint: PID controller setpoint
+            shift: Difference between the current output value Out and the Center.
+                Shift = P*Error + I*Int(Error, dt) + D*dError/dt
+            value: curretn PID output value
+            auto_adaptation: This defines the type of automatic adaptation of 
+                parameters in the PID.
+                Possible values: 'no adaptation' (No automatic adaption.),
+                      'coefficients' (The coefficients of the PID controller are
+                                      automatically set.),
+                      'low bw' (The PID coefficients, the filter bandwidth
+                                and the output limits are automatically
+                                set using a low bandwidth.),
+                      'high bw' (The PID coefficients, the filter bandwidth
+                                 and the output limits are automatically
+                                 set using a high bandwidth.),
+                      'all parameters' (All parameters of the PID including the
+                                        center frequency are adapted.)
+            enable_setpoint_toggle: Enables the setpoint toggle
+                Possible values: 'ON', 'OFF'
+            setpoint_toggle_rate: Defines the rate of setpoint toggling.
+                Note that possible values are logarithmically spaced with a
+                factor of 4 between values.
+            setpoint_toggle_setpoint: Defines the setpoint value used for setpoint
+                toggle.
+    """
+    def __init__(self, parent: 'ZIMFLI', name: str, channum: int):
+        super().__init__(parent, name)
+        self.add_parameter('center',
+                           label='center value',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'center'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'center'),
+                           vals=vals.Numbers())
+        self.add_parameter('derivativ_gain',
+                           label='Derivative Gain',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'D'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'D'),
+                           vals=vals.Numbers())
+        self.add_parameter('d_limit_time_constant',
+                           label='derivative gain limitation given as time constant',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'dlimittimeconstant'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'dlimittimeconstant'),
+                           unit='s',
+                           vals=vals.Numbers())
+        self.add_parameter('enable',
+                           label='enable',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.INT, 'enable'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.INT, 'enable'),
+                           val_mapping={'ON': 1, 'OFF': 0})
+        self.add_parameter('integral_gain',
+                           label='Integral gain',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'I'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'I'),
+                           vals=vals.Numbers())
+        input_dict={'Demod X 1': '0 0',
+                    'Demod X 2': '0 1',
+                    'Demod X 3': '0 2',
+                    'Demod X 4': '0 3',
+                    'Demod X 5': '0 4',
+                    'Demod X 6': '0 5',
+                    'Demod X 7': '0 6',
+                    'Demod X 8': '0 7',
+                    'Demod Y 1': '1 0',
+                    'Demod Y 2': '1 1',
+                    'Demod Y 3': '1 2',
+                    'Demod Y 4': '1 3',
+                    'Demod Y 5': '1 4',
+                    'Demod Y 6': '1 5',
+                    'Demod Y 7': '1 6',
+                    'Demod Y 8': '1 7',
+                    'Demod R 1': '2 0',
+                    'Demod R 2': '2 1',
+                    'Demod R 3': '2 2',
+                    'Demod R 4': '2 3',
+                    'Demod R 5': '2 4',
+                    'Demod R 6': '2 5',
+                    'Demod R 7': '2 6',
+                    'Demod R 8': '2 7',
+                    'Demod Theta 1': '3 0',
+                    'Demod Theta 2': '3 1',
+                    'Demod Theta 3': '3 2',
+                    'Demod Theta 4': '3 3',
+                    'Demod Theta 5': '3 4',
+                    'Demod Theta 6': '3 5',
+                    'Demod Theta 7': '3 6',
+                    'Demod Theta 8': '3 7',
+                    'Aux In 1': '4 0',
+                    'Aux In 2': '4 1',
+                    'Aux Out 1': '5 0',
+                    'Aux Out 2': '5 1',
+                    'Aux Out 3': '5 2',
+                    'Aux Out 4': '5 3'}                   
+        self.add_parameter('input',
+                           label='input source and channel number',
+                           set_cmd=partial(self.input_setter(channum)),
+                           get_cmd=partial(self.input_getter(channum)),
+                           val_mapping=input_dict)
+        self.add_parameter('limit_lower',
+                           label='lower limit',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'limitlower'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'limitlower'),
+                           vals=vals.Numbers()) 
+        self.add_parameter('limit_upper',
+                           label='upper limit',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'limitupper'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'limitupper'),
+                           vals=vals.Numbers())
+        self.add_parameter('mode',
+                           label='operation mode',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.INT, 'mode'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.INT, 'mode'),
+                           val_mapping={'PID': 0,
+                                        'PLL': 1,
+                                        'ExtRef': 2})
+        output_dict = {'Main signal Amps 1': '0 0', #TODO are the signal outputs 'Main signal'?
+                       'Main signal Amps 2': '0 1',
+                       'Internal oscs 1': '1 0',
+                       'Internal oscs 2': '1 1',
+                       'Demod phase 1': '2 0',
+                       'Demod phase 2': '2 1',
+                       'Demod phase 3': '2 2',
+                       'Demod phase 4': '2 3',
+                       'Demod phase 5': '2 4',
+                       'Demod phase 6': '2 5',
+                       'Demod phase 7': '2 6',
+                       'Demod phase 8': '2 7',
+                       'Aux Out 1': '3 0',
+                       'Aux Out 2': '3 1',
+                       'Aux Out 3': '3 2',
+                       'Aux Out 4': '3 3',
+                       'Main signal Offset 1': '4 0',
+                       'Main signal Offset 2': '4 1',}   
+        self.add_parameter('output',
+                           label='output selection',
+                           set_cmd=partial(self.output_setter, channum),
+                           get_cmd=partial(self.output_getter, channum),
+                           val_mapping=output_dict)
+        self.add_parameter('proportional_gain',
+                           label='Proportional gain',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'P'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'P'),
+                           vals=vals.Numbers())
+        self.add_parameter('phaseunwrap',
+                           label='Enable/Disable phase unwrapping',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.INT, 'phaseunwrap'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.INT, 'phaseunwrap'),
+                           val_mapping={'ON':1, 'OFF':2})
+        self.add_parameter('rate',
+                           label='sampling and update rate',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'rate'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'rate'),
+                           unit='Hz',
+                           vals=vals.Numbers())
+        self.add_parameter('setpoint',
+                           label='setpoint',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'setpoint'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'setpoint'),
+                           vals=vals.Numbers())
+        self.add_parameter('shift',
+                           label='shift',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'shift'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'shift'),
+                           vals=vals.Numbers())
+        self.add_parameter('value',
+                           label='value',
+                           set_cmd=None,
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'value'),
+                           vals=vals.Numbers)
+        adapt_dict = {'no adaptation': 0,
+                      'coefficients': 1,
+                      'low bw': 2,
+                      'high bw': 3,
+                      'all parameters': 4}
+        self.add_parameter('auto_adaptation',
+                           label='type of automatic adaptation',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.INT, 'pll/automode'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.INT, 'pll/automode'),
+                           val_mapping=adapt_dict)
+        self.add_parameter('enable_setpoint_toggle',
+                           lable='enable/disable the setpoint toggle',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.INT, 'setpointtoggle/enable'),
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.INT, 'setpointtoggle/enable'),
+                           val_mapping={'ON': 1, 'OFF': 0}) 
+        self.add_parameter('setpoint_toggle_rate',
+                           label='rate of settpoint toggling',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'setpointtoggle/rate'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'setpointtoggle/rate'),
+                           unit='Hz',
+                           vals=vals.Numbers())
+        self.add_parameter('setpoint_toggle_setpoint',
+                           label='setpoint value used for setpoint toggle',
+                           set_cmd=partial(self._parent._setter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'setpointtoggle/setpoint'),
+                           get_cmd=partial(self._parent._getter, 'pids',
+                                           channum-1, Mode.DOUBLE, 'setpointtoggle/setpoint'),
+                           vals=vals.Numbers())
+                           
+    def input_setter(self, channum: int, cmd: str) -> None:
+        (source, channel) = cmd.split(" ")
+        self._parent.daq.setInt('{}/pids/{}/input'.format(self._parent.device, 
+                                channum), int(source))
+        self._parent.daq.setInt('{}/pid/{}/inputchannel'.format(self._parent.device, 
+                                channum), int(channel))
+    
+    def input_getter(self, channum: int) -> str:
+        ret = str(self._parent.daq.getInt('{}/pids/{}/input'.format(self._parent.device, 
+                                          channum)))+' '
+        ret += str(self._parent.daq.setInt('{}/pid/{}/inputchannel'.format(self._parent.device, 
+                                           channum)))
+        return ret
+    
+    def output_setter(self, channum: int, cmd: str) -> None:
+        (output, channel) = cmd.split(" ")
+        self._parent.daq.setInt('{}/pids/{}/output'.format(self._parent.device,
+                                channum), int(output))
+        self._parent.daq.setInt('{}/pids/{}/outputchannel'.format(self._parent.device,
+                                channum), int(channel))
+        
+    def output_getter(self, channum: int) -> str:
+        ret = str(self._parent.daq.getInt('{}/pids/{}/output'.format(self._parent.device, 
+                                          channum)))+' '
+        ret += str(self._parent.daq.setInt('{}/pid/{}/outputchannel'.format(self._parent.device, 
+                                           channum)))
+        return ret
 
 class Sweep(MultiParameter):
     """
@@ -2032,7 +2336,7 @@ class Scope(MultiParameter):
         # First figure out what the user has asked for
         # activate Channel1 and/or Channel2
         chans = {1: (True, False), 2: (False, True), 3: (True, True)}
-        channels = chans[params['scope_channels'].get()] #TODO what is this needed for?
+        channels = chans[params['scope_channels'].get()] 
 
         sample_no = params['scope_length'].get()
         # Find out whether segments are enabled
@@ -2077,7 +2381,7 @@ class Scope(MultiParameter):
 
         #TODO: what are good names? Look up if these are the same names as used
         #in ScopeChannel -> not really needed because the mapped values doesn't
-        #relly give more information
+        #really give more information
         inputnames = {'Signal Input 1': 'Sig. In 1',
                       'Signal Input 2': 'Sig. In 2',
                       'Trig Input 1': 'Trig. In 1',
@@ -2124,10 +2428,10 @@ class Scope(MultiParameter):
         channel1 = self._instrument.submodules["scope_channel1"]
         #the value for input_select is mapped to a better name
         input1 = inputnames[channel1.input_select()]
-        unit1 = inputunits[channel1.input_select()]
+        unit1 = inputunits[params[namestr].get()]
         channel2 = self._instrument.submodules["scope_channel2"]
         input2 = inputnames[channel2.input_select()]
-        unit2 = inputunits[channel2.input_select()]
+        unit2 = inputunits[params[namestr].get()]
 
         self.setpoints = ((tuple(range(segs)), (setpointlist,)*segs),)*2
         #self.setpoints = ((setpointlist,)*segs,)*2
