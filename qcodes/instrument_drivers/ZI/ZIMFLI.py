@@ -1067,21 +1067,19 @@ class MDSChannel(InstrumentChannel):
 class Sweep(MultiParameter):
     """
     Parameter class for the ZIMFLI instrument class for the sweeper.
-
     The get method returns a tuple of arrays, where each array contains the
     values of a signal added to the sweep (e.g. demodulator 4 phase).
-
     Attributes:
         names (tuple): Tuple of strings containing the names of the sweep
           signals (to be measured)
-        units (tuple): Tuple of strings containg the units of the signals
-        shapes (tuple): Tuple of tuples each containing the Length of a
+        units (tuple): Tuple of strings containing the units of the signals
+        shapes (tuple): Tuple of tuples each containing the length of a
           signal.
         setpoints (tuple): Tuple of N copies of the sweep x-axis points,
-          where N is he number of measured signals
+          where N is the number of measured signals
         setpoint_names (tuple): Tuple of N identical strings with the name
           of the sweep x-axis.
-
+    TODO
     """
     def __init__(self, name, instrument, **kwargs):
         # The __init__ requires that we supply names and shapes,
@@ -1094,7 +1092,6 @@ class Sweep(MultiParameter):
         """
         Build a sweep with the current sweep settings. Must be called
         before the sweep can be executed.
-
         For developers:
         This is a general function for updating the sweeper.
         Every time a parameter of the sweeper is changed, this function
@@ -1102,11 +1099,9 @@ class Sweep(MultiParameter):
         strictly necessary for parameters that affect the setpoints of the
         Sweep parameter, having to call this function for any parameter is
         deemed more user friendly (easier to remember; when? -always).
-
         The function sets all (user specified) settings on the sweeper and
         additionally sets names, units, and setpoints for the Sweep
         parameter.
-
         """
 
         signals = self._instrument._sweeper_signals
@@ -1177,12 +1172,9 @@ class Sweep(MultiParameter):
         """
         Execute the sweeper and return the data corresponding to the
         subscribed signals.
-
         Returns:
-
-            tuple: Tuple containg N numpy arrays where N is the number
+            tuple: Tuple containing N numpy arrays where N is the number
               of signals added to the sweep.
-
         Raises:
             ValueError: If no signals have been added to the sweep
             ValueError: If a sweep setting has been modified since
@@ -1250,10 +1242,8 @@ class Sweep(MultiParameter):
         """
         Parse the raw result of a sweep into just the data asked for by the
         added sweeper signals. Used by Sweep.get.
-
         Args:
             sweepresult (dict): The dict returned by sweeper.read
-
         Returns:
             tuple: The requested signals in a tuple
         """
@@ -1269,16 +1259,733 @@ class Sweep(MultiParameter):
             returndata.append(data)
 
         return tuple(returndata)
+    
+class ScopeChannelChannel(InstrumentChannel):
+    """
+    Combines all the Parameters for the Scope channels, which can be found
+    under DEV.../SCOPES/0/CHANNELS/n/
+    Parameters:
+        bw_limitation: Selects between sample decimation(OFF) and sample averaging(ON) 
+            for sample rates lower than the maximal available sampling rate.
+            Averaging avoids aliasing, but may conceal signal peaks.
+        full_scale: Indicates the full scale value of the scope channel
+        input_select: Selects the scope input signal
+            Possible Values: 'Signal Input 1', 'Current Input 1', 'Trigger 1',
+                'Trigger 2', 'Aux Output 1', 'Aux Output 2', 'Aux Output 3',
+                'Aux Output 4', 'Aux Input 1', 'Aux Input 2', 'Osc phi Demod 2',
+                'Osc phi Demod 4', 'Demod 1 X', 'Demod 2 X', 'Demod 3 X',
+                'Demod 4 X', 'Demod 1 Y', 'Demod 2 Y', 'Demod 3 Y', 'Demod 4 Y',
+                'Demod 1 R', 'Demod 2 R', 'Demod 3 R', 'Demod 4 R', 'Demod 1 phi',
+                'Demod 2 phi', 'Demod 3 phi', 'Demod 4 phi', 'PID 1 value',
+                'PID 2 value', 'PID 3 value', 'PID 4 value', 'PID 1 Shift',
+                'PID 2 Shift', 'PID 3 Shift', 'PID 4 Shift'
+        limit_lower: Lower limit of the scope full scale range. For demodulator,
+            PID, Boxcar, and AU signals the limit should be adjusted so that the
+            signal covers the specified range to achieve optimal resolution.
+        limit_upper: Upper limit of the scope full scale range. For demodulator,
+            PID, Boxcar, and AU signals the limit should be adjusted so that the
+            signal covers the specified range to achieve optimal resolution.
+        offset: Indicates the offset value of the scope channel
+        enable_stream: Enable scope streaming for the specified channel. This 
+            allows for continuous recording of scope data on the plotter and 
+            streaming to disk. Note: scope streaming requires the DIG option.
+    """
+    def __init__(self, parent: 'ZIMFLI', name: str, channum: int):
+        super().__init__(parent, name)
+        self._channum = channum
+        
+        self.add_parameter('bw_limitation',
+                           label='sample averaging or sample decimation', 
+                           set_cmd=partial(parent._setter, 'scopes/0/channels',
+                                           channum-1, Mode.INT, 'bwlimit'),
+                           get_cmd=partial(parent._getter, 'scopes/0/channels',
+                                           channum-1, Mode.INT, 'bwlimit'),
+                           val_mapping={'ON': 0, 'OFF': 1},
+                           vals=vals.Enum('ON', 'OFF'))
+        self.add_parameter('full_scale',
+                           label='full scale value',
+                           set_cmd=partial(parent._setter, 'scopes/0/channels',
+                                           channum-1, Mode.DOUBLE, 'fullscale'),
+                           get_cmd=partial(parent._getter, 'scopes/0/channels',
+                                           channum-1, Mode.DOUBLE, 'fullscale'),
+                           vals=vals.Numbers())
+        inputselect_dict = {'Signal Input 1': 0,
+                           'Current Input 1': 1,
+                           'Trigger 1': 2,
+                           'Trigger 2': 3,
+                           'Aux Output 1': 4,
+                           'Aux Output 2': 5,
+                           'Aux Output 3': 6,
+                           'Aux Output 4': 7,
+                           'Aux Input 1': 8,
+                           'Aux Input 2': 9,
+                           'Osc phi Demod 2': 10,
+                           'Osc phi Demod 4': 11,
+                           'PID 1 value': 80,
+                           'PID 2 value': 81,
+                           'PID 3 value': 82,
+                           'PID 4 value': 83,
+                           'PID 1 Shift': 144,
+                           'PID 2 Shift': 145,
+                           'PID 3 Shift': 146,
+                           'PID 4 Shift': 147}
+        if 'MF-DIG' in self._parent.options:
+            demodulators = {'Demod 1 X': 16,
+                           'Demod 2 X': 17,
+                           'Demod 3 X': 18,
+                           'Demod 4 X': 19,
+                           'Demod 1 Y': 32,
+                           'Demod 2 Y': 33,
+                           'Demod 3 Y': 34,
+                           'Demod 4 Y': 35,
+                           'Demod 1 R': 48,
+                           'Demod 2 R': 49,
+                           'Demod 3 R': 50,
+                           'Demod 4 R': 51,
+                           'Demod 1 phi': 64,
+                           'Demod 2 phi': 65,
+                           'Demod 3 phi': 66,
+                           'Demod 4 phi': 67,}
+            inputselect_dict.update(demodulators)
+        self.add_parameter('input_select',
+                           label='Scope input signal',
+                           set_cmd=partial(parent._setter, 'scopes/0/channels',
+                                           channum-1, Mode.INT, 'inputselect'),
+                           get_cmd=partial(parent._getter, 'scopes/0/channels',
+                                           channum-1, Mode.INT, 'inputselect'),
+                           val_mapping=inputselect_dict) #extra validation not needed,
+                                                         #because an Enum-Validator is
+                                                         #genereated with the keys of
+                                                         #val_mapping is in 
+                                                         #the Parameters constructor
+        self.add_parameter('limit_lower',
+                           label='lower limit of full scale',
+                           set_cmd=partial(parent._setter, 'scopes/0/channels',
+                                           channum-1, Mode.DOUBLE, 'limitlower'),
+                           get_cmd=partial(parent._getter, 'scopes/0/channels',
+                                           channum-1, Mode.DOUBLE, 'limitlower'),
+                           vals=vals.Numbers())
+        self.add_parameter('limit_upper',
+                           label='upper limit of full scale',
+                           set_cmd=partial(parent._setter, 'scopes/0/channels',
+                                           channum-1, Mode.DOUBLE, 'limitupper'),
+                           get_cmd = partial(parent._getter, 'scopes/0/channels',
+                                           channum-1, Mode.DOUBLE, 'limitupper'),
+                           vals=vals.Numbers())
+        self.add_parameter('offset',
+                           label='offset vlaue of scope channel',
+                           set_cmd=partial(parent._setter, 'scopes/0/channels',
+                                           channum-1, Mode.DOUBLE, 'offset'),
+                           get_cmd=partial(parent._getter, 'scopes/0/channels',
+                                           channum-1, Mode.DOUBLE, 'offset'),
+                           vals=vals.Numbers()) 
+        self.add_parameter('enable_stream',
+                           lable='enable stream of this channel',
+                           set_cmd=partial(parent._setter, 'scopes/0/stream/enables',
+                                           channum-1, Mode.INT, ''),
+                           get_cmd=partial(parent._setter, 'scopes/0/stream/enables',
+                                           channum-1, Mode.INT, ''),
+                           val_mapping={'ON': 1, 'OFF': 0})
+                           
+class ScopeChannel(InstrumentChannel):
+    """
+    Combines all the parameters for the Scope
+    Parameters:
+            channels: activates the scope channels
+                Possible values:
+                    1: Channel 1 on, Channel 2 off.
+                    2: Channel 1 off, Channel 2 on.
+                    3: Channel 1 on, Channel 2 on.
+            runstop: Enables/disables the acquisition of scope shots
+                Possible values: 'run' or 'stop'
+            length: Defines the length of the recorded scope shot in 
+                number of samples
+            single: TODO
+            samplingrate: Defines the sampling rate of the scope
+                Possible values: '60 MHz', '30 MHz', '15 MHZ', '7.5 MHz',
+                    '3.75 MHz', '1.88 MHz', '938 kHz', '469 kHz', '234 kHz',
+                    '117 kHz', '58.6 kHz', '29.3 kHz', '14.6 kHz', '7.32 kHz',
+                    '3.66 kHz', '1.83 kHz'
+            duration: total recording time for each sample in seconds
+                (scope_length divided by scope_samplingrate in Hz)
+            streamrate: Defines the streaming rate of the scope
+                Possible values: '3.75 MHz', '1.88 MHz', '938 kHz', '469 kHz',
+                    '234 kHz', '117 kHz', '58.6 kHz', '29.3 kHz', '14.6 kHz',
+                    '7.32 kHz', '3.66 kHz', '1.83 kHz'
+            streamsample: only gettable for getting a stream sample of 
+                the scope
+            trig_signal: Selects the trigger source signal
+                Possible values:
+                    TODO
+            trig_delay: Trigger position relative to reference. A positive
+                delay results in less data being acquired before the trigger point,
+                a negative delay results in more data being acquired before the 
+                trigger point.
+            trig_enable: When triggering is enabled scope data are 
+                acquired every time the defined trigger condition is met.
+                Possible Values: 'ON' or 'OFF'
+            trig_holdoffseconds: is only existing in the beginning and
+                when scope_trig_holdoffmode is changed to 's'
+                Defines the time before the trigger is rearmed after a recording event.
+            trig_holdoffevents: is only existing when the scope_trig_holdoffmode
+                is changed to 'events'
+                Defines the trigger event number that will trigger the next 
+                recording after a recording event. A value of '1' will start
+                a recording for each trigger event.
+            trig_holdoffmode: Selects the holdoff mode as time in seconds
+                or number of events
+                Possible Values: 's' or 'events'
+            trig_level: defines the trigger level
+            trig_reference: Trigger reference position relative to the
+                acquired data. Default is 50% (0.5) which results in a
+                reference point in the middle of the acquired data.
+                Between 0 and 1
+            trig_slope: Sets on which slope of the trigger signal the 
+                scope should trigger.
+                Possible Values: 'None', 'Rise', 'Fall', 'Both'
+            trig_state: When 1, indicates that the trigger signal satifies
+                the conditions of the trigger. (only getable) TODO
+            segments_count: Specifies the number of segments to be recorded
+                in device memory. The maximum scope shot size is given by the 
+                available memory divided by the number of segments. This functionality
+                requires the DIG option.
+            segments: Enable segmented scope recording. This allows for
+                full bandwidth recording of scope shots with a minimum dead time
+                between individual shots. This functionality requires the DIG option.
+            trig_gating_enable: If enabled the trigger will be gated by 
+                the trigger gating input signal. This feature requires the DIG
+                option.
+                Possible Values: 'ON' or 'OFF'
+            trig_gating_source: Select the signal source used for trigger
+                gating if gating is enabled. This feature requires the DIG option.
+                Possible values: 'Trigger In 1 High', 'Trigger In 1 Low',
+                     'Trigger In 2 High', 'Trigger In 2 Low'
+            trig_hystabsolute: Defines the voltage the source signal 
+                must deviate from the trigger level before the trigger is
+                rearmed again. Set to 0 to turn it off. The sign is defined
+                by the Edge setting.   
+            trig_hystmode: Selects the mode to define the hysteresis strength.
+                The relative mode will work best over the full input range as 
+                long as the analog input signal does not suffer from excessive noise.
+                Possible Values: 'absolute', 'relative'
+            trig_hystrelative: Hysteresis relative to the adjusted full 
+                scale signal input range. A hysteresis value larger than 1
+                (100%) is allowed.
+            bwlimit: Selects between sample decimation(OFF) and sample
+                averaging(ON) for sample rates lower than the maximal
+                available sampling rate. Averaging avoids aliasing, but may
+                conceal signal peaks.
+    """
+    def __init__(self, parent: 'ZIMFLI', name: str):
+        super().__init__(parent, name)
 
+        # This parameter corresponds to the Run/Stop button in the GUI
+        #Enables the acqisition of the scope shots
+        self.add_parameter('runstop',
+                           label='run state',
+                           set_cmd=partial(self._parent._setter, 'scopes', 0, 
+                                           Mode.INT, 'enable'),
+                           get_cmd=partial(self._parent._getter, 'scopes', 0,
+                                           Mode.INT,'enable'),
+                           val_mapping={'run': 1, 'stop': 0},
+                           vals=vals.Enum('run', 'stop'),
+                           docstring=('This parameter corresponds to the '
+                                      'run/stop button in the GUI.'))
+        self.add_parameter('mode',
+                           label="mode: time or frequency domain.",
+                           set_cmd=partial(self._setter, 1, 0,
+                                           'mode'),
+                           get_cmd=partial(self._getter, 'mode'),
+                           val_mapping={'Time Domain': 1,
+                                        'Freq Domain FFT': 3},
+                           vals=vals.Enum('Time Domain', 'Freq Domain FFT'))
+        self.add_parameter('scope_channels',
+                           label='Recorded scope channels',
+                           set_cmd=partial(self._setter, 0, 0,
+                                           'channel'),
+                           get_cmd=partial(self._parent._getter, 'scopes', 0,
+                                           0, 'channel'),
+                           vals=vals.Enum(1, 2, 3))
+        self._samplingrate_codes = {'60 MHz': 0,
+                                    '30 MHz': 1,
+                                    '15 MHZ': 2,
+                                    '7.5 MHz': 3,
+                                    '3.75 MHz': 4,
+                                    '1.88 MHz': 5,
+                                    '938 kHz': 6,
+                                    '469 kHz': 7,
+                                    '234 kHz': 8,
+                                    '117 kHz': 9,
+                                    '58.6 kHz': 10,
+                                    '29.3 kHz': 11,
+                                    '14.6 kHz': 12,
+                                    '7.32 kHz': 13,
+                                    '3.66 kHz': 14,
+                                    '1.83 kHz': 15}
+        self.add_parameter('samplingrate',
+                           label="sampling rate",
+                           set_cmd=partial(self._setter, 0, 0,
+                                           'time'),
+                           get_cmd=partial(self._parent._getter, 'scopes', 0,
+                                           0, 'time'),
+                           val_mapping=self._samplingrate_codes)
+        self.add_parameter('streamrate',
+                           label="streaming rate",
+                           set_cmd=partial(self._parent._setter, 0, Mode.INT,
+                                           'stream/rate'),
+                           get_cmd=partial(self._parent._getter, 0, Mode.INT, 
+                                           'stream/rate'),
+                           val_mapping=self._samplingrate_codes[4:])
+        self.add_parameter('streamsample',
+                           label='Sample of the Scope stream',
+                           set_cmd=False,
+                           get_cmd=partial(self._parent._getter, 0, Mode.SAMPLE, 
+                                           'stream/sample'))
+        self.add_parameter('length',
+                           label="Length of scope trace (pts)",
+                           set_cmd=partial(self._setter, 0, 1,
+                                           'length'),
+                           get_cmd=partial(self._parent._getter, 'scopes', 0,
+                                           1, 'length'),
+                           vals=vals.Ints(4096, 128000000),
+                           get_parser=int)
+        self.add_parameter('duration',
+                           label="Scope trace duration",
+                           set_cmd=partial(self._setter, 0, 0,
+                                           'duration'),
+                           get_cmd=partial(self._getter,
+                                           'duration'),
+                           vals=vals.Numbers(2.27e-6,4.660e3),
+                           unit='s')
+        #This is not what the user manual says
+        #According to the user manual there are only 4 demodulators and moreover
+        #you can set more then just the inputselect, instead use two ScopeChannelChannels
+        #as submodule
+#        # Map the possible input sources to LabOne's IDs.
+#        # The IDs can be seen in log file of LabOne UI
+#        inputselect = {'Signal Input 1': 0,  # TODO
+#                       'Signal Input 2': 1,
+#                       'Trig Input 1': 2,
+#                       'Trig Input 2': 3,
+#                       'Aux Output 1': 4,
+#                       'Aux Output 2': 5,
+#                       'Aux Output 3': 6,
+#                       'Aux Output 4': 7,
+#                       'Aux In 1 Ch 1': 8,
+#                       'Aux In 1 Ch 2': 9,
+#                       'Osc phi Demod 4': 10,
+#                       'Osc phi Demod 8': 11,
+#                       'AU Cartesian 1': 112,
+#                       'AU Cartesian 2': 113,
+#                       'AU Polar 1': 128,
+#                       'AU Polar 2': 129,
+#                       }
+#        # Add all 8 demodulators and their respective parameters
+#        # to inputselect as well.
+#        # Numbers correspond to LabOne IDs, taken from UI log.
+#        for demod in range(1,9):
+#            inputselect['Demod {} X'.format(demod)] = 15+demod
+#            inputselect['Demod {} Y'.format(demod)] = 31+demod
+#            inputselect['Demod {} R'.format(demod)] = 47+demod
+#            inputselect['Demod {} Phase'.format(demod)] = 63+demod
+#
+#        for channel in range(1,3):
+#            self.add_parameter('scope_channel{}_input'.format(channel),
+#                            label=("Scope's channel {}".format(channel) +
+#                                   " input source"),
+#                            set_cmd=partial(self._scope_setter, 0, 0,
+#                                            ('channels/{}/'.format(channel-1) +
+#                                             'inputselect')),
+#                            get_cmd=partial(self._getter, 'scopes', 0, 0,
+#                                            ('channels/{}/'.format(channel-1) +
+#                                             'inputselect')),
+#                            val_mapping=inputselect,
+#                            vals=vals.Enum(*list(inputselect.keys()))
+#                            )
+        channels = ChannelList(self, "channels", ScopeChannelChannel)
+        for scopenum in range(1, 3):
+            name = 'channel{}'.format(scopenum)
+            channel = ScopeChannelChannel(self, name, scopenum)
+            channels.append(channel)
+            self.add_submodule(name, channel)
+        channels.lock()
+        self.add_submodule('channels', channels)
+        self.add_parameter('average_weight',
+                            label="Scope Averages",
+                            set_cmd=partial(self._setter, 1, 0,
+                                            'averager/weight'),
+                            get_cmd=partial(self._getter,
+                                            'averager/weight'),
+                            vals=vals.Numbers(min_value=1))
+        self.add_parameter('trig_enable',
+                            label="Enable triggering for scope readout",
+                            set_cmd=partial(self._parent._setter, 'scopes', 0,
+                                            0, 'trigenable'),
+                            get_cmd=partial(self._parent._getter, 'scopes', 0,
+                                            0, 'trigenable'),
+                            val_mapping={'ON': 0, 'OFF': 1}, #TODO: UserManual says it's this way ...?
+                            vals=vals.Enum('ON', 'OFF')
+                            )
+        trigger_source_dict = {'Signal Input 1': 0,
+                               'Current Input 1': 1,
+                               'Trigger 1': 2,
+                               'Trigger 2': 3,
+                               'Aux Output 1': 4,
+                               'Aux Output 2': 5,
+                               'Aux Output 3': 6,
+                               'Aux Output 4': 7,
+                               'Aux Input 1': 8,
+                               'Aux Input 2': 9,
+                               'Osc phi Demod 2': 10,
+                               'Osc phi Demod 4': 11}
+        if 'MF-DIG' in self._parent.options:
+            demodulators = {'Demod 1 X': 16,
+                           'Demod 2 X': 17,
+                           'Demod 3 X': 18,
+                           'Demod 4 X': 19,
+                           'Demod 1 Y': 32,
+                           'Demod 2 Y': 33,
+                           'Demod 3 Y': 34,
+                           'Demod 4 Y': 35,
+                           'Demod 1 R': 48,
+                           'Demod 2 R': 49,
+                           'Demod 3 R': 50,
+                           'Demod 4 R': 51,
+                           'Demod 1 phi': 64,
+                           'Demod 2 phi': 65,
+                           'Demod 3 phi': 66,
+                           'Demod 4 phi': 67,
+                           'PID 1 value': 80,
+                           'PID 2 value': 81,
+                           'PID 3 value': 82,
+                           'PID 4 value': 83,
+                           'PID 1 Shift': 144,
+                           'PID 2 Shift': 145,
+                           'PID 3 Shift': 146,
+                           'PID 4 Shift': 147}
+            trigger_source_dict.update(demodulators)
+        self.add_parameter('trig_signal',
+                            label="Trigger signal source",
+                            set_cmd=partial(self._parent._setter, 'scopes', 0,
+                                            0, 'trigchannel'),
+                            get_cmd=partial(self._parent._getter, 'scopes', 0,
+                                            0, 'trigchannel'),
+                            val_mapping=trigger_source_dict)
+
+        slopes = {'None': 0, 'Rise': 1, 'Fall': 2, 'Both': 3}
+
+        self.add_parameter('scope_trig_slope',
+                            label="Scope's triggering slope",
+                            set_cmd=partial(self._parent._setter, 'scopes', 0,
+                                            0, 'trigslope'),
+                            get_cmd=partial(self._parent._getter, 'scopes', 0,
+                                            0, 'trigslope'),
+                            val_mapping=slopes)
+
+        # TODO: figure out how value/percent works for the trigger level
+        self.add_parameter('scope_trig_level',
+                            label="Scope trigger level",
+                            set_cmd=partial(self._parent._setter, 'scopes', 0,
+                                            1, 'triglevel'),
+                            get_cmd=partial(self.parent._getter, 'scopes', 0,
+                                            1, 'triglevel'),
+                            unit='V',
+                            vals=vals.Numbers())
+
+        self.add_parameter('scope_trig_hystmode',
+                            label="Enable triggering for scope readout.",
+                            set_cmd=partial(self._parent._setter, 'scopes', 0,
+                                            0, 'trighysteresis/mode'),
+                            get_cmd=partial(self._parent._getter, 'scopes', 0,
+                                            0, 'trighysteresis/mode'),
+                            val_mapping={'absolute': 0, 'relative': 1},
+                            vals=vals.Enum('absolute', 'relative'))
+
+        self.add_parameter('scope_trig_hystrelative',
+                            label="Trigger hysteresis, relative value in %",
+                            set_cmd=partial(self._parent._setter, 'scopes', 0,
+                                            1, 'trighysteresis/relative'),
+                            get_cmd=partial(self._parent._getter, 'scopes', 0,
+                                            1, 'trighysteresis/relative'),
+                            # val_mapping= lambda x: 0.01*x,
+                            vals=vals.Numbers(0))
+
+        self.add_parameter('scope_trig_hystabsolute',
+                            label="Trigger hysteresis, absolute value",
+                            set_cmd=partial(self._parent._setter, 'scopes', 0,
+                                            1, 'trighysteresis/absolute'),
+                            get_cmd=partial(self._parent._getter, 'scopes', 0,
+                                            1, 'trighysteresis/absolute'),
+                            unit='V',
+                            vals=vals.Numbers(0, 20))
+
+        triggates = {'Trigger In 1 High': 0, 'Trigger In 1 Low': 1,
+                     'Trigger In 2 High': 2, 'Trigger In 2 Low': 3}
+        self.add_parameter('scope_trig_gating_source',
+                           label='Scope trigger gating source',
+                           set_cmd=partial(self._parent._setter, 'scopes', 0, 0,
+                                           'triggate/inputselect'),
+                           get_cmd=partial(self._parent._getter, 'scopes', 0, 0,
+                                           'triggate/inputselect'),
+                           val_mapping=triggates)
+
+        self.add_parameter('scope_trig_gating_enable',
+                           label='Scope trigger gating ON/OFF',
+                           set_cmd=partial(self._parent._setter, 'scopes', 0, 0,
+                                           'triggate/enable'),
+                           get_cmd=partial(self._parent._getter, 'scopes', 0, 0,
+                                           'triggate/enable'),
+                           val_mapping = {'ON': 1, 'OFF': 0},
+                           vals=vals.Enum('ON', 'OFF'))
+
+        self.add_parameter('scope_trig_holdoffmode',
+                            label="Scope trigger holdoff mode",
+                            set_cmd=partial(self._setter, 'scopes', 0,
+                                            0, 'trigholdoffmode'),
+                            get_cmd=partial(self._parent._getter, 'scopes', 0,
+                                            0, 'trigholdoffmode'),
+                            val_mapping={'s': 0, 'events': 1},
+                            vals=vals.Enum('s', 'events'))
+
+        #is added in the beginning because the default for holdoffmode should be 0
+        #when the mode is changed, this parameter will be deleted
+        self.add_parameter('scope_trig_holdoffseconds',
+                           label='Scope trigger holdoff',
+                           set_cmd=partial(self._setter, 0, Mode.INT,
+                                           'trigholdoff'),
+                           get_cmd=partial(self._parent._getter, 'scopes', 0,
+                                           Mode.INT, 'trigholdoff'),
+                           unit='s',
+                           vals=vals.Numbers(20e-6, 10))
+
+        self.add_parameter('scope_trig_reference',
+                           label='Scope trigger reference',
+                           set_cmd=partial(self._setter, 0, 1,
+                                           'trigreference'),
+                           get_cmd=partial(self._parent._getter, 'scopes', 0,
+                                           1, 'trigreference'),
+                           vals=vals.Numbers(0, 1))
+
+        # TODO: add validation. What's the minimal/maximal delay?
+        self.add_parameter('scope_trig_delay',
+                           label='Scope trigger delay',
+                           set_cmd=partial(self._setter, 0, 1,
+                                           'trigdelay'),
+                           get_cmd=partial(self._parent._getter, 'scopes', 0, 1,
+                                           'trigdelay'),
+                           unit='s',
+                           vals=vals.Numbers())
+
+        self.add_parameter('scope_segments',
+                           label='Enable/disable segments',
+                           set_cmd=partial(self._setter, 0, 0,
+                                           'segments/enable'),
+                           get_cmd=partial(self._parent._getter, 'scopes', 0,
+                                           0, 'segments/enable'),
+                           val_mapping={'OFF': 0, 'ON': 1},
+                           vals=vals.Enum('ON', 'OFF'))
+
+        self.add_parameter('scope_segments_count',
+                           label='No. of segments returned by scope',
+                           set_cmd=partial(self._parent._setter, 'scopes', 0, 1,
+                                           'segments/count'),
+                           get_cmd=partial(self._parent._getter, 'scopes', 0, 1,
+                                          'segments/count'),
+                           vals=vals.Ints(1, 32768),
+                           get_parser=int)
+            
+
+        self.add_function('scope_reset_avg',
+                          call_cmd=partial(self.scope.set,
+                                           'scopeModule/averager/restart', 1))
+                            
+    def _setter(self, scopemodule, mode, setting, value):
+        """
+        set_cmd for all scope parameters. The value and setting are saved in
+        a dictionary which is read by the Scope parameter's build_scope method
+        and only then sent to the instrument.
+        Args:
+            scopemodule (bool): Indicates whether this is a setting of the
+                scopeModule or not. 1: it is a scopeModule setting,
+                0: it is not.
+            mode (int): Indicates whether we are setting an int or a float.
+                0: int, 1: float. NOTE: Ignored if scopemodule==1.
+            setting (str): The setting, e.g. 'length'.
+            value (Union[int, float, str]): The value to set.
+        """
+        # Because setpoints need to be built
+        self.scope_correctly_built = False
+
+        # Some parameters are linked to each other in specific ways
+        # Therefore, we need special actions for setting these parameters
+
+        #needed to convert the sampling rate into Hz
+        SRtranslation = {'kHz': 1e3, 'MHz': 1e6, 'GHz': 1e9,  
+                         'khz': 1e3, 'Mhz': 1e6, 'Ghz': 1e9}
+
+        def setlength(value):
+            """
+            Sets the length of the scope via /dev.../scopes/0/length
+            and saves the value (number of samples) divided by scope_samplingrate 
+            in the parameter scope_duration
+            """
+            # TODO: add validation. The GUI seems to correct this value
+            SR_str = self.parameters['scope_samplingrate'].get()
+            (number, unit) = SR_str.split(' ')
+            SR = float(number)*SRtranslation[unit]  #sampling rate in Hz
+            self.parameters['scope_duration']._save_val(value/SR)
+            self.daq.setInt('/{}/scopes/0/length'.format(self.device), value)
+            
+        def setduration(value):
+            """
+            Sets the length of the scope by mulitplying the value with the 
+            samplingrate in Hz and also saves this value in the parameter scope_length
+            Saves the delivered value in scope_duration 
+            """
+            # TODO: validation? should be done in the parameter if possible
+            SR_str = self.parameters['scope_samplingrate'].get()
+            (number, unit) = SR_str.split(' ')
+            SR = float(number)*SRtranslation[unit]  #sampling rate in Hz
+            N = int(np.round(value*SR))     #number of samples per scope shot=scope_length
+            self.parameters['scope_length']._save_val(N)
+            self.daq.setInt('/{}/scopes/0/length'.format(self.device), N)
+            self.parameters['scope_duration']._save_val(value)
+            
+        def setholdoffmode(value):
+            """
+            Sets the parameter scope_trig_holdoffmode and creates a parameter 
+            scope_trig_holdoffseconds, if it is set to 's' and a parameter 
+            scope_trig_holdoffevents if it is set to 'events'
+            """
+            if value == 's' and 'scope_trig_holdoffseconds' not in self.parameters:
+                self.add_parameter('scope_trig_holdoffseconds',
+                                   label='Scope trigger holdoff',
+                                   set_cmd=partial(self._scope_setter, 0, Mode.INT,
+                                                   'trigholdoff'),
+                                   get_cmd=partial(self._getter, 'scopes', 0,
+                                                   Mode.INT, 'trigholdoff'),
+                                   unit='s',
+                                   vals=vals.Numbers(20e-6, 10)
+                                   )
+                if self.parameters['scope_trig_holdoffevents']:
+                    self.parameters.remove('scope_trig_holdoffevents')
+                self.daq.setInt('{}/scopes/0/trigholdoffmode'.format(self.device), 0)
+            elif value == 'events' and 'scope_trig_holdoffevent' not in self.parameters:
+                self.add_parameter('scope_trig_holdoffevents',
+                                   label='Scope trigger holdoff',
+                                   set_cmd=partial(self._scope_setter, 0, Mode.INT,
+                                                   'trigholdoffcount'),
+                                   get_cmd=partial(self._getter, 'scopes', 0, Mode.INT,
+                                                   'triggerholdoffcount'),
+                                   vals = vals.Ints())
+                if self.parameters['scope_trig_seconds']:
+                    self.parameters.remove('scope_trig_seconds')
+                self.daq.setInt('{}/scopes/0/trigholdoffmode'.format(self.device), 1)
+            
+
+        def setholdoffseconds(value):
+            """
+            Sets the trigholdoffmode to seconds and then sets the value of trigholdoff
+            """
+            self.parameters['scope_trig_holdoffmode'].set('s')
+            self.daq.setDouble('/{}/scopes/0/trigholdoff'.format(self.device),
+                               value)
+        
+        def setholdoffevents(value):
+            """
+            Sets the triggerholdoffmode to events and then sets the value of 
+            trigholdoffcount
+            """
+            self.parameters['scope_trig_holdoffevents'].set('events')
+            self.daq.setInt('/{}/scopes/0/trigholdoffcount'.format(self.device),
+                            value)
+            
+        def setsamplingrate(value):
+            """
+            Sets the samplingrate to value and also adjusts the scope_duration
+            """
+            # When the sample rate is changed, the number of points of the trace
+            # remains unchanged and the duration changes accordingly
+            newSR_str = value
+            (number, unit) = newSR_str.split(' ')
+            newSR = float(number)*SRtranslation[unit]   # new sampling rate in Hz
+            scopelength = self.parameters['scope_length'].get()
+            newduration = scopelength/newSR
+            self.parameters['scope_duration']._save_val(newduration)
+            self.daq.setInt('/{}/scopes/0/time'.format(self.device), value)
+
+        specialcases = {'length': setlength,
+                        'duration': setduration,
+                        'trigholdoffmode': setholdoffmode,
+                        'trigholdoff': setholdoffseconds,
+                        'trigholdoffcount': setholdoffevents,
+                        'time': setsamplingrate}
+
+        if setting in specialcases:
+            specialcases[setting](value)
+        else:
+            # We have two different parameter types: those under
+            # /scopes/0/ and those under scopeModule/
+            if scopemodule:
+                self.scope.set('scopeModule/{}'.format(setting), value)
+            elif mode == 0:
+                self.daq.setInt('/{}/scopes/0/{}'.format(self.device,
+                                                         setting), value)
+            elif mode == 1:
+                self.daq.setDouble('/{}/scopes/0/{}'.format(self.device,
+                                                            setting), value)
+        self.daq.sync()
+
+    def _getter(self, setting):
+        """
+        get_cmd for scopeModule parameters
+        """
+        # There are a few special cases
+        SRtranslation = {'kHz': 1e3, 'MHz': 1e6, 'GHz': 1e9,  # TODO
+                         'khz': 1e3, 'Mhz': 1e6, 'Ghz': 1e9}
+
+        def getduration():
+            """
+            Calculates a new value for scope_duration
+            """
+            SR_str = self.parameters['scope_samplingrate'].get()
+            (number, unit) = SR_str.split(' ')
+            SR = float(number)*SRtranslation[unit] #sampling rate in Hz
+            N = self.parameters['scope_length'].get() #number of samplings in the scope
+            duration = N/SR #duration for one sample
+            return duration
+
+        specialcases = {'duration': getduration}
+
+        if setting in specialcases:
+            value = specialcases[setting]()
+        else:
+            querystr = 'scopeModule/' + setting
+            returndict =  self.scope.get(querystr)
+            # The dict may have different 'depths' depending on the parameter.
+            # The depth is encoded in the setting string (number of '/')
+            keys = setting.split('/')[1:]
+
+            while keys != []:
+                key = keys.pop(0)
+                returndict = returndict[key]
+                rawvalue = returndict
+
+            if isinstance(rawvalue, np.ndarray) and len(rawvalue) == 1:
+                value = rawvalue[0]
+            elif isinstance(rawvalue, list) and len(rawvalue) == 1:
+                value = rawvalue[0]
+            else:
+                value = rawvalue
+
+        return value
 
 class Scope(MultiParameter):
     """
-    Parameter class for the ZI UHF-LI Scope Channel 1
-
+    Parameter class for the ZI MFLI Scope Channel
     The .get method launches an acquisition and returns a tuple of two
     np.arrays
     FFT mode is NOT supported.
-
     Attributes:
         names (tuple): Tuple of strings containing the names of the sweep
           signals (to be measured)
@@ -1293,7 +2000,7 @@ class Scope(MultiParameter):
     def __init__(self, name, instrument, **kwargs):
         # The __init__ requires that we supply names and shapes,
         # but there is no way to know what they could be known at this time.
-        # They are updated via build_scope.
+        # They are updated via prepare_scope.
         super().__init__(name, names=('',), shapes=((1,),), **kwargs)
         self._instrument = instrument
         self._scopeactions = []  # list of callables
@@ -1313,7 +2020,7 @@ class Scope(MultiParameter):
 
     def prepare_scope(self):
         """
-        Prepare the scope for a measurement. Must immediately preceed a
+        Prepare the scope for a measurement. Must immediately proceed a
         measurement.
         """
 
@@ -1323,17 +2030,17 @@ class Scope(MultiParameter):
         params = self._instrument.parameters
 
         # First figure out what the user has asked for
+        # activate Channel1 and/or Channel2
         chans = {1: (True, False), 2: (False, True), 3: (True, True)}
-        channels = chans[params['scope_channels'].get()]
+        channels = chans[params['scope_channels'].get()] #TODO what is this needed for?
 
-        npts = params['scope_length'].get()
+        sample_no = params['scope_length'].get()
         # Find out whether segments are enabled
-        if params['scope_segments'].get() == 'ON':
+        if 'scope_segments' in params and params['scope_segments'].get() == 'ON':
             segs = params['scope_segments_count'].get()
         else:
             segs = 1
 
-        # TODO Check number of demods
         inputunits = {'Signal Input 1': 'V',
                       'Signal Input 2': 'V',
                       'Trig Input 1': 'V',
@@ -1345,7 +2052,7 @@ class Scope(MultiParameter):
                       'Aux In 1 Ch 1': 'V',
                       'Aux In 1 Ch 2': 'V',
                       'Osc phi Demod 4': '°',
-                      'osc phi Demod 8': '°',
+                      'Osc phi Demod 8': '°',
                       'AU Cartesian 1': 'arb. un.',
                       'AU Cartesian 2': 'arb. un',
                       'AU Polar 1': 'arb. un.',
@@ -1368,7 +2075,9 @@ class Scope(MultiParameter):
                       'Demod 4 Phase': '°',
                       }
 
-        #TODO: what are good names?
+        #TODO: what are good names? Look up if these are the same names as used
+        #in ScopeChannel -> not really needed because the mapped values doesn't
+        #relly give more information
         inputnames = {'Signal Input 1': 'Sig. In 1',
                       'Signal Input 2': 'Sig. In 2',
                       'Trig Input 1': 'Trig. In 1',
@@ -1380,7 +2089,7 @@ class Scope(MultiParameter):
                       'Aux In 1 Ch 1': 'Aux. In 1 Ch 1',
                       'Aux In 1 Ch 2': 'Aux. In 1 Ch 2',
                       'Osc phi Demod 4': 'Demod. 4 Phase',  # TODO
-                      'osc phi Demod 8': 'Demod. 8 Phase',  # TODO
+                      'Osc phi Demod 8': 'Demod. 8 Phase',  # TODO
                       'AU Cartesian 1': 'AU Cartesian 1',  # TODO
                       'AU Cartesian 2': 'AU Cartesian 2',  # TODO
                       'AU Polar 1': 'AU Polar 1',  # TODO
@@ -1406,25 +2115,28 @@ class Scope(MultiParameter):
         # Make the basic setpoints (the x-axis)
         duration = params['scope_duration'].get()
         delay = params['scope_trig_delay'].get()
-        starttime = params['scope_trig_reference'].get()*0.01*duration + delay
+        #starttime = params['scope_trig_reference'].get()*0.01*duration + delay #TODO was ist das für ein Wert?
+        starttime = params['scope_trig_reference'].get()*duration + delay
         stoptime = starttime + duration
-
-        setpointlist = tuple(np.linspace(starttime, stoptime, npts))  # x-axis
-        spname = 'Time'
-        namestr = "scope_channel{}_input".format(1)
-        name1 = inputnames[params[namestr].get()]
-        unit1 = inputunits[params[namestr].get()]
-        namestr = "scope_channel{}_input".format(2)
-        name2 = inputnames[params[namestr].get()]
-        unit2 = inputunits[params[namestr].get()]
+        
+        setpointlist = tuple(np.linspace(starttime, stoptime, sample_no))  # x-axis
+        #setpoints for the messurement of one sample
+        channel1 = self._instrument.submodules["scope_channel1"]
+        #the value for input_select is mapped to a better name
+        input1 = inputnames[channel1.input_select()]
+        unit1 = inputunits[channel1.input_select()]
+        channel2 = self._instrument.submodules["scope_channel2"]
+        input2 = inputnames[channel2.input_select()]
+        unit2 = inputunits[channel2.input_select()]
 
         self.setpoints = ((tuple(range(segs)), (setpointlist,)*segs),)*2
         #self.setpoints = ((setpointlist,)*segs,)*2
         self.setpoint_names = (('Segments', 'Time'), ('Segments', 'Time'))
-        self.names = (name1, name2)
+        self.inputs = (input1, input2)
         self.units = (unit1, unit2)
         self.labels = ('Scope channel 1', 'Scope channel 2')
-        self.shapes = ((segs, npts), (segs, npts))
+        #number of segments per scope shot and number of samples
+        self.shapes = ((segs, sample_no), (segs, sample_no))
 
         self._instrument.daq.sync()
         self._instrument.scope_correctly_built = True
@@ -1432,15 +2144,14 @@ class Scope(MultiParameter):
     def get(self):
         """
         Acquire data from the scope.
-
         Returns:
             tuple: Tuple of two n X m arrays where n is the number of segments
                 and m is the number of points in the scope trace.
-
         Raises:
             ValueError: If the scope has not been prepared by running the
                 prepare_scope function.
         """
+        #used for timeout when measurements fail
         t_start = time.monotonic()
         log.info('Scope get method called')
 
@@ -1450,11 +2161,12 @@ class Scope(MultiParameter):
 
         # A convenient reference
         params = self._instrument.parameters
-        #
+        #channel1 and/or channel2 activated
         chans = {1: (True, False), 2: (False, True), 3: (True, True)}
         channels = chans[params['scope_channels'].get()]
 
         if params['scope_trig_holdoffmode'].get_latest() == 'events':
+            #TODO implement
             raise NotImplementedError('Scope trigger holdoff in number of '
                                       'events not supported. Please specify '
                                       'holdoff in seconds.')
@@ -1467,31 +2179,31 @@ class Scope(MultiParameter):
 
         # Calculate the time needed for the measurement. We often have failed
         # measurements, so a timeout is needed.
-        if params['scope_segments'].get() == 'ON':
+        if 'scope_segments' in params and params['scope_segments'].get() == 'ON':
             segs = params['scope_segments_count'].get()
         else:
             segs = 1
         deadtime = params['scope_trig_holdoffseconds'].get_latest()
         # We add one second to account for latencies and random delays
-        meas_time = segs*(params['scope_duration'].get()+deadtime)+1
-        npts = params['scope_length'].get()
+        meas_time = segs*(params['scope_duration'].get()+deadtime)+1 #time the meassurement takes
+        sample_no = params['scope_length'].get()
 
-        zi_error = True
+        zi_error = False
         error_counter = 0
         num_retries = 10
         timedout = False
         while (zi_error or timedout) and error_counter < num_retries:
             # one shot per trigger. This needs to be set every time
-            # a the scope is enabled as below using scope_runstop
+            # the scope is enabled as below using scope_runstop
             try:
                 # we wrap this in try finally to ensure that
                 # scope.finish is always called even if the
                 # measurement is interrupted
                 self._instrument.daq.setInt('/{}/scopes/0/single'.format(self._instrument.device), 1)
+                #put the scope in single shot mode
 
-
-                scope = self._instrument.scope
-                scope.set('scopeModule/clearhistory', 1)
+                scope = self._instrument.scope #scopeModule of the Instrument
+                scope.set('scopeModule/clearhistory', 1) 
 
                 # Start the scope triggering/acquiring
                 # set /dev/scopes/0/enable to 1
@@ -1500,7 +2212,7 @@ class Scope(MultiParameter):
                 self._instrument.daq.sync()
 
                 log.debug('Starting ZI scope acquisition.')
-                # Start something... hauling data from the scopeModule?
+                # Start acquiring data from the scope
                 scope.execute()
 
                 # Now perform actions that may produce data, e.g. running an AWG
@@ -1515,29 +2227,29 @@ class Scope(MultiParameter):
                     log.debug('Scope progress is {}'.format(progress))
                     progress = scope.progress()
                     time.sleep(0.1)  # This while+sleep is how ZI engineers do it
-                    if (time.time()-starttime) > 20*meas_time+1:
+                    if (time.time()-starttime) > 20*meas_time+1: # why 20*meas_time+1?
                         timedout = True
                         break
-                metadata = scope.get("scopeModule/*")
-                zi_error = bool(metadata['error'][0])
+                zi_error = bool(scope.getInt('scopeModule/error'))
 
                 # Stop the scope from running
                 params['scope_runstop'].set('stop')
 
-                if not (timedout or zi_error):
+                if timedout or zi_error:
+                    log.warning('[-] ZI scope acquisition attempt {} '
+                                'failed, Timeout: {}, Error: {}, '
+                                'retrying'.format(error_counter, timedout, 
+                                                  scope.getInt('scopeModule/error')))
+                    rawdata = None
+                    data = (None, None)
+                    error_counter += 1
+                else:
                     log.info('[+] ZI scope acquisition completed OK')
                     rawdata = scope.read()
                     if 'error' in rawdata:
                         zi_error = bool(rawdata['error'][0])
                     data = self._scopedataparser(rawdata, self._instrument.device,
-                                                 npts, segs, channels)
-                else:
-                    log.warning('[-] ZI scope acquisition attempt {} '
-                                'failed, Timeout: {}, Error: {}, '
-                                'retrying'.format(error_counter, timedout, zi_error))
-                    rawdata = None
-                    data = (None, None)
-                    error_counter += 1
+                                                 sample_no, segs, channels)
 
                 if error_counter >= num_retries:
                     log.error('[+] ZI scope acquisition failed, maximum number'
@@ -1557,15 +2269,13 @@ class Scope(MultiParameter):
     def _scopedataparser(rawdata, deviceID, scopelength, segments, channels):
         """
         Cast the scope return value dict into a tuple.
-
         Args:
             rawdata (dict): The return of scopeModule.read()
             deviceID (str): The device ID string of the instrument.
-            scopelength (int): The length of each segment
+            scopelength (int): The length of each segment in number of samples
             segments (int): The number of segments
             channels (tuple): Tuple of two bools controlling what data to return
                 (True, False) will return data for channel 1 etc.
-
         Returns:
             tuple: A 2-tuple of either None or np.array with dimensions
                 segments x scopelength.
@@ -1607,6 +2317,7 @@ class ZIMFLI(Instrument):
         """
 
         super().__init__(name, **kwargs)
+        self.device_ID = device_ID
         self.api_level = 5
         zisession = zhinst.utils.create_api_session(device_ID, self.api_level)
         (self.daq, self.device, self.props) = zisession
@@ -1617,6 +2328,11 @@ class ZIMFLI(Instrument):
         self.sweeper.set('sweep/device', self.device)
         self.scope = self.daq.scopeModule()
         self.scope.subscribe('/{}/scopes/0/wave'.format(self.device))
+        # Because setpoints need to be built
+        self.scope_correctly_built = False
+        self.zoomFFT = self.daq.zoomFFT()
+        self.zoomFFT.execute()
+        self.options = self.daq.getString('{}/features/options'.format(device_ID))
         ########################################
         # INSTRUMENT PARAMETERS
 
@@ -1637,7 +2353,7 @@ class ZIMFLI(Instrument):
         demodulatorchannels = ChannelList(self, "DemodulatorChannels", DemodulatorChannel,
                                           snapshotable=False)
         demodulator_no = 1
-        if 'MF-MD' in options:
+        if 'MF-MD' in self.options:
             demodulator_no = 4
         for demodchannum in range(1, demodulator_no+1):
             name = 'demod{}'.format(demodchannum)
@@ -2002,6 +2718,15 @@ class ZIMFLI(Instrument):
         ########################################
         # SCOPE PARAMETERS
         # default parameters:
+        
+        scopechannels = ChannelList(self, "ScopeChannels", ScopeChannelChannel)
+        for scopenum in range(1, 3):
+            name = 'scope_channel{}'.format(scopenum)
+            scopechannel = ScopeChannelChannel(self, name, scopenum)
+            scopechannels.append(scopechannel)
+            self.add_submodule(name, scopechannel)
+        scopechannels.lock()
+        self.add_submodule('scope_channels', scopechannels)
 
         # This parameter corresponds to the Run/Stop button in the GUI
         self.add_parameter('scope_runstop',
