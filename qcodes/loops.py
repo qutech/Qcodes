@@ -337,7 +337,7 @@ class BufferedLoop(Loop):
     device. So the loop will be run on the hardware.
     """
     
-    def __init__(self, sweep_values, station=None):
+    def __init__(self, sweep_values, station=None, run_program_cmd=None):
         """
         Creates a BufferedLoop
         
@@ -348,6 +348,8 @@ class BufferedLoop(Loop):
         
         if not isinstance(sweep_values.parameter, BufferedSweepableParameter):
             raise TypeError("The sweep values of a buffered loop must sweep a buffered parameter.")
+        
+        self.run_program_cmd = run_program_cmd
         
     def _copy(self):
         out = BufferedLoop(self.sweep_values)
@@ -394,6 +396,7 @@ class BufferedLoop(Loop):
             actions = [self.nested_loop.each(*actions)]
         
         return BufferedActiveLoop(self.sweep_values, *actions,
+                                  run_program_cmd=self.run_program_cmd,
                                   then_actions=self.then_actions, station=self.station,
                                   progress_interval=self.progress_interval,
                                   bg_task=self.bg_task, bg_final_task=self.bg_final_task, 
@@ -1028,7 +1031,7 @@ class BufferedActiveLoop(ActiveLoop):
     the device. So the loop will be run on the hardware.
     """
 
-    def __init__(self, sweep_values, *actions, then_actions=(),
+    def __init__(self, sweep_values, *actions, run_program_cmd=None, then_actions=(),
                  station=None, progress_interval=None, bg_task=None,
                  bg_final_task=None, bg_min_delay=None):
         """
@@ -1037,6 +1040,8 @@ class BufferedActiveLoop(ActiveLoop):
         super().__init__(sweep_values, 0, *actions, then_actions=then_actions,
                          station=station, progress_interval=progress_interval, bg_task=bg_task,
                          bg_final_task=bg_final_task, bg_min_delay=bg_min_delay)
+        
+        self.run_program_cmd = run_program_cmd
 
     def _set_buffered_sweep(self):
         """
@@ -1087,6 +1092,10 @@ class BufferedActiveLoop(ActiveLoop):
         if len(self.actions) == 1 and isinstance(self.actions[0], BufferedActiveLoop):
             self.actions[0]._arm_measurement()
 
+    def _run_program(self):
+        if self.run_program_cmd is not None:
+            self.run_program_cmd()
+
     def _run_loop(self, first_delay=0, action_indices=(),
                   loop_indices=(), current_values=(),
                   **ignore_kwargs):
@@ -1115,6 +1124,8 @@ class BufferedActiveLoop(ActiveLoop):
             
             self._configure_measurement(measurement_windows) # configures the measurement windows
             self._arm_measurement() # arms the hardware for the measurement
+            
+            self._run_program() # call user defined run_program-function
             
         # at the beginning of the loop, the time to wait after setting
         # the loop parameter may be increased if an outer loop requested longer

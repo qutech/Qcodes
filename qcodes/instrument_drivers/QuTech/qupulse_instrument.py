@@ -695,6 +695,7 @@ class QuPulseDACInstrument(Instrument):
             The measurement value(s) of the current measurement step. The shape
             of the value(s) depends on the operation.
         """
+        
         if not self._data:
             parameters = []
             for p in self.parameters.values():
