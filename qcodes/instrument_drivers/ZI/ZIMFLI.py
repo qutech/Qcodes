@@ -22,6 +22,7 @@ from qcodes.utils import validators as vals
 
 log = logging.getLogger(__name__)
 
+
 class Mode(IntEnum):
     """
     Mapping the mode for the ZIMFLI._setter and ._getter methods
@@ -29,6 +30,7 @@ class Mode(IntEnum):
     INT = 0
     DOUBLE = 1
     SAMPLE = 2
+    
 
 class AUXInputChannel(InstrumentChannel):
     """
@@ -81,6 +83,7 @@ class AUXInputChannel(InstrumentChannel):
                                get_cmd=partial(self._parent._getter, 'auxins',
                                                channum-1, Mode.DOUBLE, 'values/{}'.format(i)),
                                set_cmd=False)
+
 
 class AUXOutputChannel(InstrumentChannel):
     """"
@@ -204,6 +207,7 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, 1, 'value'),
                            set_cmd=False
                            )
+                           
                            
 class DemodulatorChannel(InstrumentChannel):
     """
@@ -448,6 +452,7 @@ class DemodulatorChannel(InstrumentChannel):
                                snapshot_value=False,
                                unit=unit)
                                
+                               
 class SignalInputChannel(InstrumentChannel):
     """
     Combines all the Parameters from the parent concerning the signal input
@@ -586,6 +591,7 @@ class SignalInputChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'trigger'),
                            vals=vals.Ints() )
                            
+                           
 class SignalOutputChannel(InstrumentChannel):
     """
     Combines all the parameters concerning the signal output
@@ -639,7 +645,7 @@ class SignalOutputChannel(InstrumentChannel):
                            label='Enable signal output range.',
                            set_cmd=partial(self._setter,
                                            Mode.INT, 'autorange'),
-                           get_cmd=partial(self._sigout_getter,
+                           get_cmd=partial(self._getter,
                                            channum-1, Mode.INT, 'autorange'),
                            val_mapping={'ON': 1, 'OFF': 0},
                            vals=vals.Enum('ON', 'OFF') )
@@ -657,7 +663,7 @@ class SignalOutputChannel(InstrumentChannel):
                            label='Switch to turn on 50 Ohm impedance',
                            set_cmd=partial(self._setter,
                                            Mode.INT, 'imp50'),
-                           get_cmd=partial(self.parent._getter,
+                           get_cmd=partial(self._parent._getter,
                                            channum-1, Mode.INT, 'imp50'),
                            val_mapping={'ON': 1, 'OFF': 0},
                            vals=vals.Enum('ON', 'OFF') )
@@ -666,7 +672,7 @@ class SignalOutputChannel(InstrumentChannel):
                            label='Signal output offset',
                            set_cmd=partial(self._setter,
                                            Mode.DOUBLE, 'offset'),
-                           get_cmd=partial(self.parent._getter,
+                           get_cmd=partial(self._parent._getter,
                                            channum-1, Mode.DOUBLE, 'offset'),
                            vals=vals.Numbers(-1.5, 1.5), #why is this only between -1.5 and 1.5?
                            unit='V')
@@ -721,13 +727,33 @@ class SignalOutputChannel(InstrumentChannel):
         #how many are these?
         self.add_parameter('enable',
                            label="Enable signal output's amplitude.",
-                           set_cmd=partial(self._setter,
-                                           0, outputampenable[channum]),
-                           get_cmd=partial(self._sigout_getter,
-                                           channum-1, 0,
+                           set_cmd=partial(self._setter, Mode.INT,
+                                           outputampenable[channum]),
+                           get_cmd=partial(self._getter,
+                                           channum-1, Mode.INT,
                                            outputampenable[channum]),
                            val_mapping={'ON': 1, 'OFF': 0},
                            vals=vals.Enum('ON', 'OFF') )
+                           
+    def _getter(self, number, mode, setting):
+        """
+        Function to query the settings of signal outputs. Specific setter
+        function is needed as parameters depend on each other and need to be
+        checked and updated accordingly.
+
+        Args:
+            number (int):
+            mode (bool): Indicating whether we are asking for an int or double
+            setting (str): The module's setting to set.
+        """
+
+        querystr = '/{}/sigouts/{}/{}'.format(self.device, number, setting)
+        if mode == 0:
+            value = self.daq.getInt(querystr)
+        if mode == 1:
+            value = self.daq.getDouble(querystr)
+
+        return value
                             
     def _setter(self, mode: int, setting: str, value: Union[int, float]) -> None:
         """
@@ -735,7 +761,7 @@ class SignalOutputChannel(InstrumentChannel):
         needed as parameters depend on each other and need to be checked and
         updated accordingly.
         Args:
-            mode: Indicating whether we want to set an int (0) or double (1)
+            mode: Indicating whether we want to set an int (0 = Mode.INT) or double (1 = Mode.DOUBLE)
             setting (str): The module's setting to set.
             value (Union[int, float]): The value to set the setting to.
         """
@@ -865,6 +891,7 @@ class SignalOutputChannel(InstrumentChannel):
             for f in changing_param[setting]:
                 f()
                 
+                
 class TriggerInputChannel(InstrumentChannel):
     """
     Combines all the Parameters concerning the TriggerInput
@@ -901,6 +928,7 @@ class TriggerInputChannel(InstrumentChannel):
                                            channum-1, Mode.DOUBLE, 'level'),
                            unit='V',
                            vals=vals.Numbers())
+                           
                            
 class TriggerOutputChannel(InstrumentChannel):
     """
@@ -957,6 +985,7 @@ class TriggerOutputChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'source'), 
                            val_mapping=sources,
                            vals=vals.Enum(*list(sources.keys())))
+                           
                            
 class DIOChannel(InstrumentChannel):
     """
@@ -1034,6 +1063,7 @@ class DIOChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'output'),
                            vals=vals.Ints())
                            
+                           
 class MDSChannel(InstrumentChannel):
     """
     Combines all the Parameters concerning the multi device sync
@@ -1063,6 +1093,7 @@ class MDSChannel(InstrumentChannel):
                            set_cmd=partial(self.setter, 'timestamp', Mode.INT),
                            get_cmd=partial(self.getter, 'timestamp', Mode.INT),
                            vals=vals.Ints())
+        
         
 class PIDChannel(InstrumentChannel):
     """
@@ -1367,6 +1398,411 @@ class PIDChannel(InstrumentChannel):
         ret += str(self._parent.daq.setInt('{}/pid/{}/outputchannel'.format(self._parent.device, 
                                            channum)))
         return ret
+    
+    
+class SweeperChannel(InstrumentChannel):
+    """
+    Combines all the parameters for the sweeper module.
+    Parameters:
+            param: the device parameter to be swept
+                Possible values: 'Aux Out 1 Offset', 'Aux Out 2 Offset',
+                    'Aux Out 3 Offset', 'Aux Out 4 Offset', 'Demod 1 Phase Shift'
+                    'Osc 1 Frequency', 'Osc 2 Frequency', 'Output 1 Amplitude 4',
+                    'Output 1 Offset', 'Output 2 Amplitude 8', 'Output 2 Offset'
+                for devices with the MF-MD option there are also the values:
+                    'Demod 2 Phase Shift', 'Demod 3 Phase Shift', 'Demod 4 Phase Shift'
+            start: start value of the sweep parameter
+            stop: stop value of the sweep parameter
+            samplecount: number of measurement points to set the sweep on
+            endless: Enable Endless mode; run the sweeper continuously.
+            remaining_time: Read only: Reports the remaining time of the current 
+                sweep. A valid number is only displayed once the sweeper has
+                been started. An undefined sweep time is indicated as NAN.
+            averaging_samples: Sets the number of data samples per sweeper parameter point
+                that is considered in the measurement. The maximum of this value
+                and averaging_time is taken as the effective calculation time.
+                The actual number of samples is the maximum of this value and the
+                averaging_time times the relevant sample rate.
+            averaging_time: Sets the effective measurement time per sweeper parameter
+                point that is considered in the measurement. The maximum between
+                of this value and averaging_samples is taken as the effective
+                calculation time.
+                The actual number of samples is the maximum of this value times the
+                relevant sample rate and the sweeper_averaging_samples.
+            bandwidth_mode: Specify how the sweeper should specify the bandwidth 
+                of each measurement point. Automatic is recommended in particular
+                for logarithmic sweeps and assures the whole spectrum is covered.
+                Possible values:
+                    current: the sweeper module leaves the demodulator bandwidth
+                        settings entirely untouched
+                    fixed: use the value from the parameter bandwidth
+                    automatic: bandwidth is set automatically
+            bandwidth_overlap: If enabled the bandwidth of a sweep point may overlap
+                with the frequency of neighboring sweep points. The effective
+                bandwidth is only limited by the maximal bandwidth setting and 
+                omega suppression. As a result, the bandwidth is independent of
+                the number of sweep points. For frequency response analysis bandwidth
+                overlap should be enabled to achieve maximal sweep speed.
+            bandwidth: This is the NEP bandwidth used by the sweeper if 
+                band_width_mode is set to 'fixed'. If band_width_mode is either
+                'auto' or 'current', this value is ignored.
+            order: Defines the filter roll off to use when bandwidth_mode is set
+                to fixed. Valid values are between 1 (6 dB/octave) and 8 (48 dB/
+                octave). 
+            max_bandwidth: Specifies the maximum bandwidth used when bandwidth_mode
+                is set to auto. The default is 1.25 MHz.
+            omega_supression: Damping of omega and 2omega components when 
+                bandwidth_mode is set to auto. Default is 40dB in favor of sweep
+                speed. Use a higher value for strong offset values or 
+                3omega measurement methods.
+            loopcount: The number of sweeps to perform.
+            phaseunwrap: Enable unwrapping of slowly changing phase evolutions 
+                around the +/-180 degree boundary.
+                Possible values: 'ON', 'OFF'
+            sinc_filter: Enables the sinc filter if the sweep frequency is below
+                50 Hz. This will improve the sweep speed at low frequencies as 
+                omega components do not need to be suppressed by the normal low
+                pass filter.
+            mode: Selects the scanning type
+                Possible values:
+                    sequential: incremental scanning from start to stop value 
+                    binary: Nonsequential sweep continues increase of resolution
+                        over entire range
+                    bidirectional: Sequential sweep from Start to Stop value and
+                        back to Start again
+                    reverse: reverse sequential scanning from stop to start value
+            settling_time: Minimum wait time in seconds between setting the new
+                sweep parameter value and the start of the measurement. The maximum
+                between this value and settling_tc is taken as effective settling 
+                time. Note that the filter settings may result in a longer actual
+                waiting/settling time.
+            settling_inaccuracy: Demodulator filter settling inaccuracy defining
+                the wait time between a sweep parameter change and recording of 
+                the next sweep point. The settling time is calculated as the time
+                required to attain the specified remaining proportion [1e-13, 0.1]
+                of an incoming step function. Typical inaccuracy values: 10m for
+                highest sweep speed for large signals, 100u for precise amplitude
+                measurements, 100n for precise noise measurements. Depending on 
+                the order of the demodulator filter the settling inaccuracy will
+                define the number of filter time constants the sweeper has to wait.
+                The maximum between this value and the settling time is taken as
+                wait time until the next sweep point is recorded.
+            settling_tc: Minimum wait time in factors of the time constant (TC)
+                between setting the new sweep parameter value and the start of
+                the measurement. This filter settling time is preferably configured
+                via settling_inaccuracy. The maximum between this value and 
+                settling_time is taken as effective settling time.
+            xmapping: Selects the spacing of the grid used by param
+                Possible values:
+                    linear: linear distribution of sweep parameter values
+                    logarithmic: logarithmic distribution of sweep parameter values
+            history_length: Maximum number of entries stored in the measurement
+                history.
+            clear_history: Remove all records from the history list
+                Possible values: 'ON', 'OFF'
+            directory: The directory to which sweeper measurements are saved to
+                via save().
+            fileformat: The format of the file for saving sweeper measurements.
+                Possible values: Matlab, CSV
+    """
+    def __init__(self, parent: 'ZIMFLI', name: str):
+        super().__init__(parent, name)
+        # val_mapping for sweeper_param parameter
+        sweepparams = {'Aux Out 1 Offset': 'auxouts/0/offset',  # TODO which other values may be sensefull to sweep?
+                       'Aux Out 2 Offset': 'auxouts/1/offset',
+                       'Aux Out 3 Offset': 'auxouts/2/offset',
+                       'Aux Out 4 Offset': 'auxouts/3/offset',
+                       'Demod 1 Phase Shift': 'demods/0/phaseshift',
+                       #'Demod 5 Phase Shift': 'demods/4/phaseshift', #there are only 4 demodulators?
+                       #'Demod 6 Phase Shift': 'demods/5/phaseshift',
+                       #'Demod 7 Phase Shift': 'demods/6/phaseshift',
+                       #'Demod 8 Phase Shift': 'demods/7/phaseshift',
+                       'Osc 1 Frequency': 'oscs/0/freq',
+                       'Osc 2 Frequency': 'oscs/1/freq',
+                       'Output 1 Amplitude 4': 'sigouts/0/amplitudes/3',
+                       'Output 1 Offset': 'sigouts/0/offset',
+                       'Output 2 Amplitude 8': 'sigouts/1/amplitudes/7',
+                       'Output 2 Offset': 'sigouts/1/offset'
+                       }
+        if 'MF-MD' in _parent.options: #TODO is the option really named like that?
+            demodulators = {'Demod 2 Phase Shift': 'demods/1/phaseshift',
+                            'Demod 3 Phase Shift': 'demods/2/phaseshift',
+                            'Demod 4 Phase Shift': 'demods/3/phaseshift'}
+            sweepparams.update(demodulators)
+        self.add_parameter('param',
+                           label='Parameter to sweep (sweep x-axis)',
+                           set_cmd=partial(self._setter, 'sweep/gridnode'),
+                           get_cmd=partial(self._getter, 'sweep/gridnode'),
+                           val_mapping=sweepparams,)
+        self.add_parameter('start',
+                            label='Start value of the sweep',
+                            set_cmd=partial(self._setter, 'sweep/start'),
+                            get_cmd=partial(self._getter, 'sweep/start'),
+                            vals=vals.Numbers())
+        self.add_parameter('stop',
+                            label='Stop value of the sweep',
+                            set_cmd=partial(self._setter, 'sweep/stop'),
+                            get_cmd=partial(self._getter, 'sweep/stop'),
+                            vals=vals.Numbers())
+        self.add_parameter('samplecount',
+                            label='Length of the sweep (pts)',
+                            set_cmd=partial(self._setter, 'sweep/samplecount'),
+                            get_cmd=partial(self._getter, 'sweep/samplecount'),
+                            vals=vals.Ints(0, 2**64-1))
+        self.add_parameter('endless',
+                           label='enable endless sweep',
+                           set_cmd=partial(self._setter, 'sweep/endless'),
+                           get_cmd=partial(self._getter, 'sweep/endless'),
+                           val_mapping={'ON': 1, 'OFF': 0})
+        self.add_parameter('remaining_time',
+                           label='remaining time of current sweep',
+                           set_cmd=False,
+                           get_cmd=partial(self._getter, 'sweep/remainingtime'),
+                           unit='s')
+        self.add_parameter('averaging_samples',
+                           label=('Minimal no. of samples to average at ' +
+                                  'each sweep point'),
+                           set_cmd=partial(self._setter, 'sweep/averaging/sample'),
+                           get_cmd=partial(self._getter,'sweep/averaging/sample'),
+                           vals=vals.Ints(1, 2**64-1))
+        self.add_parameter('averaging_time',
+                           label=('Minimal averaging time'),
+                           set_cmd=partial(self._setter, 'sweep/averaging/tc'),
+                           get_cmd=partial(self._getter, 'sweep/averaging/tc'),
+                           unit='s',
+                           vals=vals.Numbers())
+        self.add_parameter('bandwidth_mode', #before BWmode
+                           label='bandwidth control mode',
+                           set_cmd=partial(self._setter, 'sweep/bandwidthcontrol'),
+                           get_cmd=partial(self._getter, 'sweep/bandwidthcontrol'),
+                           val_mapping={'auto': 2, 'fixed': 1, 'current': 0})
+        self.add_parameter('bandwidth_overlap',
+                           label='overlapping bandwidth between neighbouring'
+                                   +'sweep point',
+                           set_cmd=partial(self._setter, 'sweep/bandwidthoverlap'),
+                           get_cmd=partial(self._getter, 'sweep/bandwidthoverlap'),
+                           val_mapping={'ON': 1, 'OFF': 0})
+        self.add_parameter('bandwidth', #before BW
+                           label='Fixed bandwidth sweeper bandwidth (NEP)',
+                           set_cmd=partial(self._setter, 'sweep/bandwidth'),
+                           get_cmd=partial(self._getter, 'sweep/bandwidth'),
+                           unit='Hz',
+                           vals=vals.Numbers())
+        self.add_parameter('order',
+                           label='Sweeper filter order',
+                           set_cmd=partial(self._setter, 'sweep/order'),
+                           get_cmd=partial(self._getter, 'sweep/order'),
+                           vals=vals.Ints(1, 8))
+        self.add_parameter('max_bandwidth',
+                           label='maximum bandwidth',
+                           set_cmd=partial(self._setter, 'sweep/maxbandwidth'),
+                           get_cmd=partial(self._getter, 'sweep/maxbandwidth'),
+                           unit = 'Hz',
+                           vals=vals.Numbers())
+        self.add_parameter('omega_suppression',
+                           label='damping of omega',
+                           set_cmd=partial(self._setter, 'sweep/omegasuppression'),
+                           get_cmd=partial(self._getter, 'sweep/omegasuppression'),
+                           unit='dB',
+                           vals=vals.Numbers())
+        self.add_parameter('loopcount',
+                           label='no. of sweeps',
+                           set_cmd=partial(self._setter, 'sweep/loopcount'),
+                           get_cmd=partial(self._getter, 'sweep/loopcount'),
+                           vals=vals.Ints(0, 2**64-1))
+        self.add_parameter('phaseunwrap',
+                           label='unwrapping of slowly changing phase evolution',
+                           set_cmd=partial(self._setter, 'sweep/phaseunwrap'),
+                           get_cmd=partial(self._getter, 'sweep/phaseunwrap'),
+                           val_mapping={'ON': 1, 'OFF': 0})
+        self.add_parameter('sinc_filter',
+                           label='enable sinc filter',
+                           set_cmd=partial(self._setter, 'sweep/sincfilter'),
+                           get_cmd=partial(self._getter, 'sweep/sincfilter'),
+                           val_mapping={'ON': 1, 'OFF': 0})
+        # val_mapping for mode parameter
+        sweepmodes = {'sequential': 0,
+                      'binary': 1,
+                      'biderectional': 2,
+                      'reverse': 3}
+        self.add_parameter('mode',
+                            label='Sweep mode',
+                            set_cmd=partial(self._setter, 'sweep/scan'),
+                            get_cmd=partial(self._getter, 'sweep/scan'),
+                            val_mapping=sweepmodes)
+        self.add_parameter('settling_time',
+                           label=('Minimal settling time for the sweeper'),
+                           set_cmd=partial(self._setter, 'sweep/settling/time'),
+                           get_cmd=partial(self._getter, 'sweep/settling/time'),
+                           vals=vals.Numbers(0),
+                           unit='s')
+        self.add_parameter('settling_inaccuracy',
+                           label='Demodulator filter settling inaccuracy',
+                           set_cmd=partial(self._setter, 'sweep/settling/inaccuracy'),
+                           get_cmd=partial(self._getter, 'sweep/settling/inaccuracy'),
+                           vals=vals.Numbers())
+        self.add_parameter('settling_tc',
+                           label='Sweep filter settling time',
+                           get_cmd=partial(self._getter, 'sweep/settling/tc'))
+        self.add_parameter('xmapping',
+                           label='Sweeper x mapping',
+                           set_cmd=partial(self._setter, 'sweep/xmapping'),
+                           get_cmd=partial(self._getter, 'sweep/xmapping'),
+                           val_mapping={'linear': 0, 'logarithmic': 1})
+        self.add_parameter('history_length',
+                           label='number of entries stored in measurement history',
+                           set_cmd=partial(self._setter, 'sweep/historylength'),
+                           get_cmd=partial(self._getter, 'sweep/historylength'),
+                           vals=vals.Ints(0, 2**64-1))
+        self.add_parameter('clear_history',
+                           label='Remove all records from the history list',
+                           set_cmd=partial(self._setter, 'sweep/clearhistory'),
+                           get_cmd=partial(self._getter, 'sweep/clearhistory'),
+                           val_mapping={'ON': 1, 'OFF': 0})
+        self.add_parameter('directory',
+                           label='directory to which measurements are saved',
+                           set_cmd=partial(self._setter, 'sweep/directory'),
+                           get_cmd=partial(self._getter, 'sweep/directory'))
+        self.add_parameter('fileformat',
+                           label='format of the saving files',
+                           set_cmd=partial(self._setter, 'sweep/filefomat'),
+                           get_cmd=partial(self._getter, 'sweep(fileformat'),
+                           val_mapping={'Matlab': 0, 'CSV': 1})
+        ########################################################################################
+        # val_mapping for sweeper_units parameter
+        sweepunits = {'Aux Out 1 Offset': 'V',  # TODO
+                      'Aux Out 2 Offset': 'V',
+                      'Aux Out 3 Offset': 'V',
+                      'Aux Out 4 Offset': 'V',
+                      'Demod 1 Phase Shift': 'degrees',
+                      'Demod 2 Phase Shift': 'degrees',
+                      'Demod 3 Phase Shift': 'degrees',
+                      'Demod 4 Phase Shift': 'degrees',
+                      'Demod 5 Phase Shift': 'degrees',
+                      'Demod 6 Phase Shift': 'degrees',
+                      'Demod 7 Phase Shift': 'degrees',
+                      'Demod 8 Phase Shift': 'degrees',
+                      'Osc 1 Frequency': 'Hz',
+                      'Osc 2 Frequency': 'Hz',
+                      'Output 1 Amplitude 4': 'V',
+                      'Output 1 Offset': 'V',
+                      'Output 2 Amplitude 8': 'V',
+                      'Output 2 Offset': 'V'
+                      }
+        self.add_parameter('units',
+                           label='Units of sweep x-axis',
+                           get_cmd=self.parameters['param'].get(),
+                           get_parser=lambda x:sweepunits[x])
+        self.add_parameter('sweeptime',
+                           label='Expected sweep time',
+                           unit='s',
+                           get_cmd=self._get_sweep_time)
+        self.add_parameter('sweeper_timeout',
+                           label='Sweep timeout',
+                           unit='s',
+                           initial_value=600,
+                           get_cmd=None, set_cmd=None)
+
+    def _setter(self, setting, value):
+        """
+        set_cmd for all sweeper parameters. The value and setting are saved in
+        a dictionary which is read by the Sweep parameter's build_sweep method
+        and only then sent to the instrument.
+        """
+        key = '/'.join(setting.split('/')[1:])
+        self._parent._sweepdict[key] = value
+        self._parent.sweep_correctly_built = False
+
+    def _getter(self, setting):
+        """
+        General get_cmd for sweeper parameters
+        The built-in sweeper.get command returns a dictionary, but we want
+        single values.
+        Args:
+            setting (str): the path used by ZI to describe the setting,
+            e.g. 'sweep/settling/time'
+        """
+        # TODO: Should this look up in _sweepdict rather than query the
+        # instrument?
+        returndict = self._parent.sweeper.get(setting)  # this is a dict
+        # The dict may have different 'depths' depending on the parameter.
+        # The depth is encoded in the setting string (number of '/')
+        keys = setting.split('/')[1:]
+        while keys != []:
+            key = keys.pop(0)
+            returndict = returndict[key]
+        rawvalue = returndict
+        if (isinstance(rawvalue, np.ndarray) or isinstance(rawvalue, list))\
+        and len(rawvalue) == 1:
+            value = rawvalue[0]
+        else:
+            value = rawvalue
+        return value
+    
+    def _get_sweep_time(self):
+        """
+        get_cmd for the sweeptime parameter.
+        Note: this calculation is only an estimation and not precise to more
+        than a few percent.
+        Returns:
+            Union[float, None]: None if the bandwidthcontrol setting is
+              'auto' (then all bets are off), otherwise a time in seconds.
+        Raises:
+            ValueError: if no signals are added to the sweep
+        """
+        # Possible TODO: cut down on the number of instrument
+        # queries. what does this mean?
+        if self._parent._sweeper_signals == []:
+            raise ValueError('No signals selected! Can not find sweep time.')
+        mode = self.sweeper_BWmode.get()
+        # The effective time constant of the demodulator depends on the
+        # sweeper/bandwidthcontrol setting.
+        # If this setting is 'current', the largest current
+        # time constant of the involved demodulators is used
+        # If the setting is 'fixed', the NEP BW specified under
+        # sweep/bandwidth is used. The filter order is needed to convert
+        # the NEP BW to a time constant
+        demods = set([sig.split('/')[3] for sig in self._sweeper_signals]) #what should that do?
+        rates = []
+        for demod in demods:
+            rates.append(self._parent._getter('demods', demod, 1, 'rate')) #get the rate of the demodulators
+        rate = min(rates)
+        if mode == 'current':
+            tcs = []
+            for demod in demods:
+                tcs.append(self._parent._getter('demods', demod, 1, 'timeconstant'))
+            tau_c = max(tcs)
+        elif mode == 'fixed':
+            order = self.order()
+            BW = self.bandwidth()
+            tau_c = self.NEPBW_to_timeconstant(BW, order)
+        elif mode == 'auto':
+            return None
+        settlingtime = max(self.parameters['settling_tc'].get()*tau_c,
+                           self.parameters['settling_time'].get())
+        averagingtime = max(self.parameters['averaging_time'].get()*tau_c*rate,
+                            self.parameters['averaging_samples'].get())/rate
+        time_est = (settlingtime+averagingtime)*self.sweeper_samplecount.get()
+        return time_est
+
+    #@staticmethod why should this be static?
+    def NEPBW_to_timeconstant(NEPBW, order):  # TODO
+        """
+        Helper function to translate a NEP BW and a filter order
+        to a filter time constant. Meant to be used when calculating
+        sweeper sweep times.
+        Note: precise only to within a few percent.
+        Args:
+            NEPBW (float): The NEP bandwidth in Hz
+            order (int): The filter order
+        Returns:
+            float: The filter time constant in s.
+        """
+        const = {1: 0.249, 2: 0.124, 3: 0.093, 4: 0.078, 5: 0.068,
+                 6: 0.061, 7: 0.056, 8: 0.052}
+        tau_c = const[order]/NEPBW
+        return tau_c
+    
 
 class Sweep(MultiParameter):
     """
@@ -1564,6 +2000,7 @@ class Sweep(MultiParameter):
 
         return tuple(returndata)
     
+    
 class ScopeChannelChannel(InstrumentChannel):
     """
     Combines all the Parameters for the Scope channels, which can be found
@@ -1595,6 +2032,13 @@ class ScopeChannelChannel(InstrumentChannel):
             streaming to disk. Note: scope streaming requires the DIG option.
     """
     def __init__(self, parent: 'ZIMFLI', name: str, channum: int):
+        """
+        Creates a new ScopeChannelChannel.
+        parent: should be the ZIMFLI device because the parent should be 
+            an Instrument and not an InstrumentChannel even if the ScopeChannelChannel
+            belongs to the ScopeChannel and not really directly to the ZIMFLI
+        name: QCoDeS internal name
+        """
         super().__init__(parent, name)
         self._channum = channum
         
@@ -1683,13 +2127,15 @@ class ScopeChannelChannel(InstrumentChannel):
                            get_cmd=partial(parent._getter, 'scopes/0/channels',
                                            channum-1, Mode.DOUBLE, 'offset'),
                            vals=vals.Numbers()) 
-        self.add_parameter('enable_stream',
-                           lable='enable stream of this channel',
-                           set_cmd=partial(parent._setter, 'scopes/0/stream/enables',
-                                           channum-1, Mode.INT, ''),
-                           get_cmd=partial(parent._setter, 'scopes/0/stream/enables',
-                                           channum-1, Mode.INT, ''),
-                           val_mapping={'ON': 1, 'OFF': 0})
+        if 'DIG' in _parent._parent.options: #TODO
+            self.add_parameter('enable_stream',
+                               lable='enable stream of this channel',
+                               set_cmd=partial(parent._setter, 'scopes/0/stream/enables',
+                                               channum-1, Mode.INT, ''),
+                               get_cmd=partial(parent._setter, 'scopes/0/stream/enables',
+                                               channum-1, Mode.INT, ''),
+                               val_mapping={'ON': 1, 'OFF': 0})
+                               
                            
 class ScopeChannel(InstrumentChannel):
     """
@@ -1779,6 +2225,12 @@ class ScopeChannel(InstrumentChannel):
                 averaging(ON) for sample rates lower than the maximal
                 available sampling rate. Averaging avoids aliasing, but may
                 conceal signal peaks.
+    Submodules:
+            channels: ChannelList, which contains the two ScopeChannelChannels
+            channel1: first ScopeChannelChannel, is needed to be able to set the
+                parameters under .../scopes/0/channels/0
+            channel2: first ScopeChannelChannel, is needed to be able to set the
+                parameters under .../scopes/0/channels/1
     """
     def __init__(self, parent: 'ZIMFLI', name: str):
         super().__init__(parent, name)
@@ -1863,8 +2315,8 @@ class ScopeChannel(InstrumentChannel):
                            unit='s')
         #This is not what the user manual says
         #According to the user manual there are only 4 demodulators and moreover
-        #you can set more then just the inputselect, instead use two ScopeChannelChannels
-        #as submodule
+        #you can set more then just the inputselect, so instead use two ScopeChannelChannels
+        #as submodules
 #        # Map the possible input sources to LabOne's IDs.
 #        # The IDs can be seen in log file of LabOne UI
 #        inputselect = {'Signal Input 1': 0,  # TODO
@@ -1906,7 +2358,7 @@ class ScopeChannel(InstrumentChannel):
 #                            val_mapping=inputselect,
 #                            vals=vals.Enum(*list(inputselect.keys()))
 #                            )
-        channels = ChannelList(self, "channels", ScopeChannelChannel)
+        channels = ChannelList(self, "channels", ScopeChannelChannel, snapshotable=False)
         for scopenum in range(1, 3):
             name = 'channel{}'.format(scopenum)
             channel = ScopeChannelChannel(self, name, scopenum)
@@ -2283,6 +2735,7 @@ class ScopeChannel(InstrumentChannel):
                 value = rawvalue
 
         return value
+    
 
 class Scope(MultiParameter):
     """
@@ -2596,6 +3049,7 @@ class Scope(MultiParameter):
             ch2data = None
 
         return (ch1data, ch2data)
+    
 
 class ZIMFLI(Instrument):
     """
@@ -2657,7 +3111,7 @@ class ZIMFLI(Instrument):
         demodulatorchannels = ChannelList(self, "DemodulatorChannels", DemodulatorChannel,
                                           snapshotable=False)
         demodulator_no = 1
-        if 'MF-MD' in self.options:
+        if 'MF-MD' in self.options: #TODO is this the correct name for the option
             demodulator_no = 4
         for demodchannum in range(1, demodulator_no+1):
             name = 'demod{}'.format(demodchannum)
@@ -2740,256 +3194,15 @@ class ZIMFLI(Instrument):
         ########################################
         # digitial input/output submodule
         diochannel = DIOChannel(self, 'dio', 1)
-        self.add_submodule(name, diochannel)
+        self.add_submodule('dio', diochannel)
         
         # multi device sync submodule
         mdschannel = MDSChannel(self, "mds")
-        self.add_submodule(mdschannel)
+        self.add_submodule('mds', mdschannel)
         ########################################
         # SWEEPER PARAMETERS
-
-        self.add_parameter('sweeper_BWmode',
-                           label='Sweeper bandwidth control mode',
-                           set_cmd=partial(self._sweep_setter,
-                                           'sweep/bandwidthcontrol'),
-                           get_cmd=partial(self._sweep_getter,
-                                           'sweep/bandwidthcontrol'),
-                           val_mapping={'auto': 2, 'fixed': 1, 'current': 0},
-                           docstring="""
-                                     For each sweep point, the demodulator
-                                     filter bandwidth (time constant) may
-                                     be either set automatically, be the
-                                     current demodulator bandwidth or be
-                                     a fixed number; the sweeper_BW
-                                     parameter.
-                                     """
-                           )
-
-        self.add_parameter('sweeper_BW',
-                           label='Fixed bandwidth sweeper bandwidth (NEP)',
-                           set_cmd=partial(self._sweep_setter,
-                                           'sweep/bandwidth'),
-                           get_cmd=partial(self._sweep_getter,
-                                           'sweep/bandwidth'),
-                           docstring="""
-                                     This is the NEP bandwidth used by the
-                                     sweeper if sweeper_BWmode is set to
-                                     'fixed'. If sweeper_BWmode is either
-                                     'auto' or 'current', this value is
-                                     ignored.
-                                     """
-                           )
-
-        self.add_parameter('sweeper_start',
-                            label='Start value of the sweep',
-                            set_cmd=partial(self._sweep_setter,
-                                            'sweep/start'),
-                            get_cmd=partial(self._sweep_getter,
-                                            'sweep/start'),
-                            vals=vals.Numbers(0, 600e6))
-
-        self.add_parameter('sweeper_stop',
-                            label='Stop value of the sweep',
-                            set_cmd=partial(self._sweep_setter,
-                                            'sweep/stop'),
-                            get_cmd=partial(self._sweep_getter,
-                                            'sweep/stop'),
-                            vals=vals.Numbers(0, 600e6))
-
-        self.add_parameter('sweeper_samplecount',
-                            label='Length of the sweep (pts)',
-                            set_cmd=partial(self._sweep_setter,
-                                            'sweep/samplecount'),
-                            get_cmd=partial(self._sweep_getter,
-                                            'sweep/samplecount'),
-                            vals=vals.Ints(0, 100000))
-
-        # val_mapping for sweeper_param parameter
-        sweepparams = {'Aux Out 1 Offset': 'auxouts/0/offset',  # TODO
-                       'Aux Out 2 Offset': 'auxouts/1/offset',
-                       'Aux Out 3 Offset': 'auxouts/2/offset',
-                       'Aux Out 4 Offset': 'auxouts/3/offset',
-                       'Demod 1 Phase Shift': 'demods/0/phaseshift',
-                       'Demod 2 Phase Shift': 'demods/1/phaseshift',
-                       'Demod 3 Phase Shift': 'demods/2/phaseshift',
-                       'Demod 4 Phase Shift': 'demods/3/phaseshift',
-                       'Demod 5 Phase Shift': 'demods/4/phaseshift',
-                       'Demod 6 Phase Shift': 'demods/5/phaseshift',
-                       'Demod 7 Phase Shift': 'demods/6/phaseshift',
-                       'Demod 8 Phase Shift': 'demods/7/phaseshift',
-                       'Osc 1 Frequency': 'oscs/0/freq',
-                       'Osc 2 Frequency': 'oscs/1/freq',
-                       'Output 1 Amplitude 4': 'sigouts/0/amplitudes/3',
-                       'Output 1 Offset': 'sigouts/0/offset',
-                       'Output 2 Amplitude 8': 'sigouts/1/amplitudes/7',
-                       'Output 2 Offset': 'sigouts/1/offset'
-                       }
-
-        self.add_parameter('sweeper_param',
-                           label='Parameter to sweep (sweep x-axis)',
-                           set_cmd=partial(self._sweep_setter,
-                                           'sweep/gridnode'),
-                           val_mapping=sweepparams,
-                           get_cmd=partial(self._sweep_getter,
-                                           'sweep/gridnode'),
-                           vals=vals.Enum(*list(sweepparams.keys()))
-                           )
-
-        # val_mapping for sweeper_units parameter
-        sweepunits = {'Aux Out 1 Offset': 'V',  # TODO
-                      'Aux Out 2 Offset': 'V',
-                      'Aux Out 3 Offset': 'V',
-                      'Aux Out 4 Offset': 'V',
-                      'Demod 1 Phase Shift': 'degrees',
-                      'Demod 2 Phase Shift': 'degrees',
-                      'Demod 3 Phase Shift': 'degrees',
-                      'Demod 4 Phase Shift': 'degrees',
-                      'Demod 5 Phase Shift': 'degrees',
-                      'Demod 6 Phase Shift': 'degrees',
-                      'Demod 7 Phase Shift': 'degrees',
-                      'Demod 8 Phase Shift': 'degrees',
-                      'Osc 1 Frequency': 'Hz',
-                      'Osc 2 Frequency': 'Hz',
-                      'Output 1 Amplitude 4': 'V',
-                      'Output 1 Offset': 'V',
-                      'Output 2 Amplitude 8': 'V',
-                      'Output 2 Offset': 'V'
-                      }
-
-        self.add_parameter('sweeper_units',
-                           label='Units of sweep x-axis',
-                           get_cmd=self.sweeper_param.get,
-                           get_parser=lambda x:sweepunits[x])
-
-        # val_mapping for sweeper_mode parameter
-        sweepmodes = {'Sequential': 0,
-                      'Binary': 1,
-                      'Biderectional': 2,
-                      'Reverse': 3}
-
-        self.add_parameter('sweeper_mode',
-                            label='Sweep mode',
-                            set_cmd=partial(self._sweep_setter,
-                                            'sweep/scan'),
-                            get_cmd=partial(self._sweep_getter, 'sweep/scan'),
-                            val_mapping=sweepmodes,
-                            vals=vals.Enum(*list(sweepmodes))
-                            )
-
-        self.add_parameter('sweeper_order',
-                           label='Sweeper filter order',
-                           set_cmd=partial(self._sweep_setter,
-                                           'sweep/order'),
-                           get_cmd=partial(self._sweep_getter,
-                                           'sweep/order'),
-                           vals=vals.Ints(1, 8),
-                           docstring="""
-                                     This value is invoked only when the
-                                     sweeper_BWmode is set to 'fixed'.
-                                     """)
-
-        self.add_parameter('sweeper_settlingtime',
-                           label=('Minimal settling time for the ' +
-                                  'sweeper'),
-                           set_cmd=partial(self._sweep_setter,
-                                           'sweep/settling/time'),
-                           get_cmd=partial(self._sweep_getter,
-                                           'sweep/settling/time'),
-                           vals=vals.Numbers(0),
-                           unit='s',
-                           docstring="""
-                                     This is the minimal waiting time
-                                     at each point during a sweep before the
-                                     data acquisition starts. Note that the
-                                     filter settings may result in a longer
-                                     actual waiting/settling time.
-                                     """
-                           )
-
-        self.add_parameter('sweeper_inaccuracy',
-                           label='Demodulator filter settling inaccuracy',
-                           set_cmd=partial(self._sweep_setter,
-                                           'sweep/settling/inaccuracy'),
-                           docstring="""
-                                     Demodulator filter settling inaccuracy
-                                     defining the wait time between a sweep
-                                     parameter change and recording of the
-                                     next sweep point. The settling time is
-                                     calculated as the time required to attain
-                                     the specified remaining proportion [1e-13,
-                                     0.1] of an incoming step function. Typical
-                                     inaccuracy values: 10m for highest sweep
-                                     speed for large signals, 100u for precise
-                                     amplitude measurements, 100n for precise
-                                     noise measurements. Depending on the
-                                     order of the demodulator filter the settling
-                                     inaccuracy will define the number of filter
-                                     time constants the sweeper has to wait. The
-                                     maximum between this value and the settling
-                                     time is taken as wait time until the next
-                                     sweep point is recorded.
-                                     """
-                           )
-
-        self.add_parameter('sweeper_settlingtc',
-                           label='Sweep filter settling time',
-                           get_cmd=partial(self._sweep_getter,
-                                           'sweep/settling/tc'),
-                           unit='',
-                           docstring="""This settling time is in units of
-                                        the filter time constant."""
-                           )
-
-        self.add_parameter('sweeper_averaging_samples',
-                           label=('Minimal no. of samples to average at ' +
-                                  'each sweep point'),
-                           set_cmd=partial(self._sweep_setter,
-                                           'sweep/averaging/sample'),
-                           get_cmd=partial(self._sweep_getter,
-                                           'sweep/averaging/sample'),
-                           vals=vals.Ints(1),
-                           docstring="""
-                                     The actual number of samples is the
-                                     maximum of this value and the
-                                     sweeper_averaging_time times the
-                                     relevant sample rate.
-                                     """
-                           )
-
-        self.add_parameter('sweeper_averaging_time',
-                           label=('Minimal averaging time'),
-                           set_cmd=partial(self._sweep_setter,
-                                           'sweep/averaging/tc'),
-                           get_cmd=partial(self._sweep_getter,
-                                           'sweep/averaging/tc'),
-                           unit='s',
-                           docstring="""
-                                     The actual number of samples is the
-                                     maximum of this value times the
-                                     relevant sample rate and the
-                                     sweeper_averaging_samples."""
-                           )
-
-        self.add_parameter('sweeper_xmapping',
-                           label='Sweeper x mapping',
-                           set_cmd=partial(self._sweep_setter,
-                                           'sweep/xmapping'),
-                           get_cmd=partial(self._sweep_getter,
-                                           'sweep/xmapping'),
-                           val_mapping={'lin': 0, 'log': 1}
-                           )
-
-        self.add_parameter('sweeper_sweeptime',
-                           label='Expected sweep time',
-                           unit='s',
-                           get_cmd=self._get_sweep_time)
-
-        self.add_parameter('sweeper_timeout',
-                           label='Sweep timeout',
-                           unit='s',
-                           initial_value=600,
-                           get_cmd=None, set_cmd=None)
-
+        sweeperchannel = SweeperChannel(self, 'sweeper_channel')
+        self.add_submodule('sweeper_channel', sweeperchannel)
         ########################################
         # THE SWEEP ITSELF
         self.add_parameter('Sweep',
@@ -3020,310 +3233,11 @@ class ZIMFLI(Instrument):
         self.Sweep.build_sweep()
 
         ########################################
-        # SCOPE PARAMETERS
-        # default parameters:
+        # scope submodule for the settings of the scope
+        scopechannel = ScopeChannel(self, 'scope_channel')
+        self.add_submodule('scope_channel', scopechannel)
         
-        scopechannels = ChannelList(self, "ScopeChannels", ScopeChannelChannel)
-        for scopenum in range(1, 3):
-            name = 'scope_channel{}'.format(scopenum)
-            scopechannel = ScopeChannelChannel(self, name, scopenum)
-            scopechannels.append(scopechannel)
-            self.add_submodule(name, scopechannel)
-        scopechannels.lock()
-        self.add_submodule('scope_channels', scopechannels)
-
-        # This parameter corresponds to the Run/Stop button in the GUI
-        self.add_parameter('scope_runstop',
-                           label='Scope run state',
-                           set_cmd=partial(self._setter, 'scopes', 0, 0,
-                                           'enable'),
-                           get_cmd=partial(self._getter, 'scopes', 0, 0,
-                                           'enable'),
-                           val_mapping={'run': 1, 'stop': 0},
-                           vals=vals.Enum('run', 'stop'),
-                           docstring=('This parameter corresponds to the '
-                                      'run/stop button in the GUI.'))
-
-        self.add_parameter('scope_mode',
-                            label="Scope's mode: time or frequency domain.",
-                            set_cmd=partial(self._scope_setter, 1, 0,
-                                            'mode'),
-                            get_cmd=partial(self._scope_getter, 'mode'),
-                            val_mapping={'Time Domain': 1,
-                                         'Freq Domain FFT': 3},
-                            vals=vals.Enum('Time Domain', 'Freq Domain FFT')
-                            )
-
-        # 1: Channel 1 on, Channel 2 off.
-        # 2: Channel 1 off, Channel 2 on,
-        # 3: Channel 1 on, Channel 2 on.
-        self.add_parameter('scope_channels',
-                           label='Recorded scope channels',
-                           set_cmd=partial(self._scope_setter, 0, 0,
-                                           'channel'),
-                           get_cmd=partial(self._getter, 'scopes', 0,
-                                           0, 'channel'),
-                           vals=vals.Enum(1, 2, 3)
-                           )
-
-        self._samplingrate_codes = {'1.80 GHz': 0,  # TODO
-                                   '900 MHz': 1,
-                                   '450 MHz': 2,
-                                   '225 MHz': 3,
-                                   '113 MHz': 4,
-                                   '56.2 MHz': 5,
-                                   '28.1 MHz': 6,
-                                   '14.0 MHz': 7,
-                                   '7.03 MHz': 8,
-                                   '3.50 MHz': 9,
-                                   '1.75 MHz': 10,
-                                   '880 kHz': 11,
-                                   '440 kHz': 12,
-                                   '220 kHz': 13,
-                                   '110 kHz': 14,
-                                   '54.9 kHz': 15,
-                                   '27.5 kHz': 16}
-
-        self.add_parameter('scope_samplingrate',
-                            label="Scope's sampling rate",
-                            set_cmd=partial(self._scope_setter, 0, 0,
-                                            'time'),
-                            get_cmd=partial(self._getter, 'scopes', 0,
-                                            0, 'time'),
-                            val_mapping=self._samplingrate_codes,
-                            vals=vals.Enum(*list(self._samplingrate_codes.keys()))
-                            )
-
-        self.add_parameter('scope_length',
-                            label="Length of scope trace (pts)",
-                            set_cmd=partial(self._scope_setter, 0, 1,
-                                            'length'),
-                            get_cmd=partial(self._getter, 'scopes', 0,
-                                            1, 'length'),
-                            vals=vals.Numbers(4096, 128000000),
-                            get_parser=int
-                            )
-
-        self.add_parameter('scope_duration',
-                           label="Scope trace duration",
-                           set_cmd=partial(self._scope_setter, 0, 0,
-                                           'duration'),
-                           get_cmd=partial(self._scope_getter,
-                                           'duration'),
-                           vals=vals.Numbers(2.27e-6,4.660e3),
-                           unit='s'
-                           )
-
-        # Map the possible input sources to LabOne's IDs.
-        # The IDs can be seen in log file of LabOne UI
-        inputselect = {'Signal Input 1': 0,  # TODO
-                       'Signal Input 2': 1,
-                       'Trig Input 1': 2,
-                       'Trig Input 2': 3,
-                       'Aux Output 1': 4,
-                       'Aux Output 2': 5,
-                       'Aux Output 3': 6,
-                       'Aux Output 4': 7,
-                       'Aux In 1 Ch 1': 8,
-                       'Aux In 1 Ch 2': 9,
-                       'Osc phi Demod 4': 10,
-                       'Osc phi Demod 8': 11,
-                       'AU Cartesian 1': 112,
-                       'AU Cartesian 2': 113,
-                       'AU Polar 1': 128,
-                       'AU Polar 2': 129,
-                       }
-        # Add all 8 demodulators and their respective parameters
-        # to inputselect as well.
-        # Numbers correspond to LabOne IDs, taken from UI log.
-        for demod in range(1,9):
-            inputselect['Demod {} X'.format(demod)] = 15+demod
-            inputselect['Demod {} Y'.format(demod)] = 31+demod
-            inputselect['Demod {} R'.format(demod)] = 47+demod
-            inputselect['Demod {} Phase'.format(demod)] = 63+demod
-
-        for channel in range(1,3):
-            self.add_parameter('scope_channel{}_input'.format(channel),
-                            label=("Scope's channel {}".format(channel) +
-                                   " input source"),
-                            set_cmd=partial(self._scope_setter, 0, 0,
-                                            ('channels/{}/'.format(channel-1) +
-                                             'inputselect')),
-                            get_cmd=partial(self._getter, 'scopes', 0, 0,
-                                            ('channels/{}/'.format(channel-1) +
-                                             'inputselect')),
-                            val_mapping=inputselect,
-                            vals=vals.Enum(*list(inputselect.keys()))
-                            )
-
-        self.add_parameter('scope_average_weight',
-                            label="Scope Averages",
-                            set_cmd=partial(self._scope_setter, 1, 0,
-                                            'averager/weight'),
-                            get_cmd=partial(self._scope_getter,
-                                            'averager/weight'),
-                            vals=vals.Numbers(min_value=1)
-                            )
-
-        self.add_parameter('scope_trig_enable',
-                            label="Enable triggering for scope readout",
-                            set_cmd=partial(self._setter, 'scopes', 0,
-                                            0, 'trigenable'),
-                            get_cmd=partial(self._getter, 'scopes', 0,
-                                            0, 'trigenable'),
-                            val_mapping={'ON': 1, 'OFF': 0},
-                            vals=vals.Enum('ON', 'OFF')
-                            )
-
-        self.add_parameter('scope_trig_signal',
-                            label="Trigger signal source",
-                            set_cmd=partial(self._setter, 'scopes', 0,
-                                            0, 'trigchannel'),
-                            get_cmd=partial(self._getter, 'scopes', 0,
-                                            0, 'trigchannel'),
-                            val_mapping=inputselect,
-                            vals=vals.Enum(*list(inputselect.keys()))
-                            )
-
-        slopes = {'None': 0, 'Rise': 1, 'Fall': 2, 'Both': 3}
-
-        self.add_parameter('scope_trig_slope',
-                            label="Scope's triggering slope",
-                            set_cmd=partial(self._setter, 'scopes', 0,
-                                            0, 'trigslope'),
-                            get_cmd=partial(self._getter, 'scopes', 0,
-                                            0, 'trigslope'),
-                            val_mapping=slopes,
-                            vals=vals.Enum(*list(slopes.keys()))
-                            )
-
-        # TODO: figure out how value/percent works for the trigger level
-        self.add_parameter('scope_trig_level',
-                            label="Scope trigger level",
-                            set_cmd=partial(self._setter, 'scopes', 0,
-                                            1, 'triglevel'),
-                            get_cmd=partial(self._getter, 'scopes', 0,
-                                            1, 'triglevel'),
-                            vals=vals.Numbers()
-                            )
-
-        self.add_parameter('scope_trig_hystmode',
-                            label="Enable triggering for scope readout.",
-                            set_cmd=partial(self._setter, 'scopes', 0,
-                                            0, 'trighysteresis/mode'),
-                            get_cmd=partial(self._getter, 'scopes', 0,
-                                            0, 'trighysteresis/mode'),
-                            val_mapping={'absolute': 0, 'relative': 1},
-                            vals=vals.Enum('absolute', 'relative')
-                            )
-
-        self.add_parameter('scope_trig_hystrelative',
-                            label="Trigger hysteresis, relative value in %",
-                            set_cmd=partial(self._setter, 'scopes', 0,
-                                            1, 'trighysteresis/relative'),
-                            get_cmd=partial(self._getter, 'scopes', 0,
-                                            1, 'trighysteresis/relative'),
-                            # val_mapping= lambda x: 0.01*x,
-                            vals=vals.Numbers(0)
-                            )
-
-        self.add_parameter('scope_trig_hystabsolute',
-                            label="Trigger hysteresis, absolute value",
-                            set_cmd=partial(self._setter, 'scopes', 0,
-                                            1, 'trighysteresis/absolute'),
-                            get_cmd=partial(self._getter, 'scopes', 0,
-                                            1, 'trighysteresis/absolute'),
-                            vals=vals.Numbers(0, 20)
-                            )
-
-        triggates = {'Trigger In 3 High': 0, 'Trigger In 3 Low': 1,
-                     'Trigger In 4 High': 2, 'Trigger In 4 Low': 3}
-        self.add_parameter('scope_trig_gating_source',
-                           label='Scope trigger gating source',
-                           set_cmd=partial(self._setter, 'scopes', 0, 0,
-                                           'triggate/inputselect'),
-                           get_cmd=partial(self._getter, 'scopes', 0, 0,
-                                           'triggate/inputselect'),
-                           val_mapping=triggates,
-                           vals=vals.Enum(*list(triggates.keys()))
-                           )
-
-        self.add_parameter('scope_trig_gating_enable',
-                           label='Scope trigger gating ON/OFF',
-                           set_cmd=partial(self._setter, 'scopes', 0, 0,
-                                           'triggate/enable'),
-                           get_cmd=partial(self._getter, 'scopes', 0, 0,
-                                           'triggate/enable'),
-                           val_mapping = {'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF'))
-
-        # make this a slave parameter off scope_holdoff_seconds
-        # and scope_holdoff_events
-        self.add_parameter('scope_trig_holdoffmode',
-                            label="Scope trigger holdoff mode",
-                            set_cmd=partial(self._setter, 'scopes', 0,
-                                            0, 'trigholdoffmode'),
-                            get_cmd=partial(self._getter, 'scopes', 0,
-                                            0, 'trigholdoffmode'),
-                            val_mapping={'s': 0, 'events': 1},
-                            vals=vals.Enum('s', 'events')
-                            )
-
-        self.add_parameter('scope_trig_holdoffseconds',
-                           label='Scope trigger holdoff',
-                           set_cmd=partial(self._scope_setter, 0, 1,
-                                           'trigholdoff'),
-                           get_cmd=partial(self._getter, 'scopes', 0,
-                                           1, 'trigholdoff'),
-                           unit='s',
-                           vals=vals.Numbers(20e-6, 10)
-                           )
-
-        self.add_parameter('scope_trig_reference',
-                           label='Scope trigger reference',
-                           set_cmd=partial(self._scope_setter, 0, 1,
-                                           'trigreference'),
-                           get_cmd=partial(self._getter, 'scopes', 0,
-                                           1, 'trigreference'),
-                           vals=vals.Numbers(0, 100)
-                           )
-
-        # TODO: add validation. What's the minimal/maximal delay?
-        self.add_parameter('scope_trig_delay',
-                           label='Scope trigger delay',
-                           set_cmd=partial(self._scope_setter, 0, 1,
-                                           'trigdelay'),
-                           get_cmd=partial(self._getter, 'scopes', 0, 1,
-                                           'trigdelay'),
-                           unit='s')
-
-        self.add_parameter('scope_segments',
-                           label='Enable/disable segments',
-                           set_cmd=partial(self._scope_setter, 0, 0,
-                                           'segments/enable'),
-                           get_cmd=partial(self._getter, 'scopes', 0,
-                                           0, 'segments/enable'),
-                           val_mapping={'OFF': 0, 'ON': 1},
-                           vals=vals.Enum('ON', 'OFF')
-                           )
-
-        self.add_parameter('scope_segments_count',
-                           label='No. of segments returned by scope',
-                           set_cmd=partial(self._setter, 'scopes', 0, 1,
-                                           'segments/count'),
-                           get_cmd=partial(self._getter, 'scopes', 0, 1,
-                                          'segments/count'),
-                           vals=vals.Ints(1, 32768),
-                           get_parser=int
-                           )
-
-        self.add_function('scope_reset_avg',
-                            call_cmd=partial(self.scope.set,
-                                             'scopeModule/averager/restart', 1),
-                            )
-
-        ########################################
-        # THE SCOPE ITSELF
+        # THE SCOPE ITSELF #TODO does it make sense to add this as parameter?
         self.add_parameter('Scope',
                            parameter_class=Scope,
                            )
@@ -3398,154 +3312,6 @@ class ZIMFLI(Instrument):
         datadict['phi'] = np.angle(datadict['x'] + 1j * datadict['y'], deg=True)
         return datadict[demod_param]
 
-    def _sigout_setter(self, number, mode, setting, value):
-        """
-        Function to set signal output's settings. A specific setter function is
-        needed as parameters depend on each other and need to be checked and
-        updated accordingly.
-
-        Args:
-            number (int):
-            mode (bool): Indicating whether we are asking for an int or double
-            setting (str): The module's setting to set.
-            value (Union[int, float]): The value to set the setting to.
-        """
-
-        # convenient reference
-        params = self.parameters
-
-        def amp_valid():
-            nonlocal value
-            toget = params['signal_output{}_ampdef'.format(number+1)]
-            ampdef_val = toget.get()
-            toget = params['signal_output{}_autorange'.format(number+1)]
-            autorange_val = toget.get()
-
-            if autorange_val == 'ON':
-                toget = params['signal_output{}_imp50'.format(number+1)]
-                imp50_val = toget.get()
-                imp50_dic = {'OFF': 1.5, 'ON': 0.75}
-                range_val = imp50_dic[imp50_val]
-
-            else:
-                so_range = params['signal_output{}_range'.format(number+1)].get()
-                range_val = round(so_range, 3)
-
-            amp_val_dict={'Vpk': lambda value: value,
-                          'Vrms': lambda value: value*sqrt(2),
-                          'dBm': lambda value: 10**((value-10)/20)
-                         }
-
-            if -range_val < amp_val_dict[ampdef_val](value) > range_val:
-                raise ValueError('Signal Output:'
-                                 + ' Amplitude too high for chosen range.')
-            value = amp_val_dict[ampdef_val](value)
-
-        def offset_valid():
-            nonlocal value
-            nonlocal number
-            range_val = params['signal_output{}_range'.format(number+1)].get()
-            range_val = round(range_val, 3)
-            amp_val = params['signal_output{}_amplitude'.format(number+1)].get()
-            amp_val = round(amp_val, 3)
-            if -range_val< value+amp_val > range_val:
-                raise ValueError('Signal Output: Offset too high for '
-                                 'chosen range.')
-
-        def range_valid():
-            nonlocal value
-            nonlocal number
-            toget = params['signal_output{}_autorange'.format(number+1)]
-            autorange_val = toget.get()
-            imp50_val = params['signal_output{}_imp50'.format(number+1)].get()
-            imp50_dic = {'OFF': [1.5, 0.15], 'ON': [0.75, 0.075]}
-
-            if autorange_val == "ON":
-                raise ValueError('Signal Output :'
-                                ' Cannot set range as autorange is turned on.')
-
-            if value not in imp50_dic[imp50_val]:
-                raise ValueError('Signal Output: Choose a valid range:'
-                                 '[0.75, 0.075] if imp50 is on, [1.5, 0.15]'
-                                 ' otherwise.')
-
-        def ampdef_valid():
-            # check which amplitude definition you can use.
-            # dBm is only possible with 50 Ohm imp ON
-            imp50_val = params['signal_output{}_imp50'.format(number+1)].get()
-            imp50_ampdef_dict = {'ON': ['Vpk','Vrms', 'dBm'],
-                                 'OFF': ['Vpk','Vrms']}
-            if value not in imp50_ampdef_dict[imp50_val]:
-                raise ValueError("Signal Output: Choose a valid amplitude "
-                                 "definition; ['Vpk','Vrms', 'dBm'] if imp50 is"
-                                 " on, ['Vpk','Vrms'] otherwise.")
-
-        dynamic_validation = {'range': range_valid,
-                              'ampdef': ampdef_valid,
-                              'amplitudes/3': amp_valid,
-                              'amplitudes/7': amp_valid,
-                              'offset': offset_valid}
-
-        def update_range_offset_amp():
-            range_val = params['signal_output{}_range'.format(number+1)].get()
-            offset_val = params['signal_output{}_offset'.format(number+1)].get()
-            amp_val = params['signal_output{}_amplitude'.format(number+1)].get()
-            if -range_val < offset_val + amp_val > range_val:
-                #The GUI would allow higher values but it would clip the signal.
-                raise ValueError('Signal Output: Amplitude and/or '
-                                 'offset out of range.')
-
-        def update_offset():
-            self.parameters['signal_output{}_offset'.format(number+1)].get()
-
-        def update_amp():
-            self.parameters['signal_output{}_amplitude'.format(number+1)].get()
-
-        def update_range():
-            self.parameters['signal_output{}_autorange'.format(number+1)].get()
-
-        # parameters which will potentially change other parameters
-        changing_param = {'imp50': [update_range_offset_amp, update_range],
-                          'autorange': [update_range],
-                          'range': [update_offset, update_amp],
-                          'amplitudes/3': [update_range, update_amp],
-                          'amplitudes/7': [update_range, update_amp],
-                          'offset': [update_range]
-                         }
-
-        setstr = '/{}/sigouts/{}/{}'.format(self.device, number, setting)
-
-        if setting in dynamic_validation:
-            dynamic_validation[setting]()
-
-        if mode == 0:
-            self.daq.setInt(setstr, value)
-        if mode == 1:
-            self.daq.setDouble(setstr, value)
-
-        if setting in changing_param:
-            [f() for f in changing_param[setting]]
-
-    def _sigout_getter(self, number, mode, setting):
-        """
-        Function to query the settings of signal outputs. Specific setter
-        function is needed as parameters depend on each other and need to be
-        checked and updated accordingly.
-
-        Args:
-            number (int):
-            mode (bool): Indicating whether we are asking for an int or double
-            setting (str): The module's setting to set.
-        """
-
-        querystr = '/{}/sigouts/{}/{}'.format(self.device, number, setting)
-        if mode == 0:
-            value = self.daq.getInt(querystr)
-        if mode == 1:
-            value = self.daq.getDouble(querystr)
-
-        return value
-
     def _list_nodes(self, node):
         """
         Returns a list with all nodes in the sub-tree below the specified node.
@@ -3557,134 +3323,6 @@ class ZIMFLI(Instrument):
         """
         node_list = self.daq.getList('/{}/{}/'.format(self.device, node))
         return node_list
-
-    @staticmethod
-    def NEPBW_to_timeconstant(NEPBW, order):  # TODO
-        """
-        Helper function to translate a NEP BW and a filter order
-        to a filter time constant. Meant to be used when calculating
-        sweeper sweep times.
-
-        Note: precise only to within a few percent.
-
-        Args:
-            NEPBW (float): The NEP bandwidth in Hz
-            order (int): The filter order
-
-        Returns:
-            float: The filter time constant in s.
-        """
-        const = {1: 0.249, 2: 0.124, 3: 0.093, 4: 0.078, 5: 0.068,
-                 6: 0.061, 7: 0.056, 8: 0.052}
-        tau_c = const[order]/NEPBW
-
-        return tau_c
-
-    def _get_sweep_time(self):
-        """
-        get_cmd for the sweeper_sweeptime parameter.
-
-        Note: this calculation is only an estimate and not precise to more
-        than a few percent.
-
-        Returns:
-            Union[float, None]: None if the bandwidthcontrol setting is
-              'auto' (then all bets are off), otherwise a time in seconds.
-
-        Raises:
-            ValueError: if no signals are added to the sweep
-        """
-
-        # Possible TODO: cut down on the number of instrument
-        # queries.
-
-        if self._sweeper_signals == []:
-            raise ValueError('No signals selected! Can not find sweep time.')
-
-        mode = self.sweeper_BWmode.get()
-
-        # The effective time constant of the demodulator depends on the
-        # sweeper/bandwidthcontrol setting.
-        #
-        # If this setting is 'current', the largest current
-        # time constant of the involved demodulators is used
-        #
-        # If the setting is 'fixed', the NEP BW specified under
-        # sweep/bandwidth is used. The filter order is needed to convert
-        # the NEP BW to a time constant
-
-        demods = set([sig.split('/')[3] for sig in self._sweeper_signals])
-        rates = []
-        for demod in demods:
-            rates.append(self._getter('demods', demod, 1, 'rate'))
-        rate = min(rates)
-
-        if mode == 'current':
-            tcs = []
-            for demod in demods:
-                tcs.append(self._getter('demods', demod, 1, 'timeconstant'))
-
-            tau_c = max(tcs)
-
-        elif mode == 'fixed':
-            order = self.sweeper_order()
-            BW = self.sweeper_BW()
-
-            tau_c = self.NEPBW_to_timeconstant(BW, order)
-
-        elif mode == 'auto':
-            return None
-
-        settlingtime = max(self.sweeper_settlingtc.get()*tau_c,
-                           self.sweeper_settlingtime.get())
-        averagingtime = max(self.sweeper_averaging_time.get()*tau_c*rate,
-                            self.sweeper_averaging_samples.get())/rate
-
-        time_est = (settlingtime+averagingtime)*self.sweeper_samplecount.get()
-        return time_est
-
-    def _sweep_setter(self, setting, value):
-        """
-        set_cmd for all sweeper parameters. The value and setting are saved in
-        a dictionary which is read by the Sweep parameter's build_sweep method
-        and only then sent to the instrument.
-        """
-        key = '/'.join(setting.split('/')[1:])
-        self._sweepdict[key] = value
-        self.sweep_correctly_built = False
-
-    def _sweep_getter(self, setting):
-        """
-        General get_cmd for sweeper parameters
-
-        The built-in sweeper.get command returns a dictionary, but we want
-        single values.
-
-        Args:
-            setting (str): the path used by ZI to describe the setting,
-            e.g. 'sweep/settling/time'
-        """
-        # TODO: Should this look up in _sweepdict rather than query the
-        # instrument?
-        returndict = self.sweeper.get(setting)  # this is a dict
-
-        # The dict may have different 'depths' depending on the parameter.
-        # The depth is encoded in the setting string (number of '/')
-        keys = setting.split('/')[1:]
-
-        while keys != []:
-            key = keys.pop(0)
-            returndict = returndict[key]
-        rawvalue = returndict
-
-        if isinstance(rawvalue, np.ndarray) and len(rawvalue) == 1:
-            value = rawvalue[0]
-        elif isinstance(rawvalue, list) and len(rawvalue) == 1:
-            value = rawvalue[0]
-        else:
-            value = rawvalue
-
-        return value
 
     def add_signal_to_sweeper(self, demodulator, attribute):
         """
@@ -3764,7 +3402,7 @@ class ZIMFLI(Instrument):
             print('    {}: {} ({})'.format(parameter.label, parameter.get(),
                                            parameter.unit))
 
-        print('HORISONTAL')
+        print('HORIZONTAL')
         toprint = ['sweeper_start', 'sweeper_stop',
                    'sweeper_units',
                    'sweeper_samplecount',
@@ -3803,134 +3441,6 @@ class ZIMFLI(Instrument):
                                                   's'))
         ready = self.sweep_correctly_built
         print('    Sweep built and ready to execute: {}'.format(ready))
-
-    def _scope_setter(self, scopemodule, mode, setting, value):
-        """
-        set_cmd for all scope parameters. The value and setting are saved in
-        a dictionary which is read by the Scope parameter's build_scope method
-        and only then sent to the instrument.
-
-        Args:
-            scopemodule (int): Indicates whether this is a setting of the
-                scopeModule or not. 1: it is a scopeModule setting,
-                0: it is not.
-            mode (int): Indicates whether we are setting an int or a float.
-                0: int, 1: float. NOTE: Ignored if scopemodule==1.
-            setting (str): The setting, e.g. 'length'.
-            value (Union[int, float, str]): The value to set.
-        """
-        # Because setpoints need to be built
-        self.scope_correctly_built = False
-
-        # Some parameters are linked to each other in specific ways
-        # Therefore, we need special actions for setting these parameters
-
-        SRtranslation = {'kHz': 1e3, 'MHz': 1e6, 'GHz': 1e9,  # TODO
-                         'khz': 1e3, 'Mhz': 1e6, 'Ghz': 1e9}
-
-        def setlength(value):
-            # TODO: add validation. The GUI seems to correect this value
-            self.daq.setDouble('/{}/scopes/0/length'.format(self.device),
-                               value)
-            SR_str = self.parameters['scope_samplingrate'].get()
-            (number, unit) = SR_str.split(' ')
-            SR = float(number)*SRtranslation[unit]
-            self.parameters['scope_duration']._save_val(value/SR)
-            self.daq.setInt('/{}/scopes/0/length'.format(self.device), value)
-
-        def setduration(value):
-            # TODO: validation?
-            SR_str = self.parameters['scope_samplingrate'].get()
-            (number, unit) = SR_str.split(' ')
-            SR = float(number)*SRtranslation[unit]
-            N = int(np.round(value*SR))
-            self.parameters['scope_length']._save_val(N)
-            self.parameters['scope_duration']._save_val(value)
-            self.daq.setInt('/{}/scopes/0/length'.format(self.device), N)
-
-        def setholdoffseconds(value):
-            self.parameters['scope_trig_holdoffmode'].set('s')
-            self.daq.setDouble('/{}/scopes/0/trigholdoff'.format(self.device),
-                               value)
-
-        def setsamplingrate(value):
-            # When the sample rate is changed, the number of points of the trace
-            # remains unchanged and the duration changes accordingly
-            newSR_str = dict(zip(self._samplingrate_codes.values(),
-                                 self._samplingrate_codes.keys()))[value]
-            (number, unit) = newSR_str.split(' ')
-            newSR = float(number)*SRtranslation[unit]
-            oldSR_str = self.parameters['scope_samplingrate'].get()
-            (number, unit) = oldSR_str.split(' ')
-            oldSR = float(number)*SRtranslation[unit]
-            oldduration = self.parameters['scope_duration'].get()
-            newduration = oldduration*oldSR/newSR
-            self.parameters['scope_duration']._save_val(newduration)
-            self.daq.setInt('/{}/scopes/0/time'.format(self.device), value)
-
-        specialcases = {'length': setlength,
-                        'duration': setduration,
-                        'scope_trig_holdoffseconds': setholdoffseconds,
-                        'time': setsamplingrate}
-
-        if setting in specialcases:
-            specialcases[setting](value)
-            self.daq.sync()
-            return
-        else:
-            # We have two different parameter types: those under
-            # /scopes/0/ and those under scopeModule/
-            if scopemodule:
-                self.scope.set('scopeModule/{}'.format(setting), value)
-            elif mode == 0:
-                self.daq.setInt('/{}/scopes/0/{}'.format(self.device,
-                                                         setting), value)
-            elif mode == 1:
-                self.daq.setDouble('/{}/scopes/0/{}'.format(self.device,
-                                                            setting), value)
-            return
-
-    def _scope_getter(self, setting):
-        """
-        get_cmd for scopeModule parameters
-
-        """
-        # There are a few special cases
-        SRtranslation = {'kHz': 1e3, 'MHz': 1e6, 'GHz': 1e9,  # TODO
-                         'khz': 1e3, 'Mhz': 1e6, 'Ghz': 1e9}
-
-        def getduration():
-            SR_str = self.parameters['scope_samplingrate'].get()
-            (number, unit) = SR_str.split(' ')
-            SR = float(number)*SRtranslation[unit]
-            N = self.parameters['scope_length'].get()
-            duration = N/SR
-            return duration
-
-        specialcases = {'duration': getduration}
-
-        if setting in specialcases:
-            value = specialcases[setting]()
-        else:
-            querystr = 'scopeModule/' + setting
-            returndict =  self.scope.get(querystr)
-            # The dict may have different 'depths' depending on the parameter.
-            # The depth is encoded in the setting string (number of '/')
-            keys = setting.split('/')[1:]
-
-            while keys != []:
-                key = keys.pop(0)
-                returndict = returndict[key]
-                rawvalue = returndict
-
-            if isinstance(rawvalue, np.ndarray) and len(rawvalue) == 1:
-                value = rawvalue[0]
-            elif isinstance(rawvalue, list) and len(rawvalue) == 1:
-                value = rawvalue[0]
-            else:
-                value = rawvalue
-
-        return value
 
     def close(self):
         """
