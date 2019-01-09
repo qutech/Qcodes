@@ -1,3 +1,4 @@
+import sys
 import time
 import logging
 import numpy as np
@@ -9,6 +10,7 @@ from typing import Callable, List, Union, cast
 
 try:
     import zhinst.utils
+    import zhinst.ziPython
 except ImportError:
     raise ImportError('''Could not find Zurich Instruments Lab One software.
                          Please refer to the Zi MFLI User Manual for
@@ -58,7 +60,6 @@ class AUXInputChannel(InstrumentChannel):
             channum: the Index of the channel
         """
         super().__init__(parent, name)
-        
         self.add_parameter('averaging',
                            label='Number of samples to average',
                            get_cmd=partial(self._parent._getter, 'auxins',
@@ -66,23 +67,12 @@ class AUXInputChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._getter, 'auxins',
                                            channum-1, Mode.INT, 'averaging'),
                            vals=vals.Ints(0, 16))
-                           
         self.add_parameter('sample',
                            label='Auxiliary Input sample',
                            unit='V',
                            get_cmd=partial(self._parent._getter, 'auxins',
                                            channum-1, Mode.SAMPLE, 'sample'),
                            set_cmd=False)
-                           
-        values_no = 2#the number of values the channel has, should be 2
-        #TODO is there a way to get this information from the instrument directly?
-        for i in range(0, values_no):          
-            self.add_parameter('value{}'.format(i+1),
-                               label='Value of input {}'.format(i+1),
-                               unit='V',
-                               get_cmd=partial(self._parent._getter, 'auxins',
-                                               channum-1, Mode.DOUBLE, 'values/{}'.format(i)),
-                               set_cmd=False)
 
 
 class AUXOutputChannel(InstrumentChannel):
@@ -112,7 +102,6 @@ class AUXOutputChannel(InstrumentChannel):
                 in the ChannelList of the OutputChannels
         """
         super().__init__(parent, name)
-
         self.add_parameter('scale',
                            label='scale',
                            unit='',
@@ -120,9 +109,7 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, 1, 'scale'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, 1, 'scale'),
-                           vals=vals.Numbers()
-                           )
-
+                           vals=vals.Numbers())
         self.add_parameter('preoffset',
                            label='preoffset',
                            unit='signal units',
@@ -130,9 +117,7 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, 1, 'preoffset'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, 1, 'preoffset'),
-                           vals=vals.Numbers()
-                           )
-                           
+                           vals=vals.Numbers())
         self.add_parameter('offset',
                            label='offset',
                            unit='V',
@@ -140,9 +125,7 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, 1, 'offset'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, 1, 'offset'),
-                           vals=vals.Numbers()
-                           )
-                           
+                           vals=vals.Numbers())
         self.add_parameter('limitlower',
                            label='Lower limit',
                            unit='V',
@@ -150,9 +133,7 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, 1, 'limitlower'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, 1, 'limitlower'),
-                           vals=vals.Numbers(-10, 10)
-                           )
-
+                           vals=vals.Numbers(-10, 10))
         self.add_parameter('limitupper',
                            label='Upper limit',
                            unit='V',
@@ -160,9 +141,7 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, 1, 'limitupper'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, 1, 'limitupper'),
-                           vals=vals.Numbers(-10, 10)
-                           )
-
+                           vals=vals.Numbers(-10, 10))
         # TODO the validator does not catch that there are only
         # 2 valid output channels for AU types
         self.add_parameter('channel',
@@ -174,21 +153,19 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, 0, 'demodselect'),
                            get_parser=lambda x: x+1,
                            set_parser=lambda x: x-1,
-                           vals=vals.Ints(0,7)
+                           vals=vals.Ints(0,7) #TODO is the validation here correct?
                            )
-
         outputvalmapping = {'Demod X': 0,
                             'Demod Y': 1,
                             'Demod R': 2,
                             'Demod THETA': 3,
                             'PID Out': 5,
-                            'AU Cartesian': 7,
-                            'AU Polar': 8, #7 and 8 are not documented in the Manual, what are they?
+                            #'AU Cartesian': 7,
+                            #'AU Polar': 8, #7 and 8 are not documented in the Manual, what are they?
                             'PID Shift': 9,
                             'PID Error': 10,
                             'TU Filtered Value': 11,
                             'TU Output Value': 13}
-        
         self.add_parameter('output',
                            label='Output',
                            unit='',
@@ -196,17 +173,13 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, 0, 'outputselect'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, 0, 'outputselect'),
-                           val_mapping=outputvalmapping,
-                           vals=vals.Enum(*list(outputvalmapping.keys()))
-                           )
-                           
+                           val_mapping=outputvalmapping)
         self.add_parameter('value',
                            label='Value',
                            unit='V',
                            get_cmd=partial(self._parent._getter, 'auxouts',
                                            channum - 1, 1, 'value'),
-                           set_cmd=False
-                           )
+                           set_cmd=False)
                            
                            
 class DemodulatorChannel(InstrumentChannel):
@@ -236,6 +209,7 @@ class DemodulatorChannel(InstrumentChannel):
                 locks to the external frequency divided by the integer factor.
             oscselect: Connects the demodulator with the supplied oscillator. 
                 Number of available oscillators depends on the installed options.
+                Is a number between 0 and the number of oscillators -1
             phaseadjust: Adjust the demodulator phase automatically in order to 
                 read 0 degrees.
             phaseshift: Phase shift applied to the reference input of the demodulator.
@@ -255,6 +229,9 @@ class DemodulatorChannel(InstrumentChannel):
                 and its higher harmonics. The sinc is an additional filter that 
                 attenuates these unwanted components in the demodulator output.
             signalinput: Selects the input signal for the demodulator.
+                Possible values: 'Sig In 1', 'Curr In 1', 'Trigger 1', 'Trigger 2',
+                    'Aux Out 1', 'Aux Out 2', 'Aux Out 3', 'Aux Out 4', 'Aux In 1',
+                    'Aux In 2', 'Constant input'
             streaming: Enables the data acquisition for the corresponding demodulator.
             trigger: Selects the acquisition mode (i.e. triggering) or the demodulator.
             x: get sample of x coordinate
@@ -280,14 +257,12 @@ class DemodulatorChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'demods', 
                                            channum-1, Mode.INT, 'bypass'),
                            vals=vals.Ints() )
-                           
         self.add_parameter('freq',
                            label='frequency for demodulation',
                            unit='Hz',
                            get_cmd=partial(self._parent._getter, 'demods',
                                            channum-1, Mode.DOUBLE, 'freq'),
                            set_cmd=False)
-        
         self.add_parameter('order',
                            label='Filter order',
                            get_cmd=partial(self._parent._getter, 'demods',
@@ -295,7 +270,6 @@ class DemodulatorChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, 0, 'order'),
                            vals=vals.Ints(1, 8) )
-
         self.add_parameter('harmonic',
                            label=('Reference frequency multiplication' +
                                   ' factor'),
@@ -303,16 +277,15 @@ class DemodulatorChannel(InstrumentChannel):
                                            channum-1, 1, 'harmonic'),
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, 1, 'harmonic'),
-                           vals=vals.Ints(1, 999) #why?
+                           #vals=vals.Ints(1, 999) #why?
                            )
-
         self.add_parameter('oscselect',
                            label='Select oscillator',
                            get_cmd=partial(self._parent._getter, 'demods',
                                            channum-1, Mode.INT, 'oscselect'),
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, Mode.INT, 'oscselect'),
-                           vals=vals.Int(0, self._parent.no_oscs) )
+                           vals=vals.Int(0, self._parent.no_oscs-1) )
                            
         self.add_parameter('phaseadjust',
                            label='Phase adjustment',
@@ -321,7 +294,6 @@ class DemodulatorChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, Mode.INT, 'phaseadjust'),
                            vals=vals.Int() )
-
         self.add_parameter('phaseshift',
                            label='Phase shift',
                            unit='degrees',
@@ -330,7 +302,6 @@ class DemodulatorChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, 1, 'phaseshift'),
                            vals=vals.Numbers() )
-                           
         self.add_parameter('timeconstant',
                            label='Filter time constant',
                            get_cmd=partial(self._parent._getter, 'demods',
@@ -339,7 +310,6 @@ class DemodulatorChannel(InstrumentChannel):
                                            channum-1, 1, 'timeconstant'),
                            unit='s',
                            vals=vals.Numbers() )
-
         self.add_parameter('samplerate',
                            label='Sampling rate',
                            get_cmd=partial(self._parent._getter, 'demods',
@@ -353,16 +323,13 @@ class DemodulatorChannel(InstrumentChannel):
                                      may be approximated to the
                                      nearest value supported by the
                                      instrument.
-                                     """
-                            )
-                           
+                                     """)
         self.add_parameter('sample',
                            label='Sample',
                            get_cmd=partial(self._parent._getter, 'demods',
                                            channum-1, Mode.SAMPLE, 'sample'),
                            set_cmd=False,
                            snapshot_value=False )
-                           
         self.add_parameter('sinc',
                            label='Sinc filter',
                            get_cmd=partial(self._parent._getter, 'demods',
@@ -371,7 +338,6 @@ class DemodulatorChannel(InstrumentChannel):
                                            channum-1, 0, 'sinc'),
                            val_mapping={'ON': 1, 'OFF': 0},
                            vals=vals.Enum('ON', 'OFF') )
-
         # val_mapping for the demodX_signalin parameter
         dmsigins = {'Sig In 1': 0,
                     'Curr In 1': 1,
@@ -383,18 +349,14 @@ class DemodulatorChannel(InstrumentChannel):
                     'Aux Out 4': 7,
                     'Aux In 1': 8,
                     'Aux In 2': 9,
-                    'Constant input': 174
-                    }
-        
+                    'Constant input': 174}
         self.add_parameter('signalin',
                            label='Signal input',
                            get_cmd=partial(self._parent._getter, 'demods',
                                            channum-1, 0,'adcselect'),
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, 0, 'adcselect'),
-                           val_mapping=dmsigins,
-                           vals=vals.Enum(*list(dmsigins.keys())) )
-
+                           val_mapping=dmsigins)
         self.add_parameter('streaming',
                            label='Data streaming',
                            get_cmd=partial(self._parent._getter, 'demods',
@@ -403,7 +365,6 @@ class DemodulatorChannel(InstrumentChannel):
                                            channum-1, 0, 'enable'),
                            val_mapping={'ON': 1, 'OFF': 0},
                            vals=vals.Enum('ON', 'OFF') )
-                           
         dmtrigs = {'Continuous': 0,            #demodulator data is continuously streamed 
                                                #to the host computer.
                    'Trigger in 1 Rise': 1,     #rising edge triggered.
@@ -429,16 +390,13 @@ class DemodulatorChannel(InstrumentChannel):
                    'Trigger in 1|2 High': 160, #demodulator data is streamed to the host
                                                #computer when either level is high (TTL).
                   }
-        
         self.add_parameter('trigger',
                            label='Trigger',
                            get_cmd=partial(self._parent._getter, 'demods',
                                            channum-1, 0, 'trigger'),
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, 0, 'trigger'),
-                           val_mapping=dmtrigs,
-                           vals=vals.Enum(*list(dmtrigs.keys())) )
-        
+                           val_mapping=dmtrigs)
         for demod_param in ['x', 'y', 'R', 'phi']:
             if demod_param in ('x', 'y', 'R'):
                 unit = 'V'
@@ -446,11 +404,24 @@ class DemodulatorChannel(InstrumentChannel):
                 unit = 'deg'
             self.add_parameter('{}'.format(demod_param),
                                label='{}'.format(demod_param),
-                               get_cmd=partial(self._parent._get_demod_sample,
+                               get_cmd=partial(self._get_sample,
                                                channum - 1, demod_param),
                                set_cmd=False, 
                                snapshot_value=False,
                                unit=unit)
+
+    def _get_sample(self, number: int, demod_param: str) -> float:
+        log.debug("getting demod %s param %s", number, demod_param)
+        mode = Mode.SAMPLE
+        module = 'demods'
+        setting = 'sample'
+        #not really needed, because we don't add an invalid parameter
+        if demod_param not in ['x', 'y', 'R', 'phi']:   
+            raise RuntimeError("Invalid demodulator parameter")
+        datadict = cast(dict, self._parent._getter(module, number, mode, setting))
+        datadict['R'] = np.abs(datadict['x'] + 1j * datadict['y'])
+        datadict['phi'] = np.angle(datadict['x'] + 1j * datadict['y'], deg=True)
+        return datadict[demod_param]
                                
                                
 class SignalInputChannel(InstrumentChannel):
@@ -499,7 +470,6 @@ class SignalInputChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'sigins',
                                            channum-1, Mode.INT, 'autorange'),
                            vals=vals.Ints() )
-
         self.add_parameter('range',
                            label='Input range',
                            set_cmd=partial(self._parent._setter, 'sigins',
@@ -508,7 +478,6 @@ class SignalInputChannel(InstrumentChannel):
                                            channum-1, 1, 'range'),
                            unit='V',
                            vals=vals.Numbers() )
-                           
         self.add_parameter('float',
                            label='floating',
                            get_cmd=partial(self._parent._getter, 'sigins', 
@@ -517,7 +486,6 @@ class SignalInputChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'float'),
                            val_mapping={'OFF': 0, 'ON': 1},
                            vals=vals.Enum('OFF', 'ON') )
-
         self.add_parameter('scaling',
                            label='Input scaling',
                            set_cmd=partial(self._parent._setter, 'sigins',
@@ -525,7 +493,6 @@ class SignalInputChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'sigins',
                                            channum-1, 1, 'scaling'),
                            vals=vals.Numbers() )
-
         self.add_parameter('AC',
                            label='AC coupling',
                            set_cmd=partial(self._parent._setter,'sigins',
@@ -534,7 +501,6 @@ class SignalInputChannel(InstrumentChannel):
                                            channum-1, 0, 'ac'),
                            val_mapping={'ON': 1, 'OFF': 0},
                            vals=vals.Enum('ON', 'OFF') )
-
         self.add_parameter('impedance',
                            label='Input impedance',
                            set_cmd=partial(self._parent._setter, 'sigins',
@@ -543,7 +509,6 @@ class SignalInputChannel(InstrumentChannel):
                                            channum-1, 0, 'imp50'),
                            val_mapping={'ON': 1, 'OFF': 0},
                            vals=vals.Enum('ON', 'OFF') )
-
         self.add_parameter('diff',
                            label='Differential measurements',
                            set_cmd=partial(self._parent._setter, 'sigins',
@@ -552,29 +517,22 @@ class SignalInputChannel(InstrumentChannel):
                                            channum-1, 0, 'diff'),
                            val_mapping={'OFF': 0, 'ON': 1},
                            vals=vals.Enum('OFF', 'ON') )
-                           
         self.add_parameter('max',
                            label='maximum measured value',
                            get_cmd=partial(self._parent._getter, 'sigins',
                                            channum-1, Mode.DOUBLE, 'max'),
                            set_cmd=partial(self._parent._setter, 'sigins',
                                            channum-1, Mode.DOUBLE, 'max'),
-                           #I am not sure if it is actually sensefull to be 
-                           #able to set this parameter 
                            unit='V',
                            vals=vals.Numbers() )
-                           
         self.add_parameter('min',
                            label='minimum measured value',
                            get_cmd=partial(self._parent._getter, 'sigins',
                                            channum-1, Mode.DOUBLE, 'min'),
                            set_cmd=partial(self._parent._setter, 'sigins',
                                            channum-1, Mode.DOUBLE, 'min'),
-                           #I am not sure if it is actually sensefull to be
-                           #able to set this parameter 
                            unit='V',
                            vals=vals.Numbers() )
-                           
         self.add_parameter('on',
                            label='Enable signal input',
                            get_cmd=partial(self._parent._getter, 'sigins',
@@ -582,7 +540,6 @@ class SignalInputChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'sigins',
                                            channum-1, Mode.INT, 'on'),
                            vals=vals.Ints() )
-        
         self.add_parameter('trigger',
                            label='Trigger',
                            get_cmd=partial(self._parent._getter, 'sigins',
@@ -616,6 +573,7 @@ class SignalOutputChannel(InstrumentChannel):
                 0.75 and 1.5
             amplitude: Sets the peak amplitude that the oscillator assigned to 
                 the given demodulation channel contributes to the signal output.
+                Should be given as Vpk value
                 TODO To the channum a certain amplitude number is given in 
                 outputamps, should it stay like that?
             ampdef: the unit for the amplitude Vpk, Vrms or dBm, default is Vpk
@@ -690,9 +648,7 @@ class SignalOutputChannel(InstrumentChannel):
                            label='Overloaded',
                            set_cmd=False,
                            get_cmd=partial(self._parent._getter,
-                                           Mode.INT, 'over')
-                           )
-
+                                           Mode.INT, 'over'))
         self.add_parameter('range',
                            label='Signal output range',
                            set_cmd=partial(self._setter,
@@ -700,12 +656,6 @@ class SignalOutputChannel(InstrumentChannel):
                            get_cmd=partial(self.parent._getter,
                                            channum-1, Mode.DOUBLE, 'range'),
                            vals=vals.Enum(0.075, 0.15, 0.75, 1.5) )
-                           #the instrument automatically selects the next higher
-                           #available range, so there not really a need to check
-                           #the range here
-
-        #TODO add a parameter for every amplitude the SignalOutputChannel has
-        #how many of them are there?
         self.add_parameter('amplitude',
                            label='Signal output amplitude',
                            set_cmd=partial(self._setter,
@@ -714,17 +664,14 @@ class SignalOutputChannel(InstrumentChannel):
                                           channum-1, Mode.DOUBLE, outputamps[channum]),
                            unit='V',
                            vals=vals.Numbers() )
-
-        #is this needed here, as it does not belong to the instrument directly
+        #TODO: is this really needed as it does not belong to the instrument directly
+        #Does it work properly like this?
         self.add_parameter('ampdef',
                            label="Signal output amplitude's definition",
                            get_cmd=None, 
-                           set_cmd=None,
+                           set_cmd=None,    #is only set indirectly
                            initial_value='Vpk',
                            vals=vals.Enum('Vpk','Vrms', 'dBm'))
-
-        #TODO add a parameter for every amplitude the SignalOutputChannel has
-        #how many are these?
         self.add_parameter('enable',
                            label="Enable signal output's amplitude.",
                            set_cmd=partial(self._setter, Mode.INT,
@@ -784,7 +731,7 @@ class SignalOutputChannel(InstrumentChannel):
                 so_range = params['range'].get()
                 range_val = round(so_range, 3)
 
-            amp_val_dict={'Vpk': lambda value: value,
+            amp_val_dict={'Vpk': lambda value: value,               #value for amplitude has to be given in Vpk
                           'Vrms': lambda value: value*sqrt(2),
                           'dBm': lambda value: 10**((value-10)/20)
                          }
@@ -792,7 +739,7 @@ class SignalOutputChannel(InstrumentChannel):
             if -range_val < amp_val_dict[ampdef_val](value) > range_val:
                 raise ValueError('Signal Output:'
                                  + ' Amplitude too high for chosen range.')
-            value = amp_val_dict[ampdef_val](value)
+            value = amp_val_dict[ampdef_val](value) #value of the amplitude
 
         #validation of the offset
         def offset_valid():
@@ -835,6 +782,8 @@ class SignalOutputChannel(InstrumentChannel):
                 raise ValueError("Signal Output: Choose a valid amplitude "
                                  "definition; ['Vpk','Vrms', 'dBm'] if imp50 is"
                                  " on, ['Vpk','Vrms'] otherwise.")
+            else:
+                params[ampdef]
 
         dynamic_validation = {'range': range_valid,
                               'ampdef': ampdef_valid,
@@ -853,12 +802,15 @@ class SignalOutputChannel(InstrumentChannel):
                 #The GUI would allow higher values but it would clip the signal.
                 raise ValueError('Signal Output: Amplitude and/or '
                                  'offset out of range.')
-
+        #what are these methods for, why do you get a value to do nothing with it?
         def update_offset():
             self.parameters['offset'].get()
 
         def update_amp():
             self.parameters['amplitude'].get()
+            
+        def update_ampdef():
+            self.parameters['ampdef'].set(value) #TODO test if this works correctly
 
         def update_range():
             self.parameters['autorange'].get()
@@ -1870,10 +1822,10 @@ class Sweep(MultiParameter):
                       'demods/1/phaseshift': 'degrees',
                       'demods/2/phaseshift': 'degrees',
                       'demods/3/phaseshift': 'degrees',
-                      'demods/4/phaseshift': 'degrees',
-                      'demods/5/phaseshift': 'degrees',
-                      'demods/6/phaseshift': 'degrees',
-                      'demods/7/phaseshift': 'degrees',
+                      #'demods/4/phaseshift': 'degrees', #there are only up to 4 dul-phase demodulators
+                      #'demods/5/phaseshift': 'degrees',
+                      #'demods/6/phaseshift': 'degrees',
+                      #'demods/7/phaseshift': 'degrees',
                       'oscs/0/freq': 'Hz',
                       'oscs/1/freq': 'Hz',
                       'sigouts/0/amplitudes/3': 'Volts',
@@ -3096,7 +3048,10 @@ class ZIMFLI(Instrument):
 
         ########################################
         # Oscillators
-        for oscs in range(1,3):  # TODO
+        self.no_oscs = 1
+        if 'MF-MD' in self.options:
+            self.no_oscs = 4
+        for oscs in range(1, no_oscs+1):
             self.add_parameter('oscillator{}_freq'.format(oscs),
                                label='Frequency of oscillator {}'.format(oscs),
                                unit='Hz',
@@ -3110,9 +3065,9 @@ class ZIMFLI(Instrument):
         #demodulator submodules
         demodulatorchannels = ChannelList(self, "DemodulatorChannels", DemodulatorChannel,
                                           snapshotable=False)
-        demodulator_no = 1
+        self.demodulator_no = 1
         if 'MF-MD' in self.options: #TODO is this the correct name for the option
-            demodulator_no = 4
+            self.demodulator_no = 4
         for demodchannum in range(1, demodulator_no+1):
             name = 'demod{}'.format(demodchannum)
             demodchannel = DemodulatorChannel(self, name, demodchannum)
@@ -3300,18 +3255,6 @@ class ZIMFLI(Instrument):
         # Weird exception, samplingrate returns a string
         return value
 
-    def _get_demod_sample(self, number: int, demod_param: str) -> float:
-        log.debug("getting demod %s param %s", number, demod_param)
-        mode = 2
-        module = 'demods'
-        setting = 'sample'
-        if demod_param not in ['x', 'y', 'R', 'phi']:
-            raise RuntimeError("Invalid demodulator parameter")
-        datadict = cast(dict, self._getter(module, number, mode, setting))
-        datadict['R'] = np.abs(datadict['x'] + 1j * datadict['y'])
-        datadict['phi'] = np.angle(datadict['x'] + 1j * datadict['y'], deg=True)
-        return datadict[demod_param]
-
     def _list_nodes(self, node):
         """
         Returns a list with all nodes in the sub-tree below the specified node.
@@ -3451,3 +3394,22 @@ class ZIMFLI(Instrument):
         self.sweeper.clear()
         self.daq.disconnect()
         super().close()
+
+#Only for testing, device name has to be delivered over the command line arguments
+if __name__ == "__main__":
+    #TODO
+    device_id = sys.argv[1]
+    device = ZIFMLI("ZIFMLIdevice", device_id)
+    device.oscillator1_freq(100)
+    print("frequency of oscillator1:", device.oscillator1_freq())
+    print("frequency of oscillator2:", device.oscillator2_freq())
+    demodulator = device.submodule["demod1"]
+    demodulator.oscselect(0)
+    print("freuqency of demodulator1:", demodulator.frequency())
+    demodulator.signalin('Constant input')
+    print("Sample of demodulator1:", demodulator.sample())
+    print("x of demodualtor1:", demodulator.x())
+    print("y of demodulator1:", demodulator.y())
+    print("R of demodulator1:", demodulator.R())
+    print("phi od demodualtor1:", demodulator.phi())
+    
