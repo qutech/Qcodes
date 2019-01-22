@@ -16,7 +16,7 @@ from qcodes.instrument.parameter import BufferedSweepableParameter, BufferedRead
 import qcodes.utils.validators as vals
 from qcodes.utils.helpers import full_class
 
-from qupulse.pulses import MappingPT, ForLoopPT
+from qupulse.pulses import MappingPT, ForLoopPT, RepetitionPT
 from qupulse.pulses.pulse_template import PulseTemplate
 from qupulse.hardware.dacs import DAC
 from qupulse.hardware.setup import ChannelID, _SingleChannel, PlaybackChannel, MarkerChannel, MeasurementMask
@@ -83,6 +83,12 @@ class QuPulseTemplateParameters(Instrument):
                                    vals=vals.Numbers(), set_cmd=None,
                                    sweep_parameter_cmd=sweep_parameter_cmd,
                                    send_buffer_cmd=send_buffer_cmd)
+        
+        self.add_parameter('_repetitions', parameter_class=QuPulseTemplateParameter,
+                           vals=vals.Numbers(), set_cmd=None,
+                           sweep_parameter_cmd=sweep_parameter_cmd,
+                           send_buffer_cmd=send_buffer_cmd)
+        self._repetitions.set(0)
 
 
     def to_dict(self) -> Dict:
@@ -159,6 +165,9 @@ class QuPulseAWGInstrument(Instrument):
         self._loops = []
         self.template.set(None)
         
+        
+    def reset_programs(self):
+        self._loops.clear()
         
     def _get_template(self) -> PulseTemplate:
         """
@@ -247,16 +256,27 @@ class QuPulseAWGInstrument(Instrument):
             parameter: Parameter to sweep
             sweep_values: Values the parameter should be swept over.
         """
-        for l in self._loops:
-            if l['parameter'] == parameter.name:
-                raise AttributeError('It is not supported to sweep the same parameter ({}) more than once.'.format(parameter))
-
-        loop = {
-            'parameter'    : parameter.name,
-            'iterator'     : '__' + parameter.name + '_it',
-            'sweep_values' : sweep_values,
-            'is_sent'      : False
-        }
+        
+        if parameter.name == '_repetitions':
+            loop = {
+                'parameter'    : parameter.name,
+                'is_rep'       : True,
+                'num'          : len(sweep_values),
+                'is_sent'      : False
+            }
+        else:
+            for l in self._loops:
+                if l['parameter'] == parameter.name:
+                    raise AttributeError('It is not supported to sweep the same parameter ({}) more than once.'.format(parameter))
+    
+            loop = {
+                'parameter'    : parameter.name,
+                'is_rep'       : False,
+                'iterator'     : '__' + parameter.name + '_it',
+                'sweep_values' : sweep_values,
+                'is_sent'      : False
+            }
+                
         self._loops.append(loop)
         
         
@@ -300,13 +320,17 @@ class QuPulseAWGInstrument(Instrument):
             parameter_mapping[p] = p
         
         for loop in self._loops:
-            parameter_mapping[loop['parameter']] = "{}[{}]".format(loop['parameter'], loop['iterator'])
-            params[loop['parameter']] = loop['sweep_values']
+            if not loop['is_rep']:
+                parameter_mapping[loop['parameter']] = "{}[{}]".format(loop['parameter'], loop['iterator'])
+                params[loop['parameter']] = loop['sweep_values']
 
         pt = MappingPT(self.template.get(), parameter_mapping=parameter_mapping)
 
         for loop in reversed(self._loops):
-            pt = ForLoopPT(pt, loop['iterator'], range(len(loop['sweep_values'])))
+            if loop['is_rep']:
+                pt = RepetitionPT(pt, loop['num'])
+            else:
+                pt = ForLoopPT(pt, loop['iterator'], range(len(loop['sweep_values'])))
         
         program = pt.create_program(parameters=params,
                                     channel_mapping=self.channel_mapping.get(),
@@ -553,6 +577,12 @@ class QuPulseDACInstrument(Instrument):
         self._affected_dacs = None
         self._data = None
 
+
+    def reset_measurements(self):
+        for p in self.parameters.values():
+            if isinstance(p, QuPulseDACChannel):
+                p.reset()
+        
     
     def _get_measurement_masks(self):
         """
@@ -695,7 +725,6 @@ class QuPulseDACInstrument(Instrument):
             The measurement value(s) of the current measurement step. The shape
             of the value(s) depends on the operation.
         """
-        
         if not self._data:
             parameters = []
             for p in self.parameters.values():
