@@ -13,8 +13,10 @@ from qcodes.instrument.visa import VisaInstrument
 
 import warnings
 
-class DACException(Exception):
-    pass
+class DACException(BaseException):
+    
+    def __init__(self, *args, **kwargs):
+          super().__init__(*args, **kwargs)
 
 
 class DacBase(object):
@@ -52,9 +54,6 @@ class DacBase(object):
     _SLOT_VAL      = vals.Ints(0, 4)
     _TRIG_MODE_VAL = vals.Enum(0, 2,3,4,5,6,7,8, 10,11,12,13,14,15) # The trigger modes 1 and 9 are undefined
 
-    # Default buffer size for reading the device parameters
-    _BUF_SIZE=10
-    
     # Default values of the parameters
     _DEFAULT_VOLT          = 0
     _DEFAULT_SWITCH_POS    = SWITCH_MID
@@ -239,8 +238,8 @@ class DacChannel(InstrumentChannel, DacBase):
         """
         Reads out the voltage of the channel as dac-code
         """
-        buf = self._parent._read(self, DacBase._COMMAND_GET_VOLT)
-        self._volt = int(buf[-self._BUF_SIZE+1:-1])
+        buf = self._parent._write(self, DacBase._COMMAND_GET_VOLT)
+        self._volt = int(buf[1:-1])
         
         return self._volt
 
@@ -535,13 +534,6 @@ class DacSlot(InstrumentChannel, DacBase):
         return self._parent._write(obj, cmd)
 
 
-    def _read(self, obj, buf_size):
-        """
-        Forward the read method of the Decadac class
-        """
-        return self._parent._read(obj, buf_size)
-
-
 class Decadac(VisaInstrument):
 
     _DEFAULT_RESET    = False
@@ -579,9 +571,6 @@ class Decadac(VisaInstrument):
         super().__init__(name, address, timeout=timeout, terminator=terminator,
                          **kwargs)
 
-        self.current_slot = None
-        self.current_channel = None
-        
         self.current_slot = None
         self.current_channel = None
         
@@ -681,29 +670,17 @@ class Decadac(VisaInstrument):
             elif isinstance(obj, DacChannel):
                 self._set_channel(obj._parent, obj)
         
-        super().write_raw(cmd)
+        buf = super().ask_raw(cmd)
+        
+        # Check if write and read run successfully
+        # The first letter of query and answer has to be equal otherwise the answer does not belong to the write-query. Maybe the device buffer is damaged.
+        # The last letter of the answer has to be an exclamation mark ("!"). This means the write-query was handled successfully.
+        if buf[0] != cmd[0]:
+            raise DACException("Could not write \"{}\" to the device. Please check the device buffer.".format(cmd))
+        elif buf[-1] != '!':
+            raise DACException("Could not write \"{}\" to the device.".format(cmd))
         
         if Decadac.enable_output:
-            print("Decadac._write(\"{}\")".format(cmd))
-
-
-    def _read(self, obj, cmd):
-        """
-        Read the buffer of the device
-
-        Arguments:
-            obj (object): object that wants to read something (needed to set the current slot and channel)
-            cmd (str):    command
-        """
-        if obj != None:
-            if isinstance(obj, DacSlot):
-                self._set_slot(obj)
-            elif isinstance(obj, DacChannel):
-                self._set_channel(obj._parent, obj)
-        
-        result = super().ask_raw(cmd)
-        
-        if Decadac.enable_output:
-            print("Decadac._read(\"{}\") = {}".format(cmd, result))
-
-        return result
+            print("Decadac._write(\"{}\") = {}".format(cmd, buf))
+      
+        return buf
