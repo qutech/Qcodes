@@ -63,7 +63,8 @@ class QuPulseTemplateParameters(Instrument):
 
     def set_parameters(self, pulse_parameters: Iterable[str],
                        sweep_parameter_cmd: Optional[Callable]=None,
-                       send_buffer_cmd: Optional[Callable]=None) -> None:
+                       send_buffer_cmd: Optional[Callable]=None,
+                       run_program_cmd: Optional[Callable]=None) -> None:
         """
         Adds sweepable QCoDeS-parameters from qupulse-template-parameters.
         
@@ -82,7 +83,8 @@ class QuPulseTemplateParameters(Instrument):
                 self.add_parameter(p, parameter_class=QuPulseTemplateParameter,
                                    vals=vals.Numbers(), set_cmd=None,
                                    sweep_parameter_cmd=sweep_parameter_cmd,
-                                   send_buffer_cmd=send_buffer_cmd)
+                                   send_buffer_cmd=send_buffer_cmd,
+                                   run_program_cmd=run_program_cmd)
 
 
     def to_dict(self) -> Dict:
@@ -120,6 +122,7 @@ class QuPulseAWGInstrument(Instrument):
     """
     
     def __init__(self, name: str,
+                 run_program_cmd: Optional[Callable]=None,
                  **kwargs) -> None:
         """
         Creates an QuPulseAWGInstrument that wraps an qupulse-PulseTemplate and
@@ -155,6 +158,7 @@ class QuPulseAWGInstrument(Instrument):
 
         self.program_name.set(self.name + "_program")
         
+        self.run_program_cmd = run_program_cmd
         self._channel_map = {}
         self._loops = []
         self.template.set(None)
@@ -181,7 +185,8 @@ class QuPulseAWGInstrument(Instrument):
         if self._template:
             self.template_parameters.set_parameters(self._template.parameter_names,
                                                     self._sweep_parameter,
-                                                    self._send_buffer)
+                                                    self._send_buffer,
+                                                    self._run_program)
         else:
             self.template_parameters.set_parameters(None, None, None)
 
@@ -255,7 +260,8 @@ class QuPulseAWGInstrument(Instrument):
             'parameter'    : parameter.name,
             'iterator'     : '__' + parameter.name + '_it',
             'sweep_values' : sweep_values,
-            'is_sent'      : False
+            'is_sent'      : False,
+            'is_run'       : False
         }
         self._loops.append(loop)
         
@@ -272,19 +278,21 @@ class QuPulseAWGInstrument(Instrument):
             Dictionary of the measurement windows if the function was called
             the last parameter. If not it returns None.
         """
-        send = True
-        
-        for loop in self._loops:
-            if loop['parameter'] == parameter.name:
-                loop['is_sent'] = True
-            elif not loop['is_sent']:
-                send = False
-        
-        if send:
-            return self._really_send_buffer()
-        else:
-            return None
-        
+        if self._loops:
+            send = True
+            
+            for loop in self._loops:
+                if loop['parameter'] == parameter.name:
+                    loop['is_sent'] = True
+                elif not loop['is_sent']:
+                    send = False
+            
+            if send:
+                return self._really_send_buffer()
+            else:
+                return None
+
+
     def _really_send_buffer(self) -> Dict:
         """
         Builts up and sends the buffer to the device and makes the device wait
@@ -312,14 +320,12 @@ class QuPulseAWGInstrument(Instrument):
                                     channel_mapping=self.channel_mapping.get(),
                                     measurement_mapping=self.measurement_mapping.get())
         
-        measurement_windows = self._run_program(program)
-        
-        self._loops.clear()
+        measurement_windows = self._upload_program(program)
         
         return measurement_windows
         
         
-    def _run_program(self, program, update=True) -> Dict:
+    def _upload_program(self, program, update=True) -> Dict:
         """
         Sends the buffer to the device and arms it.
         
@@ -393,7 +399,50 @@ class QuPulseAWGInstrument(Instrument):
                 awg.arm(None)
         
         return measurement_windows
+
+
+    def _run_program(self, parameter):
+        """
+        """
+        if self._loops:
+            run = True
+            
+            for loop in self._loops:
+                if loop['parameter'] == parameter.name:
+                    loop['is_run'] = True
+                elif not loop['is_run']:
+                    run = False
+            
+            if run:
+                return self._really_run_program()
+            else:
+                return None
+
+
+    def _really_run_program(self):
+        """
+        """
+        if self.run_program_cmd is not None:
+            self.run_program_cmd()
+        
+        self.reset_programs()
     
+    
+    def reset_programs(self):
+        """
+        Resets all previously defined parameter-sweeps. In case of an error
+        while running a program this can be used before running a new program.
+        """
+        self._loops.clear()
+    
+    
+    def remove_programs(self):
+        """
+        Removes all defined parameter-sweeps, channels and programs
+        """
+        self.reset_programs()
+        self._channel_map.clear()
+
 
     def snapshot_base(self, update: bool=False,
                       params_to_skip_update: Sequence[str]=None):
@@ -695,7 +744,6 @@ class QuPulseDACInstrument(Instrument):
             The measurement value(s) of the current measurement step. The shape
             of the value(s) depends on the operation.
         """
-        
         if not self._data:
             parameters = []
             for p in self.parameters.values():
@@ -718,9 +766,31 @@ class QuPulseDACInstrument(Instrument):
             del self._data[parameter.name]
         
         if self._data != None and not self._data:
+            del self._data
             self._data = None
             
         return values
+    
+    
+    def reset_measurements(self):
+        """
+        Resets all previously defined measurements. In case of an error while
+        measuring this can be used before starting a new measurement.
+        """
+        for p in self.parameters.values():
+            if isinstance(p, QuPulseDACChannel):
+                p.reset()
+    
+    
+    def remove_measurements(self):
+        """
+        Removes all defined measurements, measurement-masks and operations
+        """
+        for p in self.parameters.values():
+            if isinstance(p, QuPulseDACChannel):
+                self.parameters.pop(p.name)
+        
+        self._measurement_masks.clear()
 
 
     def snapshot_base(self, update: bool=False,

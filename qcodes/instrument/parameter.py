@@ -1749,6 +1749,7 @@ class BufferedSweepableParameter(Parameter):
                  instrument: 'Instrument',
                  sweep_parameter_cmd: Optional[Callable]=None,
                  send_buffer_cmd: Optional[Callable]=None,
+                 run_program_cmd: Optional[Callable]=None,
                  *args, **kwargs):
         """
         Creates a BufferedSweepableParameter that creates buffered sweeps in
@@ -1766,6 +1767,7 @@ class BufferedSweepableParameter(Parameter):
         
         self._sweep_parameter_cmd = sweep_parameter_cmd
         self._send_buffer_cmd = send_buffer_cmd
+        self._run_program_cmd = run_program_cmd
         
     def set_buffered(self, sweep_values):
         """
@@ -1782,6 +1784,15 @@ class BufferedSweepableParameter(Parameter):
         """
         if self._send_buffer_cmd is not None:
             return self._send_buffer_cmd(self)
+        else:
+            return None
+            
+    def run_program(self):
+        """
+        Send the buffer to the device.
+        """
+        if self._run_program_cmd is not None:
+            return self._run_program_cmd(self)
         else:
             return None
         
