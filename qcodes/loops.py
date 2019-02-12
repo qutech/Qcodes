@@ -1115,7 +1115,9 @@ class BufferedActiveLoop(ActiveLoop):
         # - (it arms the program on the instruments hardware),
         # - it configures the measurement on the instrument and
         # - it arms the measruement on the instruments hardware.
-        if self._nest_first:
+        # - it runs the program and starts the measurement 
+        if len(action_indices) == 0 and len(loop_indices) == 0 and len(current_values) == 0:
+            print("outer loop")
             self._set_buffered_sweep() # builds up the buffer
             measurement_windows = self._send_buffer() # sends the buffer to the hardware and arms the hardware
             
