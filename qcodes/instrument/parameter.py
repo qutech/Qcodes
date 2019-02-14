@@ -1748,6 +1748,7 @@ class BufferedSweepableParameter(Parameter):
     def __init__(self, name: str,
                  instrument: 'Instrument',
                  sweep_parameter_cmd: Optional[Callable]=None,
+                 repeat_parameter_cmd: Optional[Callable]=None,
                  send_buffer_cmd: Optional[Callable]=None,
                  run_program_cmd: Optional[Callable]=None,
                  *args, **kwargs):
@@ -1766,33 +1767,43 @@ class BufferedSweepableParameter(Parameter):
         super().__init__(name, instrument=instrument, *args, **kwargs)
         
         self._sweep_parameter_cmd = sweep_parameter_cmd
+        self._repeat_parameter_cmd = repeat_parameter_cmd
         self._send_buffer_cmd = send_buffer_cmd
         self._run_program_cmd = run_program_cmd
         
-    def set_buffered(self, sweep_values):
+    def set_buffered(self, sweep_values, layer):
         """
         Define a buffered sweep for the parameter.
         """
         if self._sweep_parameter_cmd is not None:
-            return self._sweep_parameter_cmd(self, sweep_values)
+            return self._sweep_parameter_cmd(self, sweep_values, layer)
+        else:
+            return None
+        
+    def repeat_buffered(self, repetition_count, layer):
+        """
+        Define a buffered sweep for the parameter.
+        """
+        if self._repeat_parameter_cmd is not None:
+            return self._repeat_parameter_cmd(repetition_count, layer)
         else:
             return None
             
-    def send_buffer(self):
+    def send_buffer(self, layer):
         """
         Send the buffer to the device.
         """
         if self._send_buffer_cmd is not None:
-            return self._send_buffer_cmd(self)
+            return self._send_buffer_cmd(layer)
         else:
             return None
             
-    def run_program(self):
+    def run_program(self, layer):
         """
         Send the buffer to the device.
         """
         if self._run_program_cmd is not None:
-            return self._run_program_cmd(self)
+            return self._run_program_cmd(layer)
         else:
             return None
         

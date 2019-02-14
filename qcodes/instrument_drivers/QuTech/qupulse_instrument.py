@@ -16,7 +16,7 @@ from qcodes.instrument.parameter import BufferedSweepableParameter, BufferedRead
 import qcodes.utils.validators as vals
 from qcodes.utils.helpers import full_class
 
-from qupulse.pulses import MappingPT, ForLoopPT
+from qupulse.pulses import MappingPT, ForLoopPT, RepetitionPT
 from qupulse.pulses.pulse_template import PulseTemplate
 from qupulse.hardware.dacs import DAC
 from qupulse.hardware.setup import ChannelID, _SingleChannel, PlaybackChannel, MarkerChannel, MeasurementMask
@@ -63,6 +63,7 @@ class QuPulseTemplateParameters(Instrument):
 
     def set_parameters(self, pulse_parameters: Iterable[str],
                        sweep_parameter_cmd: Optional[Callable]=None,
+                       repeat_parameter_cmd: Optional[Callable]=None,
                        send_buffer_cmd: Optional[Callable]=None,
                        run_program_cmd: Optional[Callable]=None) -> None:
         """
@@ -83,6 +84,7 @@ class QuPulseTemplateParameters(Instrument):
                 self.add_parameter(p, parameter_class=QuPulseTemplateParameter,
                                    vals=vals.Numbers(), set_cmd=None,
                                    sweep_parameter_cmd=sweep_parameter_cmd,
+                                   repeat_parameter_cmd=repeat_parameter_cmd,
                                    send_buffer_cmd=send_buffer_cmd,
                                    run_program_cmd=run_program_cmd)
 
@@ -185,6 +187,7 @@ class QuPulseAWGInstrument(Instrument):
         if self._template:
             self.template_parameters.set_parameters(self._template.parameter_names,
                                                     self._sweep_parameter,
+                                                    self._repeat_parameter,
                                                     self._send_buffer,
                                                     self._run_program)
         else:
@@ -244,19 +247,23 @@ class QuPulseAWGInstrument(Instrument):
         return self._channel_map
 
 
-    def _sweep_parameter(self, parameter, sweep_values) -> None:
+    def _sweep_parameter(self, parameter, sweep_values, layer) -> None:
         """
         Adds the sweep information to a list, to build up a single buffer later
         
         Args:
             parameter: Parameter to sweep
             sweep_values: Values the parameter should be swept over.
+            layer: nnumber of nested loop (most outer loop: 0)
         """
         for l in self._loops:
-            if l['parameter'] == parameter.name:
+            if l['layer'] == layer:
+                raise AttributeError('It is not possible to define multiple loops per layer (layer={}).'.format(layer))
+            if 'parameter' in l and l['parameter'] == parameter.name:
                 raise AttributeError('It is not supported to sweep the same parameter ({}) more than once.'.format(parameter))
 
         loop = {
+            'layer'        : layer,
             'parameter'    : parameter.name,
             'iterator'     : '__' + parameter.name + '_it',
             'sweep_values' : sweep_values,
@@ -264,15 +271,36 @@ class QuPulseAWGInstrument(Instrument):
             'is_run'       : False
         }
         self._loops.append(loop)
+    
+    
+    def _repeat_parameter(self, repetition_count, layer) -> None:
+        """
+        Adds the repetition information to a list to build up a single buffer later
+        
+        Args:
+            repetition_count: number of repetitions
+            layer: nnumber of nested loop (most outer loop: 0)
+        """
+        for l in self._loops:
+            if l['layer'] == layer:
+                raise AttributeError('It is not possible to define multiple loops per layer (layer={}).'.format(layer))
+
+        loop = {
+            'layer'        : layer,
+            'repetitions'  : repetition_count,
+            'is_sent'      : False,
+            'is_run'       : False
+        }
+        self._loops.append(loop)
         
         
-    def _send_buffer(self, parameter) -> Dict:
+    def _send_buffer(self, layer) -> Dict:
         """
         Waits until this function is called for all swept parameters. Then the 
         buffer will be built and sent to the device.
         
         Args:
-            parameter: The parameter that calls the function
+            layer: nnumber of nested loop (most outer loop: 0)
             
         Returns:
             Dictionary of the measurement windows if the function was called
@@ -282,7 +310,7 @@ class QuPulseAWGInstrument(Instrument):
             send = True
             
             for loop in self._loops:
-                if loop['parameter'] == parameter.name:
+                if loop['layer'] == layer:
                     loop['is_sent'] = True
                 elif not loop['is_sent']:
                     send = False
@@ -308,13 +336,17 @@ class QuPulseAWGInstrument(Instrument):
             parameter_mapping[p] = p
         
         for loop in self._loops:
-            parameter_mapping[loop['parameter']] = "{}[{}]".format(loop['parameter'], loop['iterator'])
-            params[loop['parameter']] = loop['sweep_values']
+            if 'sweep_values' in loop:
+                parameter_mapping[loop['parameter']] = "{}[{}]".format(loop['parameter'], loop['iterator'])
+                params[loop['parameter']] = loop['sweep_values']
 
         pt = MappingPT(self.template.get(), parameter_mapping=parameter_mapping)
 
         for loop in reversed(self._loops):
-            pt = ForLoopPT(pt, loop['iterator'], range(len(loop['sweep_values'])))
+            if 'sweep_values' in loop:
+                pt = ForLoopPT(pt, loop['iterator'], range(len(loop['sweep_values'])))
+            elif 'repetitions' in loop:
+                pt = RepetitionPT(pt, loop['repetitions'])
         
         program = pt.create_program(parameters=params,
                                     channel_mapping=self.channel_mapping.get(),
@@ -401,14 +433,16 @@ class QuPulseAWGInstrument(Instrument):
         return measurement_windows
 
 
-    def _run_program(self, parameter):
+    def _run_program(self, layer):
         """
+        Runs the waveform program on the awg as soon as this function was
+        called for the last (buffered) loop
         """
         if self._loops:
             run = True
             
             for loop in self._loops:
-                if loop['parameter'] == parameter.name:
+                if loop['layer'] == layer:
                     loop['is_run'] = True
                 elif not loop['is_run']:
                     run = False
@@ -421,6 +455,8 @@ class QuPulseAWGInstrument(Instrument):
 
     def _really_run_program(self):
         """
+        Runs the program on the awg by calling the configured
+        callback.
         """
         if self.run_program_cmd is not None:
             self.run_program_cmd()

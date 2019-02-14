@@ -33,7 +33,7 @@ if plotlib in {'matplotlib', 'all'}:
 
 
 from qcodes.station import Station
-from qcodes.loops import Loop, BufferedLoop, active_loop, active_data_set
+from qcodes.loops import Loop, BufferedLoop, Repetition, BufferedRepetition, active_loop, active_data_set
 from qcodes.measure import Measure
 from qcodes.actions import Task, Wait, BreakIf
 haswebsockets = True

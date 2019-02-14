@@ -66,7 +66,7 @@ log = logging.getLogger(__name__)
 
 
 def active_loop():
-    return ActiveLoop.active_loop
+    return _BaseActiveLoop.active_loop
 
 
 def active_data_set():
@@ -77,39 +77,16 @@ def active_data_set():
         return None
 
 
-class Loop(Metadatable):
+class _BaseLoop(Metadatable):
     """
-    The entry point for creating measurement loops
-
-    Args:
-        sweep_values: a SweepValues or compatible object describing what
-            parameter to set in the loop and over what values
-        delay: a number of seconds to wait after setting a value before
-            continuing. 0 (default) means no waiting and no warnings. > 0
-            means to wait, potentially filling the delay time with monitoring,
-            and give an error if you wait longer than expected.
-        progress_interval: should progress of the loop every x seconds. Default
-            is None (no output)
-
-    After creating a Loop, you attach ``action``\s to it, making an ``ActiveLoop``
-
-    TODO:
-        how? Maybe obvious but not specified! that you can ``.run()``,
-        or you can ``.run()`` a ``Loop`` directly, in which
-        case it takes the default ``action``\s from the default ``Station``
-
-    ``actions`` are a sequence of things to do at each ``Loop`` step: they can be
-    ``Parameter``\s to measure, ``Task``\s to do (any callable that does not yield
-    data), ``Wait`` times, or other ``ActiveLoop``\s or ``Loop``\s to nest inside
-    this one.
+    Base class for Loops, Repetitions, etc.
     """
-    def __init__(self, sweep_values, delay=0, station=None,
-                 progress_interval=None):
+    
+    def __init__(self, delay, station, progress_interval):
         super().__init__()
         if delay < 0:
             raise ValueError('delay must be > 0, not {}'.format(repr(delay)))
 
-        self.sweep_values = sweep_values
         self.delay = delay
         self.station = station
         self.nested_loop = None
@@ -119,7 +96,7 @@ class Loop(Metadatable):
         self.bg_final_task = None
         self.bg_min_delay = None
         self.progress_interval = progress_interval
-
+    
     def __getitem__(self, item):
         """
         Retrieves action with index `item`
@@ -183,49 +160,60 @@ class Loop(Metadatable):
             out.nested_loop = BufferedLoop(sweep_values)
 
         return out
-    
-    def _copy(self):
-        out = Loop(self.sweep_values, self.delay,
-                   progress_interval=self.progress_interval)
-        out.nested_loop = self.nested_loop
-        out.then_actions = self.then_actions
-        out.station = self.station
-        return out
 
-    def each(self, *actions):
+    def repeat(self, repetition_count, delay=0):
         """
-        Perform a set of actions at each setting of this loop.
-        TODO(setting vs setpoints) ? better be verbose.
+        Nest another loop inside this one.
 
         Args:
-            *actions (Any): actions to perform at each setting of the loop
+            sweep_values ():
+            delay (int):
 
-        Each action can be:
+        Examples:
+            >>> Loop(sv1, d1).loop(sv2, d2).each(*a)
 
-        - a Parameter to measure
-        - a Task to execute
-        - a Wait
-        - another Loop or ActiveLoop
+            is equivalent to:
 
+            >>> Loop(sv1, d1).each(Loop(sv2, d2).each(*a))
+
+        Returns: a new Loop object - the original is untouched
         """
-        actions = list(actions)
+        out = self._copy()
 
-        # check for nested Loops, and activate them with default measurement
-        for i, action in enumerate(actions):
-            if isinstance(action, Loop):
-                default = Station.default.default_measurement
-                actions[i] = action.each(*default)
+        if out.nested_loop:
+            # nest this new loop inside the deepest level
+            out.nested_loop = out.nested_loop.repeat(repetition_count, delay)
+        else:
+            out.nested_loop = Repetition(repetition_count, delay)
 
-        self.validate_actions(*actions)
+        return out
+    
+    def buffered_repeat(self, repetition_count):
+        """
+        Nest another loop inside this one.
 
-        if self.nested_loop:
-            # recurse into the innermost loop and apply these actions there
-            actions = [self.nested_loop.each(*actions)]
+        Args:
+            sweep_values ():
 
-        return ActiveLoop(self.sweep_values, self.delay, *actions,
-                          then_actions=self.then_actions, station=self.station,
-                          progress_interval=self.progress_interval,
-                          bg_task=self.bg_task, bg_final_task=self.bg_final_task, bg_min_delay=self.bg_min_delay)
+        Examples:
+            >>> Loop(sv1, d1).buffered_loop(sv2, d2).each(*a)
+
+            is equivalent to:
+
+            >>> Loop(sv1, d1).each(BufferedLoop(sv2, d2).each(*a))
+
+        Returns: a new Loop object - the original is untouched
+        """
+        out = self._copy()
+
+        if out.nested_loop:
+            # nest this new loop inside the deepest level
+            out.nested_loop = out.nested_loop.buffered_repeat(repetition_count)
+        else:
+            out.nested_loop = BufferedRepetition(repetition_count)
+
+        return out
+
 
     def with_bg_task(self, task, bg_final_task=None, min_delay=0.01):
         """
@@ -256,7 +244,7 @@ class Loop(Metadatable):
         if an action is not recognized
         """
         for action in actions:
-            if isinstance(action, (Task, Wait, BreakIf, ActiveLoop)):
+            if isinstance(action, (Task, Wait, BreakIf, _BaseActiveLoop)):
                 continue
             if hasattr(action, 'get') and (hasattr(action, 'name') or
                                            hasattr(action, 'names')):
@@ -325,6 +313,99 @@ class Loop(Metadatable):
         """
         return {
             '__class__': full_class(self),
+            'delay': self.delay,
+            'then_actions': _actions_snapshot(self.then_actions, update)
+        }
+
+class Loop(_BaseLoop):
+    """
+    The entry point for creating measurement loops
+
+    Args:
+        sweep_values: a SweepValues or compatible object describing what
+            parameter to set in the loop and over what values
+        delay: a number of seconds to wait after setting a value before
+            continuing. 0 (default) means no waiting and no warnings. > 0
+            means to wait, potentially filling the delay time with monitoring,
+            and give an error if you wait longer than expected.
+        progress_interval: should progress of the loop every x seconds. Default
+            is None (no output)
+
+    After creating a Loop, you attach ``action``\s to it, making an ``ActiveLoop``
+
+    TODO:
+        how? Maybe obvious but not specified! that you can ``.run()``,
+        or you can ``.run()`` a ``Loop`` directly, in which
+        case it takes the default ``action``\s from the default ``Station``
+
+    ``actions`` are a sequence of things to do at each ``Loop`` step: they can be
+    ``Parameter``\s to measure, ``Task``\s to do (any callable that does not yield
+    data), ``Wait`` times, or other ``ActiveLoop``\s or ``Loop``\s to nest inside
+    this one.
+    """
+    def __init__(self, sweep_values, delay=0, station=None,
+                 progress_interval=None):
+        super().__init__(delay, station, progress_interval)
+
+        self.sweep_values = sweep_values
+
+    def _copy(self):
+        out = Loop(self.sweep_values, self.delay,
+                   progress_interval=self.progress_interval)
+        out.nested_loop = self.nested_loop
+        out.then_actions = self.then_actions
+        out.station = self.station
+        return out
+
+    def each(self, *actions):
+        """
+        Perform a set of actions at each setting of this loop.
+        TODO(setting vs setpoints) ? better be verbose.
+
+        Args:
+            *actions (Any): actions to perform at each setting of the loop
+
+        Each action can be:
+
+        - a Parameter to measure
+        - a Task to execute
+        - a Wait
+        - another Loop or ActiveLoop
+
+        """
+        actions = list(actions)
+
+        # check for nested Loops, and activate them with default measurement
+        for i, action in enumerate(actions):
+            if isinstance(action, _BaseLoop):
+                default = Station.default.default_measurement
+                actions[i] = action.each(*default)
+
+        self.validate_actions(*actions)
+
+        if self.nested_loop:
+            # recurse into the innermost loop and apply these actions there
+            actions = [self.nested_loop.each(*actions)]
+
+        return ActiveLoop(self.sweep_values, self.delay, *actions,
+                          then_actions=self.then_actions, station=self.station,
+                          progress_interval=self.progress_interval,
+                          bg_task=self.bg_task, bg_final_task=self.bg_final_task, bg_min_delay=self.bg_min_delay)
+
+    def snapshot_base(self, update=False):
+        """
+        State of the loop as a JSON-compatible dict.
+
+        Args:
+            update (bool): If True, update the state by querying the underlying
+             sweep_values and actions. If False, just use the latest values in
+             memory.
+
+        Returns:
+            dict: base snapshot
+        """
+        return {
+            '__class__': full_class(self),
             'sweep_values': self.sweep_values.snapshot(update=update),
             'delay': self.delay,
             'then_actions': _actions_snapshot(self.then_actions, update)
@@ -344,7 +425,7 @@ class BufferedLoop(Loop):
         Args:
             sweep_values: Sweep values of a BufferedSweepableParameter
         """
-        super().__init__(sweep_values, delay=0, station=station)
+        super().__init__(sweep_values, station=station)
         
         if not isinstance(sweep_values.parameter, BufferedSweepableParameter):
             raise TypeError("The sweep values of a buffered loop must sweep a buffered parameter.")
@@ -358,6 +439,9 @@ class BufferedLoop(Loop):
     
     def loop(self, *args, **kwargs):
         raise AttributeError('It is not supported to nest a \'normal\' Loop in a BufferedLoop.')
+        
+    def repeat(self, *args, **kwargs):
+        raise AttributeError('It is not supported to nest a \'normal\' Repetition in a BufferedLoop.')
     
     def each(self, *actions):
         """
@@ -379,10 +463,10 @@ class BufferedLoop(Loop):
 
         # check for nested Loops, and activate them with default measurement
         for i, action in enumerate(actions):
-            if isinstance(action, BufferedLoop):
+            if isinstance(action, (BufferedLoop, BufferedRepetition)):
                 default = Station.default.default_measurement
                 actions[i] = action.each(*default)
-            elif isinstance(action, Loop):
+            elif isinstance(action, _BaseLoop):
                 raise AttributeError('It is not supported to nest a \'normal\' Loop in a BufferedLoop.')
             elif isinstance(action, _BaseParameter) and not isinstance(action, BufferedReadableParameter):
                 raise AttributeError("The measuring parameters in a buffered loop must be BufferedReadableParameters.")
@@ -398,6 +482,160 @@ class BufferedLoop(Loop):
                                   progress_interval=self.progress_interval,
                                   bg_task=self.bg_task, bg_final_task=self.bg_final_task, 
                                   bg_min_delay=self.bg_min_delay)
+
+
+class Repetition(_BaseLoop):
+    """
+    The entry point for creating repetitions of nested loops
+
+    Args:
+        repetition_count: number of repetitions
+        delay: a number of seconds to wait after setting a value before
+            continuing. 0 (default) means no waiting and no warnings. > 0
+            means to wait, potentially filling the delay time with monitoring,
+            and give an error if you wait longer than expected.
+        progress_interval: should progress of the loop every x seconds. Default
+            is None (no output)
+
+    After creating a Repetition, you attach ``action``\s to it, making an
+    ``ActiveRepetition``
+    """
+    def __init__(self, repetition_count, delay=0, station=None,
+                 progress_interval=None):
+        super().__init__(delay, station, progress_interval)
+
+        self.repetition_count = repetition_count
+
+    def _copy(self):
+        out = Repetition(self.repetition_count, self.delay,
+                   progress_interval=self.progress_interval)
+        out.nested_loop = self.nested_loop
+        out.then_actions = self.then_actions
+        out.station = self.station
+        return out
+
+    def each(self, *actions):
+        """
+        Perform a set of actions at each setting of this loop.
+        TODO(setting vs setpoints) ? better be verbose.
+
+        Args:
+            *actions (Any): actions to perform at each setting of the loop
+
+        Each action can be:
+
+        - a Parameter to measure
+        - a Task to execute
+        - a Wait
+        - another Loop or ActiveLoop
+
+        """
+        actions = list(actions)
+
+        # check for nested Loops, and activate them with default measurement
+        for i, action in enumerate(actions):
+            if isinstance(action, _BaseLoop):
+                default = Station.default.default_measurement
+                actions[i] = action.each(*default)
+
+        self.validate_actions(*actions)
+
+        if self.nested_loop:
+            # recurse into the innermost loop and apply these actions there
+            actions = [self.nested_loop.each(*actions)]
+
+        return ActiveRepetition(self.repetition_count, self.delay, *actions,
+                                then_actions=self.then_actions, station=self.station,
+                                progress_interval=self.progress_interval,
+                                bg_task=self.bg_task, bg_final_task=self.bg_final_task, bg_min_delay=self.bg_min_delay)
+
+    def snapshot_base(self, update=False):
+        """
+        State of the loop as a JSON-compatible dict.
+
+        Args:
+            update (bool): If True, update the state by querying the underlying
+             sweep_values and actions. If False, just use the latest values in
+             memory.
+
+        Returns:
+            dict: base snapshot
+        """
+        return {
+            '__class__': full_class(self),
+            'repetition_count': self.repetition_count,
+            'delay': self.delay,
+            'then_actions': _actions_snapshot(self.then_actions, update)
+        }
+
+
+class BufferedRepetition(Repetition):
+    """
+    A loop that sweeps the parameters in a buffer that is sent once to the
+    device. So the loop will be run on the hardware.
+    """
+    
+    def __init__(self, repetition_count, station=None):
+        """
+        Creates a BufferedLoop
+        
+        Args:
+            sweep_values: Sweep values of a BufferedSweepableParameter
+        """
+        super().__init__(repetition_count, station=station)
+
+    def _copy(self):
+        out = BufferedRepetition(self.repetition_count)
+        out.nested_loop = self.nested_loop
+        out.then_actions = self.then_actions
+        out.station = self.station
+        return out
+    
+    def loop(self, *args, **kwargs):
+        raise AttributeError('It is not supported to nest a \'normal\' Loop in a BufferedLoop or -Repetition.')
+        
+    def repeat(self, *args, **kwargs):
+        raise AttributeError('It is not supported to nest a \'normal\' Repetition in a BufferedLoop or -Repetition.')
+    
+    def each(self, *actions):
+        """
+        Perform a set of actions at each setting of this loop.
+        TODO(setting vs setpoints) ? better be verbose.
+
+        Args:
+            *actions (Any): actions to perform at each setting of the loop
+
+        Each action can be:
+
+        - a Parameter to measure
+        - a Task to execute
+        - a Wait
+        - another Loop or ActiveLoop
+
+        """
+        actions = list(actions)
+
+        # check for nested Loops, and activate them with default measurement
+        for i, action in enumerate(actions):
+            if isinstance(action, (BufferedLoop, BufferedRepetition)):
+                default = Station.default.default_measurement
+                actions[i] = action.each(*default)
+            elif isinstance(action, _BaseLoop):
+                raise AttributeError('It is not supported to nest a \'normal\' Loop in a BufferedLoop.')
+            elif isinstance(action, _BaseParameter) and not isinstance(action, BufferedReadableParameter):
+                raise AttributeError("The measuring parameters in a buffered loop must be BufferedReadableParameters.")
+
+        self.validate_actions(*actions)
+
+        if self.nested_loop:
+            # recurse into the innermost loop and apply these actions there
+            actions = [self.nested_loop.each(*actions)]
+        
+        return BufferedActiveRepetition(self.repetition_count, *actions,
+                                        then_actions=self.then_actions, station=self.station,
+                                        progress_interval=self.progress_interval,
+                                        bg_task=self.bg_task, bg_final_task=self.bg_final_task, 
+                                        bg_min_delay=self.bg_min_delay)
 
 
 def _attach_then_actions(loop, actions, overwrite):
@@ -430,25 +668,15 @@ def _attach_bg_task(loop, task, bg_final_task, min_delay):
     return loop
 
 
-class ActiveLoop(Metadatable):
-    """
-    Created by attaching actions to a *Loop*, this is the object that actually
-    runs a measurement loop. An *ActiveLoop* can no longer be nested, only run,
-    or used as an action inside another `Loop` which will run the whole thing.
-
-    The *ActiveLoop* determines what *DataArray*\s it will need to hold the data
-    it collects, and it creates a *DataSet* holding these *DataArray*\s
-    """
-
+class _BaseActiveLoop(Metadatable):
     # Currently active loop, is set when calling loop.run(set_active=True)
     # is reset to None when active measurement is finished
     active_loop = None
-
-    def __init__(self, sweep_values, delay, *actions, then_actions=(),
-                 station=None, progress_interval=None, bg_task=None,
-                 bg_final_task=None, bg_min_delay=None):
+    
+    def __init__(self, delay, *actions, then_actions=(), station=None,
+                 progress_interval=None, bg_task=None, bg_final_task=None,
+                 bg_min_delay=None):
         super().__init__()
-        self.sweep_values = sweep_values
         self.delay = delay
         self.actions = list(actions)
         self.progress_interval = progress_interval
@@ -475,26 +703,6 @@ class ActiveLoop(Metadatable):
         """
         return self.actions[item]
 
-    def then(self, *actions, overwrite=False):
-        """
-        Attach actions to be performed after the loop completes.
-
-        These can only be `Task` and `Wait` actions, as they may not generate
-        any data.
-
-        returns a new ActiveLoop object - the original is untouched
-
-        \*actions: `Task` and `Wait` objects to execute in order
-
-        Args:
-            overwrite: (default False) whether subsequent .then() calls (including
-                calls in an ActiveLoop after .then() has already been called on
-                the Loop) will add to each other or overwrite the earlier ones.
-        """
-        loop = ActiveLoop(self.sweep_values, self.delay, *self.actions,
-                          then_actions=self.then_actions, station=self.station)
-        return _attach_then_actions(loop, actions, overwrite)
-
     def with_bg_task(self, task, bg_final_task=None, min_delay=0.01):
         """
         Attaches a background task to this loop.
@@ -518,54 +726,10 @@ class ActiveLoop(Metadatable):
         """Snapshot of this ActiveLoop's definition."""
         return {
             '__class__': full_class(self),
-            'sweep_values': self.sweep_values.snapshot(update=update),
             'delay': self.delay,
             'actions': _actions_snapshot(self.actions, update),
             'then_actions': _actions_snapshot(self.then_actions, update)
         }
-
-    def containers(self):
-        """
-        Finds the data arrays that will be created by the actions in this
-        loop, and nests them inside this level of the loop.
-
-        Recursively calls `.containers` on any enclosed actions.
-        """
-        loop_size = len(self.sweep_values)
-        data_arrays = []
-        loop_array = DataArray(parameter=self.sweep_values.parameter,
-                               is_setpoint=True)
-        loop_array.nest(size=loop_size)
-
-        data_arrays = [loop_array]
-        # hack set_data into actions
-        new_actions = self.actions[:]
-        if hasattr(self.sweep_values, "parameters"): # combined parameter
-            for parameter in self.sweep_values.parameters:
-                new_actions.append(parameter)
-
-        for i, action in enumerate(new_actions):
-            if hasattr(action, 'containers'):
-                action_arrays = action.containers()
-
-            elif hasattr(action, 'get'):
-                # this action is a parameter to measure
-                # note that this supports lists (separate output arrays)
-                # and arrays (nested in one/each output array) of return values
-                action_arrays = self._parameter_arrays(action)
-
-            else:
-                # this *is* covered but the report misses it because Python
-                # optimizes it away. See:
-                # https://bitbucket.org/ned/coveragepy/issues/198
-                continue  # pragma: no cover
-
-            for array in action_arrays:
-                array.nest(size=loop_size, action_index=i,
-                           set_array=loop_array)
-            data_arrays.extend(action_arrays)
-
-        return data_arrays
 
     def _parameter_arrays(self, action):
         out = []
@@ -826,7 +990,7 @@ class ActiveLoop(Metadatable):
         data_set.save_metadata()
 
         if set_active:
-            ActiveLoop.active_loop = self
+            _BaseActiveLoop.active_loop = self
 
         try:
             if not quiet:
@@ -844,7 +1008,7 @@ class ActiveLoop(Metadatable):
             # this one later.
             self.data_set = None
             if set_active:
-                ActiveLoop.active_loop = None
+                _BaseActiveLoop.active_loop = None
 
         return ds
 
@@ -873,7 +1037,7 @@ class ActiveLoop(Metadatable):
     def _compile_one(self, action, new_action_indices):
         if isinstance(action, Wait):
             return Task(self._wait, action.delay)
-        elif isinstance(action, ActiveLoop):
+        elif isinstance(action, _BaseActiveLoop):
             return _Nest(action, new_action_indices)
         else:
             return action
@@ -889,6 +1053,105 @@ class ActiveLoop(Metadatable):
                 ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 self.data_set.add_metadata({'loop': {'ts_end': ts}})
                 self.data_set.finalize()
+
+    def _wait(self, delay):
+        if delay:
+            finish_clock = time.perf_counter() + delay
+            t = wait_secs(finish_clock)
+            time.sleep(t)
+
+class ActiveLoop(_BaseActiveLoop):
+    """
+    Created by attaching actions to a *Loop*, this is the object that actually
+    runs a measurement loop. An *ActiveLoop* can no longer be nested, only run,
+    or used as an action inside another `Loop` which will run the whole thing.
+
+    The *ActiveLoop* determines what *DataArray*\s it will need to hold the data
+    it collects, and it creates a *DataSet* holding these *DataArray*\s
+    """
+
+    def __init__(self, sweep_values, delay, *actions, then_actions=(),
+                 station=None, progress_interval=None, bg_task=None,
+                 bg_final_task=None, bg_min_delay=None):
+        super().__init__(delay, *actions, then_actions=then_actions,
+                         station=station, progress_interval=progress_interval,
+                         bg_task=bg_task, bg_final_task=bg_final_task,
+                         bg_min_delay=bg_min_delay)
+        
+        self.sweep_values = sweep_values
+
+    def then(self, *actions, overwrite=False):
+        """
+        Attach actions to be performed after the loop completes.
+
+        These can only be `Task` and `Wait` actions, as they may not generate
+        any data.
+
+        returns a new ActiveLoop object - the original is untouched
+
+        \*actions: `Task` and `Wait` objects to execute in order
+
+        Args:
+            overwrite: (default False) whether subsequent .then() calls (including
+                calls in an ActiveLoop after .then() has already been called on
+                the Loop) will add to each other or overwrite the earlier ones.
+        """
+        loop = ActiveLoop(self.sweep_values, self.delay, *self.actions,
+                          then_actions=self.then_actions, station=self.station)
+        return _attach_then_actions(loop, actions, overwrite)
+
+    def snapshot_base(self, update=False):
+        """Snapshot of this ActiveLoop's definition."""
+        return {
+            '__class__': full_class(self),
+            'sweep_values': self.sweep_values.snapshot(update=update),
+            'delay': self.delay,
+            'actions': _actions_snapshot(self.actions, update),
+            'then_actions': _actions_snapshot(self.then_actions, update)
+        }
+
+    def containers(self):
+        """
+        Finds the data arrays that will be created by the actions in this
+        loop, and nests them inside this level of the loop.
+
+        Recursively calls `.containers` on any enclosed actions.
+        """
+        loop_size = len(self.sweep_values)
+        data_arrays = []
+        loop_array = DataArray(parameter=self.sweep_values.parameter,
+                               is_setpoint=True)
+        loop_array.nest(size=loop_size)
+
+        data_arrays = [loop_array]
+        # hack set_data into actions
+        new_actions = self.actions[:]
+        if hasattr(self.sweep_values, "parameters"): # combined parameter
+            for parameter in self.sweep_values.parameters:
+                new_actions.append(parameter)
+
+        for i, action in enumerate(new_actions):
+            if hasattr(action, 'containers'):
+                action_arrays = action.containers()
+
+            elif hasattr(action, 'get'):
+                # this action is a parameter to measure
+                # note that this supports lists (separate output arrays)
+                # and arrays (nested in one/each output array) of return values
+                action_arrays = self._parameter_arrays(action)
+
+            else:
+                # this *is* covered but the report misses it because Python
+                # optimizes it away. See:
+                # https://bitbucket.org/ned/coveragepy/issues/198
+                continue  # pragma: no cover
+
+            for array in action_arrays:
+                array.nest(size=loop_size, action_index=i,
+                           set_array=loop_array)
+            data_arrays.extend(action_arrays)
+
+        return data_arrays
 
     def _run_loop(self, first_delay=0, action_indices=(),
                   loop_indices=(), current_values=(),
@@ -1015,12 +1278,6 @@ class ActiveLoop(Metadatable):
             log.debug('Running the bg_final_task')
             self.bg_final_task()
 
-    def _wait(self, delay):
-        if delay:
-            finish_clock = time.perf_counter() + delay
-            t = wait_secs(finish_clock)
-            time.sleep(t)
-
 
 class BufferedActiveLoop(ActiveLoop):
     """
@@ -1037,27 +1294,52 @@ class BufferedActiveLoop(ActiveLoop):
         super().__init__(sweep_values, 0, *actions, then_actions=then_actions,
                          station=station, progress_interval=progress_interval, bg_task=bg_task,
                          bg_final_task=bg_final_task, bg_min_delay=bg_min_delay)
+        
+        self._most_outer_buffered_loop = None
 
-    def _set_buffered_sweep(self):
+    def _is_most_outer_buffered_loop(self, set_value=True):
+        """
+        The first call of this functin will set the _most_outer_loop attribute
+        to True for the self object and to False for all nested loops
+        """
+        if self._most_outer_buffered_loop == None:
+            self._most_outer_buffered_loop = set_value
+        
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
+            self.actions[0]._is_most_outer_buffered_loop(False)
+        
+        return self._most_outer_buffered_loop
+
+    def _get_loop_parameter(self):
+        """
+        Returns parameter of the loop.
+        """
+        return self.sweep_values.parameter
+        
+    def _set_buffered_sweep(self, layer=0):
         """
         Builds up the buffers on the instrument by setting the loop information
         (sweep_values).
         """
-        self.sweep_values.parameter.set_buffered(list(self.sweep_values))
+        parameter = self._get_loop_parameter()
         
-        if len(self.actions) == 1 and isinstance(self.actions[0], BufferedActiveLoop):
-            self.actions[0]._set_buffered_sweep()
+        parameter.set_buffered(list(self.sweep_values), layer)
+        
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
+            self.actions[0]._set_buffered_sweep(layer + 1)
 
-    def _send_buffer(self):
+    def _send_buffer(self, layer=0):
         """
         Lets the instrument(s) send the buffer(s) to the hardware (and arms the
         hardware).
         """
-        mw = self.sweep_values.parameter.send_buffer()
+        parameter = self._get_loop_parameter()
+        
+        mw = parameter.send_buffer(layer)
         if mw is None: mw = {}
         
-        if len(self.actions) == 1 and isinstance(self.actions[0], BufferedActiveLoop):
-            mw_tmp = self.actions[0]._send_buffer()
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
+            mw_tmp = self.actions[0]._send_buffer(layer + 1)
             
             if mw_tmp is not None:
                 mw = {**mw, **mw_tmp}
@@ -1073,7 +1355,7 @@ class BufferedActiveLoop(ActiveLoop):
             if isinstance(action, BufferedReadableParameter): # Measurement
                 action.configure_measurement(measurement_windows)
         
-        if len(self.actions) == 1 and isinstance(self.actions[0], BufferedActiveLoop):
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
             self.actions[0]._configure_measurement(measurement_windows)
 
     def _arm_measurement(self):
@@ -1084,14 +1366,16 @@ class BufferedActiveLoop(ActiveLoop):
             if isinstance(action, BufferedReadableParameter): # Measurement
                 action.arm_measurement()
         
-        if len(self.actions) == 1 and isinstance(self.actions[0], BufferedActiveLoop):
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
             self.actions[0]._arm_measurement()
 
-    def _run_program(self):
-        self.sweep_values.parameter.run_program()
+    def _run_program(self, layer=0):
+        parameter = self._get_loop_parameter()
         
-        if len(self.actions) == 1 and isinstance(self.actions[0], BufferedActiveLoop):
-            self.actions[0]._run_program()
+        parameter.run_program(layer)
+        
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
+            self.actions[0]._run_program(layer + 1)
 
     def _run_loop(self, first_delay=0, action_indices=(),
                   loop_indices=(), current_values=(),
@@ -1116,7 +1400,7 @@ class BufferedActiveLoop(ActiveLoop):
         # - it configures the measurement on the instrument and
         # - it arms the measruement on the instruments hardware.
         # - it runs the program and starts the measurement 
-        if len(action_indices) == 0 and len(loop_indices) == 0 and len(current_values) == 0:
+        if self._is_most_outer_buffered_loop():
             self._set_buffered_sweep() # builds up the buffer
             measurement_windows = self._send_buffer() # sends the buffer to the hardware and arms the hardware
             
@@ -1174,6 +1458,441 @@ class BufferedActiveLoop(ActiveLoop):
             else:
                 set_name = self.data_set.action_id_map[action_indices]
                 data_to_store[set_name] = value
+            # below is useful but too verbose even at debug
+            # log.debug('Calling .store method of DataSet because a sweep step'
+            #           ' was taken')
+            self.data_set.store(new_indices, data_to_store)
+
+            if not self._nest_first:
+                # only wait the delay time if an inner loop will not inherit it
+                self._wait(delay)
+
+            try:
+                for f in callables:
+                    # below is useful but too verbose even at debug
+                    # log.debug('Going through callables at this sweep step.'
+                    #           ' Calling {}'.format(f))
+                    f(first_delay=delay,
+                      loop_indices=new_indices,
+                      current_values=new_values)
+
+                    # after the first action, no delay is inherited
+                    delay = 0
+            except _QcodesBreak:
+                break
+            
+            # after the first setpoint, delay reverts to the loop delay
+            delay = self.delay
+
+            # now check for a background task and execute it if it's
+            # been long enough since the last time
+            # don't let exceptions in the background task interrupt
+            # the loop
+            # if the background task fails twice consecutively, stop
+            # executing it
+            if self.bg_task is not None:
+                t = time.time()
+                if t - last_task >= self.bg_min_delay:
+                    try:
+                        self.bg_task()
+                    except Exception:
+                        if self.last_task_failed:
+                            self.bg_task = None
+                        self.last_task_failed = True
+                        log.exception("Failed to execute bg task")
+
+                    last_task = t
+
+        # run the background task one last time to catch the last setpoint(s)
+        if self.bg_task is not None:
+            log.debug('Running the background task one last time.')
+            self.bg_task()
+
+        # the loop is finished - run the .then actions
+        #log.debug('Finishing loop, running the .then actions...')
+        for f in self._compile_actions(self.then_actions, ()):
+            #log.debug('...running .then action {}'.format(f))
+            f()
+
+        # run the bg_final_task from the bg_task:
+        if self.bg_final_task is not None:
+            log.debug('Running the bg_final_task')
+            self.bg_final_task()
+
+    def _wait(self, delay):
+        if delay:
+            finish_clock = time.perf_counter() + delay
+            t = wait_secs(finish_clock)
+            time.sleep(t)
+            
+
+class ActiveRepetition(_BaseActiveLoop):
+    """
+    Created by attaching actions to a *Repetition*, this is the object that actually
+    repeats a nested measurement loop. An *ActiveRepetition* can no longer be nested, only run,
+    or used as an action inside another `Loop` or `Repetition` which will run the whole thing.
+
+    The *ActiveRepetition* determines what *DataArray*\s it will need to hold the data
+    it collects, and it creates a *DataSet* holding these *DataArray*\s
+    """
+
+    def __init__(self, repetition_count, delay, *actions, then_actions=(),
+                 station=None, progress_interval=None, bg_task=None,
+                 bg_final_task=None, bg_min_delay=None):
+        super().__init__(delay, *actions, then_actions=then_actions,
+                         station=station, progress_interval=progress_interval,
+                         bg_task=bg_task, bg_final_task=bg_final_task,
+                         bg_min_delay=bg_min_delay)
+        
+        self.repetition_count = repetition_count
+
+    def then(self, *actions, overwrite=False):
+        """
+        Attach actions to be performed after the loop completes.
+
+        These can only be `Task` and `Wait` actions, as they may not generate
+        any data.
+
+        returns a new ActiveLoop object - the original is untouched
+
+        \*actions: `Task` and `Wait` objects to execute in order
+
+        Args:
+            overwrite: (default False) whether subsequent .then() calls (including
+                calls in an ActiveLoop after .then() has already been called on
+                the Loop) will add to each other or overwrite the earlier ones.
+        """
+        loop = ActiveRepetition(self.repetition_count, self.delay, *self.actions,
+                          then_actions=self.then_actions, station=self.station)
+        return _attach_then_actions(loop, actions, overwrite)
+
+    def snapshot_base(self, update=False):
+        """Snapshot of this ActiveLoop's definition."""
+        return {
+            '__class__': full_class(self),
+            'repetition_count': self.repetition_count,
+            'delay': self.delay,
+            'actions': _actions_snapshot(self.actions, update),
+            'then_actions': _actions_snapshot(self.then_actions, update)
+        }
+
+    def containers(self):
+        """
+        Finds the data arrays that will be created by the actions in this
+        loop, and nests them inside this level of the loop.
+
+        Recursively calls `.containers` on any enclosed actions.
+        """
+        loop_size = self.repetition_count
+        data_arrays = []
+        loop_array = DataArray(name='__repetition', is_setpoint=True)
+        loop_array.nest(size=loop_size)
+
+        data_arrays = [loop_array]
+        # hack set_data into actions
+        new_actions = self.actions[:]
+
+        for i, action in enumerate(new_actions):
+            if hasattr(action, 'containers'):
+                action_arrays = action.containers()
+
+            elif hasattr(action, 'get'):
+                # this action is a parameter to measure
+                # note that this supports lists (separate output arrays)
+                # and arrays (nested in one/each output array) of return values
+                action_arrays = self._parameter_arrays(action)
+
+            else:
+                # this *is* covered but the report misses it because Python
+                # optimizes it away. See:
+                # https://bitbucket.org/ned/coveragepy/issues/198
+                continue  # pragma: no cover
+
+            for array in action_arrays:
+                array.nest(size=loop_size, action_index=i,
+                           set_array=loop_array)
+            data_arrays.extend(action_arrays)
+
+        return data_arrays
+
+    def _run_loop(self, first_delay=0, action_indices=(),
+                  loop_indices=(), current_values=(),
+                  **ignore_kwargs):
+        """
+        the routine that actually executes the loop, and can be called
+        from one loop to execute a nested loop
+
+        first_delay: any delay carried over from an outer loop
+        action_indices: where we are in any outer loop action arrays
+        loop_indices: setpoint indices in any outer loops
+        current_values: setpoint values in any outer loops
+        signal_queue: queue to communicate with main process directly
+        ignore_kwargs: for compatibility with other loop tasks
+        """
+
+        # at the beginning of the loop, the time to wait after setting
+        # the loop parameter may be increased if an outer loop requested longer
+        delay = max(self.delay, first_delay)
+
+        callables = self._compile_actions(self.actions, action_indices)
+        n_callables = 0
+        for item in callables:
+            if hasattr(item, 'param_ids'):
+                n_callables += len(item.param_ids)
+            else:
+                n_callables += 1
+        t0 = time.time()
+        last_task = t0
+        imax = self.repetition_count
+
+        self.last_task_failed = False
+
+        for i in range(self.repetition_count):
+            if self.progress_interval is not None:
+                tprint('repetition: %d/%d (%.1f [s])' % (
+                    i, imax, time.time() - t0),
+                    dt=self.progress_interval, tag='outerloop')
+                if i:
+                    tprint("Estimated finish time: %s" % (
+                        time.asctime(time.localtime(t0 + ((time.time() - t0) * imax / i)))),
+                           dt=self.progress_interval, tag="finish")
+
+            new_indices = loop_indices + (i,)
+            new_values = current_values + (i,)
+            data_to_store = {}
+
+            set_name = self.data_set.action_id_map[action_indices]
+            data_to_store[set_name] = i
+            # below is useful but too verbose even at debug
+            # log.debug('Calling .store method of DataSet because a sweep step'
+            #           ' was taken')
+            self.data_set.store(new_indices, data_to_store)
+
+            if not self._nest_first:
+                # only wait the delay time if an inner loop will not inherit it
+                self._wait(delay)
+
+            try:
+                for f in callables:
+                    # below is useful but too verbose even at debug
+                    # log.debug('Going through callables at this sweep step.'
+                    #           ' Calling {}'.format(f))
+                    f(first_delay=delay,
+                      loop_indices=new_indices,
+                      current_values=new_values)
+
+                    # after the first action, no delay is inherited
+                    delay = 0
+            except _QcodesBreak:
+                break
+            
+            # after the first setpoint, delay reverts to the loop delay
+            delay = self.delay
+
+            # now check for a background task and execute it if it's
+            # been long enough since the last time
+            # don't let exceptions in the background task interrupt
+            # the loop
+            # if the background task fails twice consecutively, stop
+            # executing it
+            if self.bg_task is not None:
+                t = time.time()
+                if t - last_task >= self.bg_min_delay:
+                    try:
+                        self.bg_task()
+                    except Exception:
+                        if self.last_task_failed:
+                            self.bg_task = None
+                        self.last_task_failed = True
+                        log.exception("Failed to execute bg task")
+
+                    last_task = t
+
+        # run the background task one last time to catch the last setpoint(s)
+        if self.bg_task is not None:
+            log.debug('Running the background task one last time.')
+            self.bg_task()
+
+        # the loop is finished - run the .then actions
+        #log.debug('Finishing loop, running the .then actions...')
+        for f in self._compile_actions(self.then_actions, ()):
+            #log.debug('...running .then action {}'.format(f))
+            f()
+
+        # run the bg_final_task from the bg_task:
+        if self.bg_final_task is not None:
+            log.debug('Running the bg_final_task')
+            self.bg_final_task()
+
+
+class BufferedActiveRepetition(ActiveRepetition):
+    """
+    An ActiveLoop that sweeps the parameters in a buffer that is sent once to
+    the device. So the loop will be run on the hardware.
+    """
+
+    def __init__(self, repetition_count, *actions, then_actions=(),
+                 station=None, progress_interval=None, bg_task=None,
+                 bg_final_task=None, bg_min_delay=None):
+        """
+        Creates a BufferedActiveLoop
+        """
+        super().__init__(repetition_count, 0, *actions, then_actions=then_actions,
+                         station=station, progress_interval=progress_interval, bg_task=bg_task,
+                         bg_final_task=bg_final_task, bg_min_delay=bg_min_delay)
+        
+        self._most_outer_buffered_loop = None
+
+    def _is_most_outer_buffered_loop(self, set_value=True):
+        """
+        The first call of this functin will set the _most_outer_loop attribute
+        to True for the self object and to False for all nested loops
+        """
+        if self._most_outer_buffered_loop == None:
+            self._most_outer_buffered_loop = set_value
+        
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
+            self.actions[0]._is_most_outer_buffered_loop(False)
+        
+        return self._most_outer_buffered_loop
+        
+
+    def _get_loop_parameter(self):
+        """
+        Returns the parameter of the inner loop. If the inner loop is also a
+        repetition, the next inner loop will be checked, because repetitions
+        are not mapped to a parameter or instrument.
+        """
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
+            return self.actions[0]._get_loop_parameter()
+        else:
+            return None
+
+    def _set_buffered_sweep(self, layer=0):
+        """
+        Builds up the buffers on the instrument by setting the loop information
+        (sweep_values).
+        """
+        parameter = self._get_loop_parameter()
+        
+        parameter.repeat_buffered(self.repetition_count, layer)
+        
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
+            self.actions[0]._set_buffered_sweep(layer + 1)
+
+    def _send_buffer(self, layer=0):
+        """
+        Lets the instrument(s) send the buffer(s) to the hardware (and arms the
+        hardware).
+        """
+        parameter = self._get_loop_parameter()
+        
+        mw = parameter.send_buffer(layer)
+        if mw is None: mw = {}
+        
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
+            mw_tmp = self.actions[0]._send_buffer(layer + 1)
+            
+            if mw_tmp is not None:
+                mw = {**mw, **mw_tmp}
+        
+        return mw
+    
+    def _configure_measurement(self, measurement_windows):
+        """
+        Configures the measurement on the instrument by setting the measurement
+        windows (measurement times).
+        """
+        for action in self.actions:
+            if isinstance(action, BufferedReadableParameter): # Measurement
+                action.configure_measurement(measurement_windows)
+        
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
+            self.actions[0]._configure_measurement(measurement_windows)
+
+    def _arm_measurement(self):
+        """
+        Arms the instruments hardware for the measurement
+        """
+        for action in self.actions:
+            if isinstance(action, BufferedReadableParameter): # Measurement
+                action.arm_measurement()
+        
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
+            self.actions[0]._arm_measurement()
+
+    def _run_program(self, layer=0):
+        parameter = self._get_loop_parameter()
+        
+        parameter.run_program(layer)
+        
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
+            self.actions[0]._run_program(layer + 1)
+
+    def _run_loop(self, first_delay=0, action_indices=(),
+                  loop_indices=(), current_values=(),
+                  **ignore_kwargs):
+        """
+        the routine that actually executes the loop, and can be called
+        from one loop to execute a nested loop
+
+        first_delay: any delay carried over from an outer loop
+        action_indices: where we are in any outer loop action arrays
+        loop_indices: setpoint indices in any outer loops
+        current_values: setpoint values in any outer loops
+        signal_queue: queue to communicate with main process directly
+        ignore_kwargs: for compatibility with other loop tasks
+        """
+        # The most outer loop controls the buffered loop:
+        # - It lets the instrument(s) build up the buffer,
+        # - it registers the instruments program/buffer to the hardware,
+        # - it lets the instrument(s) send their buffers to the hardware,
+        # - (it arms the program on the instruments hardware),
+        # - it configures the measurement on the instrument and
+        # - it arms the measruement on the instruments hardware.
+        # - it runs the program and starts the measurement 
+        if self._is_most_outer_buffered_loop():
+            self._set_buffered_sweep() # builds up the buffer
+            measurement_windows = self._send_buffer() # sends the buffer to the hardware and arms the hardware
+            
+            self._configure_measurement(measurement_windows) # configures the measurement windows
+            self._arm_measurement() # arms the hardware for the measurement
+            
+            self._run_program() # call user defined run_program-function
+            
+        # at the beginning of the loop, the time to wait after setting
+        # the loop parameter may be increased if an outer loop requested longer
+        delay = max(self.delay, first_delay)
+
+        callables = self._compile_actions(self.actions, action_indices)
+        n_callables = 0
+        for item in callables:
+            if hasattr(item, 'param_ids'):
+                n_callables += len(item.param_ids)
+            else:
+                n_callables += 1
+        t0 = time.time()
+        last_task = t0
+        imax = self.repetition_count
+
+        self.last_task_failed = False
+
+        for i in range(self.repetition_count):
+            if self.progress_interval is not None:
+                tprint('repetition: %d/%d (%.1f [s])' % (
+                    i, imax, time.time() - t0),
+                    dt=self.progress_interval, tag='outerloop')
+                if i:
+                    tprint("Estimated finish time: %s" % (
+                        time.asctime(time.localtime(t0 + ((time.time() - t0) * imax / i)))),
+                           dt=self.progress_interval, tag="finish")
+
+            new_indices = loop_indices + (i,)
+            new_values = current_values + (i,)
+            data_to_store = {}
+
+            set_name = self.data_set.action_id_map[action_indices]
+            data_to_store[set_name] = i
             # below is useful but too verbose even at debug
             # log.debug('Calling .store method of DataSet because a sweep step'
             #           ' was taken')
