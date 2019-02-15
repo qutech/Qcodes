@@ -106,41 +106,41 @@ class AUXOutputChannel(InstrumentChannel):
                            label='scale',
                            unit='',
                            get_cmd=partial(self._parent._getter, 'auxouts',
-                                           channum - 1, 1, 'scale'),
+                                           channum - 1, Mode.DOUBLE, 'scale'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
-                                           channum - 1, 1, 'scale'),
+                                           channum - 1, Mode.DOUBLE, 'scale'),
                            vals=vals.Numbers())
         self.add_parameter('preoffset',
                            label='preoffset',
                            unit='signal units',
                            get_cmd=partial(self._parent._getter, 'auxouts',
-                                           channum - 1, 1, 'preoffset'),
+                                           channum - 1, Mode.DOUBLE, 'preoffset'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
-                                           channum - 1, 1, 'preoffset'),
+                                           channum - 1, Mode.DOUBLE, 'preoffset'),
                            vals=vals.Numbers())
         self.add_parameter('offset',
                            label='offset',
                            unit='V',
                            get_cmd=partial(self._parent._getter, 'auxouts',
-                                           channum - 1, 1, 'offset'),
+                                           channum - 1, Mode.DOUBLE, 'offset'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
-                                           channum - 1, 1, 'offset'),
+                                           channum - 1, Mode.DOUBLE, 'offset'),
                            vals=vals.Numbers())
         self.add_parameter('limitlower',
                            label='Lower limit',
                            unit='V',
                            get_cmd=partial(self._parent._getter, 'auxouts',
-                                           channum - 1, 1, 'limitlower'),
+                                           channum - 1, Mode.DOUBLE, 'limitlower'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
-                                           channum - 1, 1, 'limitlower'),
+                                           channum - 1, Mode.DOUBLE, 'limitlower'),
                            vals=vals.Numbers(-10, 10))
         self.add_parameter('limitupper',
                            label='Upper limit',
                            unit='V',
                            get_cmd=partial(self._parent._getter, 'auxouts',
-                                           channum - 1, 1, 'limitupper'),
+                                           channum - 1, Mode.DOUBLE, 'limitupper'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
-                                           channum - 1, 1, 'limitupper'),
+                                           channum - 1, Mode.DOUBLE, 'limitupper'),
                            vals=vals.Numbers(-10, 10))
         # TODO the validator does not catch that there are only
         # 2 valid output channels for AU types
@@ -148,9 +148,9 @@ class AUXOutputChannel(InstrumentChannel):
                            label='Channel',
                            unit='',
                            get_cmd=partial(self._parent._getter, 'auxouts',
-                                           channum - 1, 0, 'demodselect'),
+                                           channum - 1, Mode.INT, 'demodselect'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
-                                           channum - 1, 0, 'demodselect'),
+                                           channum - 1, Mode.INT, 'demodselect'),
                            get_parser=lambda x: x+1,
                            set_parser=lambda x: x-1,
                            vals=vals.Ints(0,7) #TODO is the validation here correct?
@@ -170,15 +170,15 @@ class AUXOutputChannel(InstrumentChannel):
                            label='Output',
                            unit='',
                            get_cmd=partial(self._parent._getter, 'auxouts',
-                                           channum - 1, 0, 'outputselect'),
+                                           channum - 1, Mode.INT, 'outputselect'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
-                                           channum - 1, 0, 'outputselect'),
+                                           channum - 1, Mode.INT, 'outputselect'),
                            val_mapping=outputvalmapping)
         self.add_parameter('value',
                            label='Value',
                            unit='V',
                            get_cmd=partial(self._parent._getter, 'auxouts',
-                                           channum - 1, 1, 'value'),
+                                           channum - 1, Mode.DOUBLE, 'value'),
                            set_cmd=False)
                            
                            
@@ -333,9 +333,9 @@ class DemodulatorChannel(InstrumentChannel):
         self.add_parameter('sinc',
                            label='Sinc filter',
                            get_cmd=partial(self._parent._getter, 'demods',
-                                           channum-1, 0, 'sinc'),
+                                           channum-1, Mode.INT, 'sinc'),
                            set_cmd=partial(self._parent._setter, 'demods',
-                                           channum-1, 0, 'sinc'),
+                                           channum-1, Mode.INT, 'sinc'),
                            val_mapping={'ON': 1, 'OFF': 0},
                            vals=vals.Enum('ON', 'OFF') )
         # val_mapping for the demodX_signalin parameter
@@ -353,16 +353,16 @@ class DemodulatorChannel(InstrumentChannel):
         self.add_parameter('signalin',
                            label='Signal input',
                            get_cmd=partial(self._parent._getter, 'demods',
-                                           channum-1, 0,'adcselect'),
+                                           channum-1, Mode.INT,'adcselect'),
                            set_cmd=partial(self._parent._setter, 'demods',
-                                           channum-1, 0, 'adcselect'),
+                                           channum-1, Mode.INT, 'adcselect'),
                            val_mapping=dmsigins)
         self.add_parameter('streaming',
                            label='Data streaming',
                            get_cmd=partial(self._parent._getter, 'demods',
-                                           channum-1, 0, 'enable'),
+                                           channum-1, Mode.INT, 'enable'),
                            set_cmd=partial(self._parent._setter, 'demods',
-                                           channum-1, 0, 'enable'),
+                                           channum-1, Mode.INT, 'enable'),
                            val_mapping={'ON': 1, 'OFF': 0},
                            vals=vals.Enum('ON', 'OFF') )
         dmtrigs = {'Continuous': 0,            #demodulator data is continuously streamed 
@@ -393,9 +393,9 @@ class DemodulatorChannel(InstrumentChannel):
         self.add_parameter('trigger',
                            label='Trigger',
                            get_cmd=partial(self._parent._getter, 'demods',
-                                           channum-1, 0, 'trigger'),
+                                           channum-1, Mode.INT, 'trigger'),
                            set_cmd=partial(self._parent._setter, 'demods',
-                                           channum-1, 0, 'trigger'),
+                                           channum-1, Mode.INT, 'trigger'),
                            val_mapping=dmtrigs)
         for demod_param in ['x', 'y', 'R', 'phi']:
             if demod_param in ('x', 'y', 'R'):
@@ -2649,7 +2649,7 @@ class ScopeChannel(InstrumentChannel):
         get_cmd for scopeModule parameters
         """
         # There are a few special cases
-        SRtranslation = {'kHz': 1e3, 'MHz': 1e6, 'GHz': 1e9,  # TODO
+        SRtranslation = {'kHz': 1e3, 'MHz': 1e6, 'GHz': 1e9, 
                          'khz': 1e3, 'Mhz': 1e6, 'Ghz': 1e9}
 
         def getduration():
@@ -3397,19 +3397,24 @@ class ZIMFLI(Instrument):
 
 #Only for testing, device name has to be delivered over the command line arguments
 if __name__ == "__main__":
-    #TODO
     device_id = sys.argv[1]
     device = ZIFMLI("ZIFMLIdevice", device_id)
+    #Set a freuquency of an oscillator and print it
     device.oscillator1_freq(100)
     print("frequency of oscillator1:", device.oscillator1_freq())
     print("frequency of oscillator2:", device.oscillator2_freq())
+    #Select an oscillator for a demodulator and print out the frequency of the demodulator
     demodulator = device.submodule["demod1"]
     demodulator.oscselect(0)
     print("freuqency of demodulator1:", demodulator.frequency())
+    #Select the Signal Input of the demodulator as constant input and print out a sample
     demodulator.signalin('Constant input')
     print("Sample of demodulator1:", demodulator.sample())
     print("x of demodualtor1:", demodulator.x())
     print("y of demodulator1:", demodulator.y())
     print("R of demodulator1:", demodulator.R())
-    print("phi od demodualtor1:", demodulator.phi())
+    print("phi of demodualtor1:", demodulator.phi())
+    #Set the harmonic factor of the demodulator to 2 and print out the frequency
+    demodulator.harmonic(2)
+    print("frequency of demodulator1", demodulator.frequency())
     
