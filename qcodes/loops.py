@@ -56,7 +56,7 @@ from qcodes.data.data_set import new_data
 from qcodes.data.data_array import DataArray
 from qcodes.utils.helpers import wait_secs, full_class, tprint
 from qcodes.utils.metadata import Metadatable
-from qcodes.instrument.parameter import _BaseParameter, BufferedSweepableParameter, BufferedReadableParameter
+from qcodes.instrument.parameter import _BaseParameter, BufferedSweepableParameter, BufferedReadableArrayParameter
 
 from .actions import (_actions_snapshot, Task, Wait, _Measure, _Nest,
                       BreakIf, _QcodesBreak)
@@ -469,8 +469,8 @@ class BufferedLoop(Loop):
                 actions[i] = action.each(*default)
             elif isinstance(action, _BaseLoop):
                 raise AttributeError('It is not supported to nest a \'normal\' Loop in a BufferedLoop.')
-            elif isinstance(action, _BaseParameter) and not isinstance(action, BufferedReadableParameter):
-                raise AttributeError("The measuring parameters in a buffered loop must be BufferedReadableParameters.")
+            elif isinstance(action, _BaseParameter) and not isinstance(action, BufferedReadableArrayParameter):
+                raise AttributeError("The measuring parameters in a buffered loop must be BufferedReadableArrayParameters.")
 
         self.validate_actions(*actions)
 
@@ -623,8 +623,8 @@ class BufferedRepetition(Repetition):
                 actions[i] = action.each(*default)
             elif isinstance(action, _BaseLoop):
                 raise AttributeError('It is not supported to nest a \'normal\' Loop in a BufferedLoop.')
-            elif isinstance(action, _BaseParameter) and not isinstance(action, BufferedReadableParameter):
-                raise AttributeError("The measuring parameters in a buffered loop must be BufferedReadableParameters.")
+            elif isinstance(action, _BaseParameter) and not isinstance(action, BufferedReadableArrayParameter):
+                raise AttributeError("The measuring parameters in a buffered loop must be BufferedReadableArrayParameters.")
 
         self.validate_actions(*actions)
 
@@ -1355,7 +1355,7 @@ class BufferedActiveLoop(ActiveLoop):
         windows (measurement times).
         """
         for action in self.actions:
-            if isinstance(action, BufferedReadableParameter): # Measurement
+            if isinstance(action, BufferedReadableArrayParameter): # Measurement
                 action.configure_measurement(measurement_windows)
         
         if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
@@ -1366,7 +1366,7 @@ class BufferedActiveLoop(ActiveLoop):
         Arms the instruments hardware for the measurement
         """
         for action in self.actions:
-            if isinstance(action, BufferedReadableParameter): # Measurement
+            if isinstance(action, BufferedReadableArrayParameter): # Measurement
                 action.arm_measurement()
         
         if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
@@ -1809,7 +1809,7 @@ class BufferedActiveRepetition(ActiveRepetition):
         windows (measurement times).
         """
         for action in self.actions:
-            if isinstance(action, BufferedReadableParameter): # Measurement
+            if isinstance(action, BufferedReadableArrayParameter): # Measurement
                 action.configure_measurement(measurement_windows)
         
         if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
@@ -1820,7 +1820,7 @@ class BufferedActiveRepetition(ActiveRepetition):
         Arms the instruments hardware for the measurement
         """
         for action in self.actions:
-            if isinstance(action, BufferedReadableParameter): # Measurement
+            if isinstance(action, BufferedReadableArrayParameter): # Measurement
                 action.arm_measurement()
         
         if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):

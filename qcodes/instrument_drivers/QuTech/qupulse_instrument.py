@@ -12,7 +12,7 @@ import numpy as np
 import warnings
 
 from qcodes.instrument.base import Instrument
-from qcodes.instrument.parameter import BufferedSweepableParameter, BufferedReadableParameter
+from qcodes.instrument.parameter import BufferedSweepableParameter, BufferedReadableArrayParameter
 import qcodes.utils.validators as vals
 from qcodes.utils.helpers import full_class
 
@@ -512,7 +512,7 @@ class QuPulseAWGInstrument(Instrument):
         return metadata
 
 
-class QuPulseDACChannel(BufferedReadableParameter):
+class QuPulseDACChannel(BufferedReadableArrayParameter):
     """
     A parameter for an operation on a measurement mask. These parameters can be
     measured in a QCoDeS-loop.

@@ -1989,7 +1989,7 @@ class BufferedSweepableParameter(Parameter):
             return None
         
 
-class BufferedReadableParameter(ArrayParameter):
+class BufferedReadableArrayParameter(ArrayParameter):
     """
     An ArrayParameter for buffered measurements.
     """
