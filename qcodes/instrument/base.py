@@ -188,7 +188,7 @@ class InstrumentBase(Metadatable, DelegateAttributes):
                 update = False
             try:
                 snap['parameters'][name] = param.snapshot(update=update)
-            except:
+            except Exception as e:
                 # really log this twice. Once verbose for the UI and once
                 # at lower level with more info for file based loggers
                 self.log.warning(f"Snapshot: Could not update parameter: "
