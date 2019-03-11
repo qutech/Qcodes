@@ -61,7 +61,7 @@ from qcodes.instrument.function import Function
 from qcodes.instrument.parameter import (
     Parameter,
     BufferedSweepableParameter,
-    BufferedReadableParameter,
+    BufferedReadableArrayParameter,
     ArrayParameter,
     MultiParameter,
     ParameterWithSetpoints,
