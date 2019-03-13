@@ -7,9 +7,12 @@
 # Date:   July 2018
 
 
-from qcodes import  InstrumentChannel, ChannelList
+from typing import Dict
+from qcodes import  InstrumentChannel, ChannelList, BufferedSweepableParameter, SweepFixedValues
 from qcodes.utils import validators as vals
 from qcodes.instrument.visa import VisaInstrument
+
+import numpy as np
 
 import warnings
 
@@ -191,7 +194,9 @@ class DacChannel(InstrumentChannel, DacBase):
         
         # Channel parameters
         # Voltage
-        self.add_parameter("volt", get_cmd=self._get_volt, get_parser=self._dac_code_to_v, set_cmd=self._set_volt, set_parser=self._dac_v_to_code, vals=self._volt_val, label="Voltage", unit="V")
+        self.add_parameter("volt", parameter_class=BufferedSweepableParameter,
+                           sweep_parameter_cmd=self._sweep_parameter, send_buffer_cmd=self._send_buffer, run_program_cmd=self._run_program,
+                           get_cmd=self._get_volt, get_parser=self._dac_code_to_v, set_cmd=self._set_volt, set_parser=self._dac_v_to_code, vals=self._volt_val, label="Voltage", unit="V")
         self.add_parameter("volt_raw", get_cmd=self._get_volt, set_cmd=self._set_volt, vals=self._volt_raw_val, label="Voltage (raw data)")
         
         # The limit commands are used to sweep dac voltages. They are not safety features.
@@ -211,6 +216,37 @@ class DacChannel(InstrumentChannel, DacBase):
         self.add_function("ramp", call_cmd=self._ramp, args=(self._volt_val, self._ramp_val))
         self.add_function("ramp_wait", call_cmd=self._ramp_wait, args=(self._volt_val, self._ramp_val))
         
+    def _sweep_parameter(self, parameter, sweep_values, layer) -> None:
+        """
+        Adds the sweep information to a list, to build up a single buffer later
+        
+        Args:
+            parameter: Parameter to sweep
+            sweep_values: Values the parameter should be swept over.
+            layer: nnumber of nested loop (most outer loop: 0)
+        """
+        self._parent._sweep_parameter(self, parameter, sweep_values, layer)
+    
+    def _send_buffer(self, layer) -> Dict:
+        """
+        Waits until this function is called for all swept parameters. Then the 
+        buffer will be built and sent to the device.
+        
+        Args:
+            layer: nnumber of nested loop (most outer loop: 0)
+            
+        Returns:
+            Dictionary of the measurement windows if the function was called
+            the last parameter. If not it returns None.
+        """
+        return self._parent._send_buffer(self, layer)
+
+    def _run_program(self, layer):
+        """
+        Runs the waveform program on the awg as soon as this function was
+        called for the last (buffered) loop
+        """
+        return self._parent._run_program(self, layer)
         
     def reset(self):
         """
@@ -501,7 +537,38 @@ class DacSlot(InstrumentChannel, DacBase):
         self.add_submodule("channels", channels)
         
         self.add_parameter("mode", get_cmd=self._get_mode, set_cmd=self._set_mode, vals=self._MODE_VAL, label="Slot Mode")
+        
+    def _sweep_parameter(self, obj, parameter, sweep_values, layer) -> None:
+        """
+        Adds the sweep information to a list, to build up a single buffer later
+        
+        Args:
+            parameter: Parameter to sweep
+            sweep_values: Values the parameter should be swept over.
+            layer: nnumber of nested loop (most outer loop: 0)
+        """
+        self._parent._sweep_parameter(obj, parameter, sweep_values, layer)
+    
+    def _send_buffer(self, obj, layer) -> Dict:
+        """
+        Waits until this function is called for all swept parameters. Then the 
+        buffer will be built and sent to the device.
+        
+        Args:
+            layer: nnumber of nested loop (most outer loop: 0)
+            
+        Returns:
+            Dictionary of the measurement windows if the function was called
+            the last parameter. If not it returns None.
+        """
+        return self._parent._send_buffer(obj, layer)
 
+    def _run_program(self, obj, layer):
+        """
+        Runs the waveform program on the awg as soon as this function was
+        called for the last (buffered) loop
+        """
+        return self._parent._run_program(obj, layer)
 
     def reset(self):
         """
@@ -550,6 +617,7 @@ class Decadac(VisaInstrument):
                  timeout=_DEFAULT_TIMEOUT,
                  default_switch_pos=DacBase._DEFAULT_SWITCH_POS,
                  terminator='\n',
+                 run_buffered_cmd=None,
                  **kwargs):
         """
         Initialize the device
@@ -587,6 +655,9 @@ class Decadac(VisaInstrument):
         self.add_submodule("slots", slots)
         self.add_submodule("channels", channels)
         
+        self.run_buffered_cmd = run_buffered_cmd
+        self._buffered_loop = None
+        
         if reset:
             self.reset()
 
@@ -607,6 +678,8 @@ class Decadac(VisaInstrument):
         """
         Reset all parameters to default
         """
+        self.reset_programs()
+        
         cmd = ""
         
         for slot in self.slots:
@@ -620,7 +693,96 @@ class Decadac(VisaInstrument):
         cmd += DacBase._COMMAND_SET_SLOT.format(0) + DacBase._COMMAND_SET_CHANNEL.format(0) # Select first slot and channel
         
         self._write(self, cmd)
+        
+    def reset_programs(self):
+        """
+        Resets all buffered loop actions
+        """
+        self._buffered_loop = None
+        
+    def _sweep_parameter(self, obj, parameter, sweep_values, layer) -> None:
+        """
+        Adds the sweep information to a list, to build up a single buffer later
+        
+        Args:
+            parameter: Parameter to sweep
+            sweep_values: Values the parameter should be swept over.
+            layer: nnumber of nested loop (most outer loop: 0)
+        """
+        if self._buffered_loop is not None:
+            raise NotImplementedError('It is not supported by the Decadac to nest multiple buffered loops.')
+        
+        ramp_start = sweep_values[0]
+        ramp_stop  = sweep_values[-1]
+        ramp_num   = len(sweep_values)
+        
+        if list(SweepFixedValues(obj, start=ramp_start, stop=ramp_stop, num=ramp_num)) != sweep_values or ramp_start == ramp_stop:
+            raise NotImplementedError('It is not supported by the Decadac to sweep parameters in a non-linear order.')
+        
+        self._buffered_loop = {
+            'parameter'  : parameter,
+            'ramp_start' : ramp_start,
+            'ramp_stop'  : ramp_stop,
+            'ramp_num'   : ramp_num
+        }
+    
+    def _send_buffer(self, obj, layer) -> Dict:
+        """
+        Waits until this function is called for all swept parameters. Then the 
+        buffer will be built and sent to the device.
+        
+        Args:
+            obj: Channel -> Caller of the function
+            layer: Number of nested loop (most outer loop: 0)
+            
+        Returns:
+            Dictionary of the measurement windows if the function was called
+            the last parameter. If not it returns None.
+        """
+        if self._buffered_loop is not None:
+            param = self._buffered_loop['parameter']
+            
+            v_start = self._buffered_loop['ramp_start']
+            v_stop = self._buffered_loop['ramp_stop']
+            num = self._buffered_loop['ramp_num']
+            
+            # Convert voltages to dac-codes
+            c_start = self._v_to_code(v_start)
+            c_stop = self._v_to_code(v_stop)
+            
+            # Calculate the slope
+            slope = int((c_stop - c_start) / (num - 1) * 65536)
+            
+            meas_length = param.update_period.get () * 1000. # Microseconds to nanoseconds
+            
+            window_begins  = np.linspace(0, meas_length * (num-1), num=num)
+            window_lengths = np.array([meas_length] * num)
+            
+            measurement_windows = { 'M' : (window_begins, window_lengths) }
+            
+            param.volt.set(v_start)
+            
+            # Now let's set up our limits and ramp slope
+            if v_start < v_stop:
+                param.upper_ramp_limit.set(v_stop)
+            else:
+                param.lower_ramp_limit.set(v_stop)
+            
+            param.slope.set(slope)
+            
+            return measurement_windows
+        
+        return None
 
+    def _run_program(self, obj, layer):
+        """
+        Runs the waveform program on the awg as soon as this function was
+        called for the last (buffered) loop
+        """
+        if self.run_buffered_cmd is not None:
+            self.run_buffered_cmd()
+        
+        self.reset_programs()
 
     def _set_slot(self, slot: DacSlot):
         """

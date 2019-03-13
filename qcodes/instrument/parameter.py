@@ -1959,7 +1959,7 @@ class BufferedSweepableParameter(Parameter):
         if self._sweep_parameter_cmd is not None:
             return self._sweep_parameter_cmd(self, sweep_values, layer)
         else:
-            return None
+            raise NotImplementedError('The callable "sweep_parameter_cmd" was not set for the parameter "{}".'.format(self.name))
         
     def repeat_buffered(self, repetition_count, layer):
         """
@@ -1968,7 +1968,7 @@ class BufferedSweepableParameter(Parameter):
         if self._repeat_parameter_cmd is not None:
             return self._repeat_parameter_cmd(repetition_count, layer)
         else:
-            return None
+            raise NotImplementedError('The callable "repeat_parameter_cmd" was not set for the parameter "{}".'.format(self.name))
             
     def send_buffer(self, layer):
         """
@@ -1977,7 +1977,7 @@ class BufferedSweepableParameter(Parameter):
         if self._send_buffer_cmd is not None:
             return self._send_buffer_cmd(layer)
         else:
-            return None
+            raise NotImplementedError('The callable "send_buffer_cmd" was not set for the parameter "{}".'.format(self.name))
             
     def run_program(self, layer):
         """
@@ -1986,8 +1986,8 @@ class BufferedSweepableParameter(Parameter):
         if self._run_program_cmd is not None:
             return self._run_program_cmd(layer)
         else:
-            return None
-        
+            raise NotImplementedError('The callable "run_program_cmd" was not set for the parameter "{}".'.format(self.name))
+
 
 class BufferedReadableArrayParameter(ArrayParameter):
     """
@@ -2036,6 +2036,8 @@ class BufferedReadableArrayParameter(ArrayParameter):
         """
         if self._config_meas_cmd is not None:
             self._config_meas_cmd(self, measurement_windows)
+        else:
+            raise NotImplementedError('The callable "config_meas_cmd" was not set for the parameter "{}".'.format(self.name))
         
     def arm_measurement(self) -> None:
         """
@@ -2043,6 +2045,8 @@ class BufferedReadableArrayParameter(ArrayParameter):
         """
         if self._arm_meas_cmd is not None:
             self._arm_meas_cmd(self)
+        else:
+            raise NotImplementedError('The callable "arm_meas_cmd" was not set for the parameter "{}".'.format(self.name))
 
 
 def expand_setpoints_helper(parameter: ParameterWithSetpoints) -> List[
