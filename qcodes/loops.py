@@ -1439,7 +1439,7 @@ class BufferedActiveLoop(ActiveLoop):
                         time.asctime(time.localtime(t0 + ((time.time() - t0) * imax / i)))),
                            dt=self.progress_interval, tag="finish")
 
-            set_val = self.sweep_values.set(value)
+            set_val = value # TODO self.sweep_values.set(value)
 
             new_indices = loop_indices + (i,)
             new_values = current_values + (value,)
