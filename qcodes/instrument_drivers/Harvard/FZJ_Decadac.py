@@ -95,11 +95,11 @@ class DacBase(object):
         Returns:
             (int): dac-code
         """
-        if volt < min_volt or volt >= max_volt:
+        if volt < min_volt or volt > max_volt:
             raise ValueError("Cannot convert voltage {} V to a voltage code, value out of range ({} V - {} V).".format(volt, min_volt, max_volt))
 
         frac = (volt - min_volt) / (max_volt - min_volt)
-        val = int(round(frac * 65536))
+        val = int(round(frac * 65535))
         
         # extra check to be absolutely sure that the instrument does nothing
         # receive an out-of-bounds value
@@ -123,7 +123,7 @@ class DacBase(object):
         Returns:
             (float): voltage in V
         """
-        frac = code / 65536.0
+        frac = code / 65535.0
         
         return (frac * (max_volt - min_volt)) + min_volt
     
@@ -532,7 +532,7 @@ class DacSlot(InstrumentChannel, DacBase):
         channels = ChannelList(self, "Slot_Chans", DacChannel)
         
         for channel in range(4):
-            channels.append(DacChannel(self, "Chan{}".format(slot, channel), channel, default_switch_pos=default_switch_pos))
+            channels.append(DacChannel(self, "Chan{}".format(channel), channel, default_switch_pos=default_switch_pos))
         
         self.add_submodule("channels", channels)
         
@@ -716,11 +716,11 @@ class Decadac(VisaInstrument):
         ramp_stop  = sweep_values[-1]
         ramp_num   = len(sweep_values)
         
-        if list(SweepFixedValues(obj, start=ramp_start, stop=ramp_stop, num=ramp_num)) != sweep_values or ramp_start == ramp_stop:
+        if list(SweepFixedValues(obj, start=ramp_start, stop=ramp_stop, num=ramp_num)) != list(sweep_values) or ramp_start == ramp_stop:
             raise NotImplementedError('It is not supported by the Decadac to sweep parameters in a non-linear order.')
         
         self._buffered_loop = {
-            'parameter'  : parameter,
+            'parameter'  : parameter.name,
             'ramp_start' : ramp_start,
             'ramp_stop'  : ramp_stop,
             'ramp_num'   : ramp_num
@@ -740,35 +740,44 @@ class Decadac(VisaInstrument):
             the last parameter. If not it returns None.
         """
         if self._buffered_loop is not None:
-            param = self._buffered_loop['parameter']
+            param_name = self._buffered_loop['parameter']
             
-            v_start = self._buffered_loop['ramp_start']
-            v_stop = self._buffered_loop['ramp_stop']
-            num = self._buffered_loop['ramp_num']
-            
-            # Convert voltages to dac-codes
-            c_start = self._v_to_code(v_start)
-            c_stop = self._v_to_code(v_stop)
+            if param_name == obj.volt.name:
+                v_start = self._buffered_loop['ramp_start']
+                v_stop = self._buffered_loop['ramp_stop']
+                num = self._buffered_loop['ramp_num']
+                
+                # Convert voltages to dac-codes
+                c_start = obj._dac_v_to_code(v_start)
+                c_stop = obj._dac_v_to_code(v_stop)
+            elif param_name == obj.volt_raw.name:
+                c_start = self._buffered_loop['ramp_start']
+                c_stop = self._buffered_loop['ramp_stop']
+                num = self._buffered_loop['ramp_num']
+            else:
+                raise NotImplementedError('Only the volt-parameters can be used in a buffered loop with the Dacadac.')
             
             # Calculate the slope
             slope = int((c_stop - c_start) / (num - 1) * 65536)
             
-            meas_length = param.update_period.get () * 1000. # Microseconds to nanoseconds
+            meas_length = obj.update_period.get () * 1000. # Microseconds to nanoseconds
             
             window_begins  = np.linspace(0, meas_length * (num-1), num=num)
             window_lengths = np.array([meas_length] * num)
             
             measurement_windows = { 'M' : (window_begins, window_lengths) }
             
-            param.volt.set(v_start)
-            
             # Now let's set up our limits and ramp slope
-            if v_start < v_stop:
-                param.upper_ramp_limit.set(v_stop)
+            if c_start < c_stop:
+                obj.lower_ramp_limit_raw.set(c_start)
+                obj.upper_ramp_limit_raw.set(c_stop)
             else:
-                param.lower_ramp_limit.set(v_stop)
+                obj.upper_ramp_limit_raw.set(c_start)
+                obj.lower_ramp_limit_raw.set(c_stop)
             
-            param.slope.set(slope)
+            obj.volt_raw.set(c_start)
+            
+            obj.slope.set(slope)
             
             return measurement_windows
         
