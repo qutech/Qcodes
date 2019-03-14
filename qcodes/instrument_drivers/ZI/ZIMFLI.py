@@ -9,7 +9,7 @@ Purpose: Main instrument driver for the Zurich Instruments Lock-In Amplifier
 """
 
 
-import os, platform # used in version()
+#import os, platform # used in version() if the git command is activated
 import time
 import logging
 import numpy as np
@@ -80,8 +80,7 @@ class AUXInputChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'averaging'),
                            vals=vals.Ints(0, 16))
         self.add_parameter('sample',
-                           label='Auxiliary Input sample',
-                           unit='V',
+                           label='Demodulator sample',
                            get_cmd=partial(self._parent._getter, 'demods', # !!!
                                            channum-1, Mode.SAMPLE, 'sample'),
                            set_cmd=False,
@@ -1189,23 +1188,23 @@ class ExternalReferenceChannel(InstrumentChannel):
         # val_mapping for the extrefX_signalin parameter
         ersigins = {'Sig In 1': 0,
                     'Curr In 1': 1,
-                    #'Trigger 1': 2, not used in manual
+                    'Trigger 1': 2, #not documented in manual, but available in GUI
                     'Trigger 2': 3,
                     'Aux Out 1': 4,
                     'Aux Out 2': 5,
                     'Aux Out 3': 6,
                     'Aux Out 4': 7,
                     'Aux In 1': 8,
-                    'Aux In 2': 9}
+                    'Aux In 2': 9,
+                    'Constant': 174}
         self.add_parameter('signalin',
                            label='Signal input',
                            get_cmd=partial(self._parent._getter, 'extrefs',
                                            channum-1, Mode.INT,'adcselect'),
-                           set_cmd=partial(self._parent._setter, 'extrefs',
-                                           channum-1, Mode.INT, 'adcselect'),
+                           set_cmd=False,
                            val_mapping=ersigins)
-        # val_mapping for the extrefX_automode parameter
         if 'MD' in self._parent.options:
+            # With this option the automode parameter select some PID settings
             ermode = {'None': 0,
                       'PID Auto': 1,
                       'PID Low': 2,
@@ -1218,16 +1217,25 @@ class ExternalReferenceChannel(InstrumentChannel):
                                set_cmd=partial(self._parent._setter, 'extrefs',
                                                channum-1, Mode.INT, 'automode'),
                                val_mapping=ermode)
+        else:
+            # Without MD option the automode parameter can be used to select
+            # the bandwidth of the external reference. This is not documented
+            # in the manual but checked with the Web-GUI
+            ermode = {'Low': 2,
+                      'High': 3,
+                      'None': 4}
+            self.add_parameter('bandwidth',
+                               label='Select bandwidth',
+                               get_cmd=partial(self._parent._getter, 'extrefs',
+                                               channum-1, Mode.INT,'automode'),
+                               set_cmd=partial(self._parent._setter, 'extrefs',
+                                               channum-1, Mode.INT, 'automode'),
+                               val_mapping=ermode)
         self.add_parameter('channel',
                            label='Demodulator channel',
-                           unit='',
                            get_cmd=partial(self._parent._getter, 'extrefs',
                                            channum - 1, Mode.INT, 'demodselect'),
-                           set_cmd=partial(self._parent._setter, 'extrefs',
-                                           channum - 1, Mode.INT, 'demodselect'),
-                           get_parser=lambda x: x+1,
-                           set_parser=lambda x: x-1,
-                           vals=vals.Ints(0,2)
+                           set_cmd=False
                            )
         self.add_parameter('enable',
                            label='Enables the external reference',
@@ -1243,25 +1251,12 @@ class ExternalReferenceChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'locked'),
                            set_cmd=False,
                            vals=vals.Ints() )
-        if self._parent.no_oscs == 1:
-            # Bei nur einem vorhandenen Oszillator kann kein Validator genutzt
-            # werden. Ist zwar auch blöd, aber der Validator kann nicht mit
-            # min == max aufgerufen werden.
-            self.add_parameter('oscselect',
+        self.add_parameter('oscselect',
                            label='Select oscillator',
                            get_cmd=partial(self._parent._getter, 'extrefs',
                                            channum-1, Mode.INT, 'oscselect'),
-                           set_cmd=partial(self._setter, 'extrefs',
-                                           channum-1, Mode.INT, 'oscselect'),
+                           set_cmd=False
                            )
-        else:
-            self.add_parameter('oscselect',
-                           label='Select oscillator',
-                           get_cmd=partial(self._parent._getter, 'extrefs',
-                                           channum-1, Mode.INT, 'oscselect'),
-                           set_cmd=partial(self._parent._setter, 'extrefs',
-                                           channum-1, Mode.INT, 'oscselect'),
-                           vals=vals.Ints(0, self._parent.no_oscs-1) )
 
 
     def _setter(self, module, number, mode, setting, value):
@@ -1327,7 +1322,7 @@ class DIOChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'dios',
                                            channum-1, Mode.INT, 'decimation'),
                            vals=vals.Ints() )
-        self.add_parameter('drive',
+        self.add_parameter('direction',
                            label='Input(0)-Output(1) Bitmask',
                            set_cmd=partial(self._parent._setter, 'dios',
                                            channum-1, Mode.INT, 'drive'),
@@ -3914,7 +3909,6 @@ class ZIMFLI(Instrument):
         retval['ZI_FWRev'  ] = self.daq.getInt('/ZI/ABOUT/FWREVISION')
         retval['ZIRevision'] = self.daq.getInt('/ZI/ABOUT/REVISION')
         retval['Version'   ] = self.daq.getString('/ZI/ABOUT/VERSION')
-        #zhinst.utils.
         return retval
         
 
@@ -4031,3 +4025,14 @@ class ZIMFLI(Instrument):
         sample['time']['clockbase'] = self.clockbase
 
         return sample
+
+    def getClockbase(self):
+        return self.clockbase
+    
+    def getOptions(self):
+        return self.options
+
+    def getLastSampleTimestamp(self):                   # Get time of last sample request
+        return [ self.lastSampleSecs,                   # in seconds
+                 self.lastsampletime,                   # in device timestamp
+                 self.lastsampletime/self.clockbase ]   # dev timestamp in seconds

@@ -86,6 +86,7 @@
 \endfirsthead
 \hline
 08. Mar. 2019 & M.Wagener & First edit phase. \\ \hline
+14. Mar. 2019 & M.Wagener & Complete the descriptions. \\ \hline
  &  &  \\ \hline
 \end{longtable}
 
@@ -180,7 +181,7 @@ After this you can access the device as decribed in detail later. As a first tes
 %%%
 \section{Base parameters}
 
-The following parameter is accessible directly from the main device instance.
+The following parameters are accessible directly from the main device instance.
 
 \begin{itemize}
 \item zidev.{\bf oscillator1\_freq}( {\it value} ) \\
@@ -192,20 +193,19 @@ The following parameter is accessible directly from the main device instance.
 \item zidev.oscillator4\_freq( {\it value} ) \\
 	Same for the fourth oscillator if the MD option is installed.
 
-\item zidev.{\bf bufferedReader}( demod\_index, total\_time, dolog=False, copyFreq=False, copyPhase=False, copyDIO=False, copyTrigger=False, copyAuxin=False ) \\
+\item zidev.{\bf bufferedReader}( demod\_index, total\_time, dolog, copyFreq, copyPhase, copyDIO, copyTrigger, copyAuxin ) \\
 	Read the sample informations from the given demodulator for a given time and returns it as a dict of arrays. The parameters are:
-	\begin{itemize}
-	\itemsep0pt
-	\item demod\_index = index of demodulator channel (1,2)
-	\item total\_time  = number of seconds for measurement, this time the function is blocking
-	\item dolog = Flag if this function print some informations during running (elapsed time and data length)
-	\item copyFreq = Flag to copy the frequency data
-	\item copyPhase = Flag to copy the phase data
-	\item copyDIO = Flag to copy the digital I/O data
-	\item copyTrigger = Flag to copy the trigger data
-	\item copyAuxin = Flag to copy both auxin port data \\
-	{\it The copy flags can be set to False (default if omitted) to preserve memory usage. Set them to True to get more arrays in the resulting dict.}
-	\end{itemize}
+	\begin{longtable}{p{1.5cm}p{3cm}p{12cm}}
+	&demod\_index & index of demodulator channel (1,2) \\
+	&total\_time  & number of seconds for measurement, this time the function is blocking \\
+	&dolog & Flag if this function print some informations during running (elapsed time and data length) \\
+	&copyFreq & Flag to copy the frequency data \\
+	&copyPhase & Flag to copy the phase data \\
+	&copyDIO & Flag to copy the digital I/O data \\
+	&copyTrigger & Flag to copy the trigger data \\
+	&copyAuxin & Flag to copy both auxin port data \\
+	& \multicolumn{2}{p{15cm}}{\it The copy flags can be set to False (default if omitted) to preserve memory usage. Set them to True to get more arrays in the resulting dict.} \\
+	\end{longtable}
 	\textbf{\textit{Return:}} a dict with dict\_keys(['timestamp', 'x', 'y', {\it 'frequency'}, {\it 'phase'}, {\it 'dio'}, {\it 'trigger'}, {\it 'auxin0'}, {\it 'auxin1'}, 'time', 'R', 'phi'])
 	The fields `R' and `phi' are calculated from `x' and `y'. The italic fields can be switched off with the copy flags. The field 'time' has the values:
 	\begin{itemize}[ ]
@@ -218,13 +218,28 @@ The following parameter is accessible directly from the main device instance.
 	\item 'mindelta': 0,
 	\item 'clockbase': 60000000.0  {\it this is used to calculate the correct time from the timestamps}
   	\end{itemize}
-  	
-  \item zidev.{\bf version}() \\
+
+\item zidev.{\bf version}() \\
   	Read all possible version informations and returns them as a dict. See the first example above.
 
-  \item zidev.{\bf Scope} \\
+\item zidev.{\bf getLastSampleTimestamp()} \\
+	Get the time of last sample request. The return is a three value array:
+	\begin{longtable}{p{1.5cm}p{0.5cm}p{14.4cm}}
+	& [0] & the current system time in seconds from time.time(). \\
+	& [1] & the timestamp value of the device. \\
+	& [2] & the timestamp of the device divided by the clockbase to get seconds. The absolute value of the seconds is not relevant because there is no function to set the current time, but the differences are useful. \\
+	\end{longtable}
+
+\item zidev.{\bf Scope} \\
   	Submodule for the scope functionality. This is under development.
-  	
+ 	
+\item zidev.{\bf getClockbase()} \\
+	Value of the clockbase to calculate the correct time from the timestamps.
+	%%% --> Beispiel ?
+
+\item zidev.{\bf getOptions()} \\
+	Option string from the device. This string is read at the start of the driver from the device to apply the correct parameters and values.
+  
 \end{itemize}
 
 
@@ -234,284 +249,236 @@ The following parameter is accessible directly from the main device instance.
 In this section I describe all implemented submodules for this device. For each submodule all available parameters are described.
 
 \subsection{Demodulator}
-	Combines all parameters of the parent concerning the demodulators. Parameters:
+	The Lock-In-Amplifier has 2 demodulator channels. Not all parameters are accessible for the second channel. If the MD option is installed, there are more channels available. The Parameters for each channel:
 	\begin{itemize}
-	\item bypass: Allows to bypass the demodulator low-pass filter, thus increasing the bandwidth.
-	\item frequency: Indicates the frequency used for demodulation and for output generation. The demodulation frequency is calculated with oscillator frequency times the harmonic factor. When the MOD option is used linear combinations of oscillator frequencies including the harmonic factors define the demodulation frequencies.
-	\item order: Selects the filter roll off between 6 dB/oct and 48 dB/oct. Allowed Values:
-	\begin{itemize}
-	\itemsep0pt
-	\item 1 1st order filter 6 dB/oct
-	\item 2 2nd order filter 12 dB/oct
-	\item 3 3rd order filter 18 dB/oct
-	\item 4 4th order filter 24 dB/oct
-	\item 5 5th order filter 30 dB/oct
-	\item 6 6th order filter 36 dB/oct
-	\item 7 7th order filter 42 dB/oct
-	\item 8 8th order filter 48 dB/oct
+	\item {\bf bypass}: Allows to bypass the demodulator low-pass filter, thus increasing the bandwidth.
+	\item {\bf frequency}: {\it (ReadOnly)} Indicates the frequency used for demodulation and for output generation. The demodulation frequency is calculated with oscillator frequency times the harmonic factor. When the MOD option is used, linear combinations of oscillator frequencies including the harmonic factors define the demodulation frequencies.
+	\item {\bf order}: Selects the filter roll off. Allowed Values:
+	\begin{longtable}{p{1.5cm}p{1cm}p{14cm}}
+	& 1 & 1st order filter 6 dB/oct \\
+	& 2 & 2nd order filter 12 dB/oct \\
+	& 3 & 3rd order filter 18 dB/oct \\
+	& 4 & 4th order filter 24 dB/oct \\
+	& 5 & 5th order filter 30 dB/oct \\
+	& 6 & 6th order filter 36 dB/oct \\
+	& 7 & 7th order filter 42 dB/oct \\
+	& 8 & 8th order filter 48 dB/oct \\
+	\end{longtable}
+	\item {\bf harmonic}: Multiplies the demodulator's reference frequency by an integer factor. If the demodulator is used as a phase detector in external reference mode (PLL), the effect is that the internal oscillator locks to the external frequency divided by the integer factor.
+	\item {\bf oscselect}: Connects the demodulator with the supplied oscillator. Number of available oscillators depends on the installed options. Is a number between 0 and the number of oscillators -1.
+	\item {\bf phaseadjust}: Adjust the demodulator phase automatically in order to read 0 degrees.
+	\item {\bf phaseshift}: Phase shift applied to the reference input of the demodulator. The value is clipped to -180 .. +180 degrees.
+	\item {\bf timeconstant}: Sets the integration time constant or in other words, the cutoff frequency of the demodulator low pass filter.
+	\item {\bf samplerate}$^{(*)}$: Defines the demodulator sampling rate, the number of samples that are sent to the host computer per second. A rate of about 7-10 higher as compared to the filter bandwidth usually provides sufficient aliasing suppression. This is also the rate of data received by LabOne Data Server and saved to the computer hard disk. This setting has no impact on the sample rate on the auxiliary outputs connectors. Note: the value inserted by the user may be approximated to the nearest value supported by the instrument.
+	\item {\bf sample}$^{(*)}$: {\it (ReadOnly)} Returns a dict with streamed demodulator samples with sample interval defined by the demodulator data rate. See note below. The dict contains the following entries:
+	\begin{longtable}{p{1.5cm}p{3cm}p{12cm}}
+	& 'timestamp' & array of uint64 with the internal timestamp of the measurement. Divide this by zidev.clockbase to get the real time in seconds. \\
+	& 'x' & array of double with the x part of the demodulated cartesian coordinates \\
+	& 'y' & array of double with the y part of the demodulated cartesian coordinates \\
+	& 'frequency' & array of double with the current frequency of the oscillator \\
+	& 'phase' & array of double with the angle of the demodulator polar coordinates \\
+	& 'dio' & array of uint32 with the values of the digital inputs \\
+	& 'trigger' & array of uint32 \\
+	& 'auxin0' & array of double with the voltage of the first auxiliary input \\
+	& 'auxin1' & array of double with the voltage of the second auxiliary input \\
+	& 'R' & array of double with the calculated radius of the demodulated polar coordinates, see note below. \\
+	& 'phi' & array of double with the calculated angle of the demodulated polar coordinates, see note below. \\
+	\end{longtable}
+	\item {\bf sinc}: Enables the sinc filter. When the filter bandwidth is comparable to or larger than the demodulation frequency, the demodulator output may contain frequency components at the frequency of demodulation and its higher harmonics. The sinc is an additional filter that attenuates these unwanted components in the demodulator output. Possible values are: `ON', `OFF'.
+	\item {\bf signalinput}: Selects the input signal for the demodulator. Possible values: 'Sig In 1', 'Curr In 1', 'Trigger 1', 'Trigger 2', 'Aux Out 1', 'Aux Out 2', 'Aux Out 3', 'Aux Out 4', 'Aux In 1', 'Aux In 2', 'Constant input'.
+	\item {\bf streaming}$^{(*)}$: Enables the data acquisition for the corresponding demodulator. Possible values are: `ON', `OFF'.
+	\item {\bf trigger}$^{(*)}$: Selects the acquisition mode (i.e. triggering) or the demodulator. The possible values are:
+	\begin{longtable}{p{1.5cm}p{4cm}p{11cm}}
+	&'Continuous' & demodulator data is continuously streamed to the host computer. \\
+	&'Trigger in 1 Rise' & rising edge triggered. \\
+	&'Trigger in 1 Fall' & falling edge triggered. \\
+	&'Trigger in 1 Both' & triggering on both rising and falling edge. \\
+	&'Trigger in 2 Rise' & rising edge triggered. \\
+	&'Trigger in 2 Fall' & falling edge triggered. \\
+	&'Trigger in 2 Both' & triggering on both rising and falling edge. \\
+	&'Trigger in 1$\mid$2 Rise' & rising edge triggered on either input. \\
+	&'Trigger in 1$\mid$2 Fall' & falling edge triggered on either input. \\
+	&'Trigger in 1$\mid$2 Both' & triggering on both rising and falling edge or either trigger input. \\
+	&'Trigger in 1 Low' & demodulator data is streamed to the host computer when the level is low (TTL). \\
+	&'Trigger in 1 High' & demodulator data is streamed to the host computer when the level is high (TTL). \\
+	&'Trigger in 2 Low' & demodulator data is streamed to the host computer when the level is low (TTL). \\
+	&'Trigger in 2 High' & demodulator data is streamed to the host computer when the level is high (TTL). \\
+	&'Trigger in 1$\mid$2 Low' & demodulator data is streamed to the host computer when either level is low (TTL). \\
+	&'Trigger in 1$\mid$2 High' & demodulator data is streamed to the host computer when either level is high (TTL). \\
+	\end{longtable}
+	\item {\bf x}: {\it (ReadOnly)} get sample of x coordinate. See note below.
+	\item {\bf y}: {\it (ReadOnly)} get sample of y coordinate. See note below.
+	\item {\bf R}: {\it (ReadOnly)} get sample of absolute value of x+y*i. See note below.
+	\item {\bf phi}: {\it (ReadOnly)} get sample of angle of x+y*i. See note below.
+	\item {\bf cfgTimeout}: stores the  used timeout in seconds for the readings of sample data (default 0.07). The valid range is from 0 to 1 second.
+	\item $^{(*)}$ all parameters marked with this are only accessible for channel 1 or if the MD option is installed on other channels.
 	\end{itemize}
-	\item harmonic: Multiplies the demodulator's reference frequency by an integer factor. If the demodulator is used as a phase detector in external reference mode (PLL), the effect is that the internal oscillator locks to the external frequency divided by the integer factor.
-	\item oscselect: Connects the demodulator with the supplied oscillator. Number of available oscillators depends on the installed options. Is a number between 0 and the number of oscillators -1
-	\item phaseadjust: Adjust the demodulator phase automatically in order to read 0 degrees.
-	\item phaseshift: Phase shift applied to the reference input of the demodulator. %Value is clipped to -180 .. +180°
-	\item timeconstant: Sets the integration time constant or in other words, the cutoff frequency of the demodulator low pass filter.
-	\item samplerate(*): Defines the demodulator sampling rate, the number of samples that are sent to the host computer per second. A rate of about 7-10 higher as compared to the filter bandwidth usually provides sufficient aliasing suppression. This is also the rate of data received by LabOne Data Server and saved to the computer hard disk. This setting has no impact on the sample rate on the auxiliary outputs connectors. Note: the value inserted by the user may be approximated to the nearest value supported by the instrument.
-	\item sample(*): Contains streamed demodulator samples with sample interval defined by the demodulator data rate.
-	\item sinc: Enables the sinc filter. When the filter bandwidth is comparable to or larger than the demodulation frequency, the demodulator output may contain frequency components at the frequency of demodulation and its higher harmonics. The sinc is an additional filter that attenuates these unwanted components in the demodulator output.
-	\item signalinput: Selects the input signal for the demodulator. Possible values: 'Sig In 1', 'Curr In 1', 'Trigger 1', 'Trigger 2', 'Aux Out 1', 'Aux Out 2', 'Aux Out 3', 'Aux Out 4', 'Aux In 1', 'Aux In 2', 'Constant input'
-	\item streaming(*): Enables the data acquisition for the corresponding demodulator.
-	\item trigger(*): Selects the acquisition mode (i.e. triggering) or the demodulator.
-        %dmtrigs = {'Continuous': 0,            #demodulator data is continuously streamed 
-         %                                      #to the host computer.
-          %         'Trigger in 1 Rise': 1,     #rising edge triggered.
-           %        'Trigger in 1 Fall': 2,     #falling edge triggered.
-          %         'Trigger in 1 Both': 3,     #triggering on both rising and falling edge.
-          %         'Trigger in 2 Rise': 4,     #rising edge triggered.
-          %         'Trigger in 1|2 Rise': 5,   #rising edge triggered on either input.
-          %         'Trigger in 2 Fall': 8,     #falling edge triggered.
-          %         'Trigger in 1|2 Fall': 10,  #falling edge triggered on either input.
-          %         'Trigger in 2 Both': 12,    #triggering on both rising and falling edge.
-          %         'Trigger in 1|2 Both': 15,  #triggering on both rising and falling 
-          %                                     #edge or either trigger input.
-          %         'Trigger in 1 Low': 16,     #demodulator data is streamed to the host
-          %                                     #computer when the level is low (TTL).
-          %         'Trigger in 1 High': 32,    #demodulator data is streamed to the host
-          %                                     #computer when the level is high (TTL).
-          %         'Trigger in 2 Low': 64,     #demodulator data is streamed to the host
-          %                                     #computer when the level is low (TTL).
-          %         'Trigger in 1|2 Low': 80,   #demodulator data is streamed to the host 
-          %                                     #computer when either level is low (TTL).
-          %         'Trigger in 2 High': 128,   #demodulator data is streamed to the host
-          %                                     #computer when the level is high (TTL).
-          %         'Trigger in 1|2 High': 160, #demodulator data is streamed to the host
-          %                                     #computer when either level is high (TTL).
-
-	\item x: get sample of x coordinate
-	\item y: get sample of y coordinate
-	\item R: get sample of absolute value of x+y*i
-	\item phi: get sample of angle of x+y*i
-	\item cfgTimeout: stores the  used timeout in seconds for the readings of sample data (default 0.07)
-	\item (*) all parameters marked with this are only accessible for channel 1 or if the MD option is installed
-	\end{itemize}
+	{\bf Note:} {\it The values of x and y are inside the sample dict, the values of R and phi are calculated. To have all values at the same measurement timestamp, the driver asks the device only if the last sample request is more than the cfgTimeout seconds ago.}
 
 
 \subsection{Signal Input (Voltage)}
-    Combines all the Parameters from the parent concerning the signal input. Parameters:
-    
-            autorange: Automatic adjustment of the Range to about two times the maximum 
-                signal input amplitude measured over about 100 ms.
-            range: Defines the gain of the analog input amplifier. The range should 
-                exceed the incoming signal by roughly a factor two including a 
-                potential DC offset. The instrument selects the next higher available
-                range relative to a value inserted by the user. A suitable choice of
-                this setting optimizes the accuracy and signal-to-noise ratio by 
-                ensuring that the full dynamic range of the input ADC is used.
-            float: Switches the input between floating (ON) and connected to ground (OFF). 
-                This setting applies both to the voltage and the current input. It
-                is recommended to discharge the test device before connecting or to
-                enable this setting only after the signal source has been connected
-                to the Signal Input in grounded mode.
-            scaling: Applies the given scaling factor to the input signal.
-            ac: Defines the input coupling for the Signal Inputs. 
-                AC coupling inserts a high-pass filter. OFF means DC ccoupling
-            impedance: Switches between 50 Ohm (ON) and 10 M Ohm (OFF).
-            diff: Switches between single ended (OFF) and differential (ON) measurements.
-            max: Indicates the maximum measured value at the input.
-            min: Indicates the minimum measured value at the input.
-            on: Enables the signal input.
-            trigger: Switches to the next appropriate input range such that the range 
-                fits best with the measured input signal amplitude.
+The Lock-In-Amplifier has one voltage sensitive input channel with the following parameters:
+\begin{itemize}
+\item {\bf autorange}: Automatic adjustment of the Range to about two times the maximum signal input amplitude measured over about 100 ms.
+\item {\bf range}: Defines the gain of the analog input amplifier. The range should exceed the incoming signal by roughly a factor two including a potential DC offset. The instrument selects the next higher available range relative to a value inserted by the user. A suitable choice of this setting optimizes the accuracy and signal-to-noise ratio by ensuring that the full dynamic range of the input ADC is used.
+\item {\bf float}: Switches the input between floating (ON) and connected to ground (OFF). This setting applies both to the voltage and the current input. It is recommended to discharge the test device before connecting or to enable this setting only after the signal source has been connected to the Signal Input in grounded mode.
+\item {\bf scaling}: Applies the given scaling factor to the input signal.
+\item {\bf ac}: Defines the input coupling for the Signal Inputs. AC coupling inserts a high-pass filter. OFF means DC ccoupling.
+\item {\bf impedance}: Switches between 50 Ohm (ON) and 10 M Ohm (OFF).
+\item {\bf diff}: Switches between single ended (OFF, use only +V input) and differential (ON, use both +V and -V inputs) measurements.
+\item {\bf max}: Indicates the maximum measured value at the input.
+\item {\bf min}: Indicates the minimum measured value at the input.
+\item {\bf on}: Enables the signal input.
+\item {\bf trigger}: Switches to the next appropriate input range such that the range fits best with the measured input signal amplitude.
+\end{itemize}
 
 
 \subsection{Signal Input (Current)}
-    Combines all the Parameters from the parent concerning the current input
-    Parameters: 
-            autorange: Automatic adjustment of the Range to about two times the maximum 
-                signal input amplitude measured over about 100 ms.
-            range: Defines the gain of the analog input amplifier. The range should 
-                exceed the incoming signal by roughly a factor two including a 
-                potential DC offset. The instrument selects the next higher available
-                range relative to a value inserted by the user. A suitable choice of
-                this setting optimizes the accuracy and signal-to-noise ratio by 
-                ensuring that the full dynamic range of the input ADC is used.
-            float: Switches the input between floating (ON) and connected to ground (OFF). 
-                This setting applies both to the voltage and the current input. It
-                is recommended to discharge the test device before connecting or to
-                enable this setting only after the signal source has been connected
-                to the Signal Input in grounded mode.
-            scaling: Applies the given scaling factor to the input signal.
-            max: Indicates the maximum measured value at the input.
-            min: Indicates the minimum measured value at the input.
-            on: Enables the signal input.
-            trigger: Switches to the next appropriate input range such that the range 
-                fits best with the measured input signal amplitude.
+The device has one current sensitive input channel with the following parameters:
+\begin{itemize}
+\item {\bf autorange}: Automatic adjustment of the Range to about two times the maximum signal input amplitude measured over about 100 ms.
+\item {\bf range}: Defines the gain of the analog input amplifier. The range should exceed the incoming signal by roughly a factor two including a potential DC offset. The instrument selects the next higher available range relative to a value inserted by the user. A suitable choice of this setting optimizes the accuracy and signal-to-noise ratio by ensuring that the full dynamic range of the input ADC is used.
+\item {\bf float}: Switches the input between floating (ON) and connected to ground (OFF). This setting applies both to the voltage and the current input. It is recommended to discharge the test device before connecting or to enable this setting only after the signal source has been connected to the Signal Input in grounded mode.
+\item {\bf scaling}: Applies the given scaling factor to the input signal.
+\item {\bf max}: Indicates the maximum measured value at the input.
+\item {\bf min}: Indicates the minimum measured value at the input.
+\item {\bf on}: Enables the signal input.
+\item {\bf trigger}: Switches to the next appropriate input range such that the range fits best with the measured input signal amplitude.
+\end{itemize}
 
 
-\subsection{Auxilliary Inputs}
-    Combines all parameters of the instrument concerning AUXInput
-    Parameters:
-            averaging: Defines the number of samples on the input to average as 
-                a power of two. Possible values are in the range [0, 16]. A value 
-                of 0 corresponds to the sampling rate of the auxiliary input's ADC.
-            sample: Voltage measured at the Auxiliary Input after averaging. 
-                The data rate depends on the averaging value. Note, if the instrument
-                has demodulator functionality, the auxiliary input values are
-                available as fields in a demodulator sample and are aligned by 
-                timestamp with the demodulator output.
-sample  |  Auxiliary Input sample :  {'timestamp': array([2364820144667], dtype=uint64), 'x': array([2.07443144e-07]), 'y': array([5.94475209e-07]), 'frequency': array([99999.99999991]), 'phase': array([2.2394202]), 'dio': array([0], dtype=uint32), 'trigger': array([768], dtype=uint32), 'auxin0': array([0.00133604]), 'auxin1': array([-0.00033299]), 'R': array([6.29629599e-07]), 'phi': array([70.7634789])} V
+\subsection{Auxiliary Inputs}
+The device has two auxiliary inputs. Because of the demodulator functionality the input values are only available as fields in the dict of the demodulator sample reading. The parameters of the AUXInputs are:
+\begin{itemize}
+\item {\bf averaging}: Defines the number of samples on the input to average as a power of two. Possible values are in the range [0, 16]. A value of 0 corresponds to the sampling rate of the auxiliary input's ADC.
+\item {\bf sample}: This returns the same dict as the demodulator parameter sample.
+\end{itemize}
 
 
 \subsection{External reference}
-    Combines all the Parameters from the parent concerning the external reference
-    Parameters:
-            signalin: Indicates the input signal selection for the selected
-                demodulator.
-                Allowed Values:
-                    0 = Signal Input 1
-                    1 = Current Input 1
-                    2 = NOT USED
-                    3 = Trigger 2
-                    4 = Auxiliary Output 1
-                    5 = Auxiliary Output 2
-                    6 = Auxiliary Output 3
-                    7 = Auxiliary Output 4
-                    8 = Auxiliary Input 1
-                    9 = Auxiliary Input 2
-%        ersigins = {'Sig In 1': 0,
-%                    'Curr In 1': 1,
-%                    #'Trigger 1': 2, not used in manual
-%                    'Trigger 2': 3,
-%                    'Aux Out 1': 4,
-%                    'Aux Out 2': 5,
-%                    'Aux Out 3': 6,
-%                    'Aux Out 4': 7,
-%                    'Aux In 1': 8,
-%                    'Aux In 2': 9}
-            automode: This defines the type of automatic adaptation of parameters
-                in the PID used for Ext Ref.
-                *** ONLY AVAILABLE IF MD OPTION IS INSTALLED. ***
-                Allowed Values:
-                    0 = No automatic adaption (default if no MD-option installed)
-                    1 = The coefficients of the PID controller are automatically set.
-                    2 = The PID coefficients, the filter bandwidth and the output
-                        limits are automatically set using a LOW bandwidth.
-                    3 = The PID coefficients, the filter bandwidth and the output
-                        limits are automatically set using a HIGH bandwidth.
-                    4 = All parameters of the PID including the center frequency
-                        are adapted.
-            channel: Indicates the demodulator connected to the extref channel.
-            enable: Enables the external reference.
-                Allowed Values:
-                    OFF, ON
-            locked: Indicates whether the external reference is locked.
-            oscselect: Indicates which oscillator is being locked to the external
-                reference.
+The device has the capability to synchronize its internal oscillator used for demodulation with an external reference clock signal. The parameters of the {\bf ExternalReferenceChannel} are:
+\begin{itemize}
+\item {\bf signalin}: {\it (ReadOnly)} Indicates the input signal selection for the selected demodulator. Possible Values are 'Sig In 1', 'Curr In 1', `Trigger 1', 'Trigger 2', 'Aux Out 1', 'Aux Out 2', 'Aux Out 3', 'Aux Out 4', 'Aux In 1', 'Aux In 2', `Constant'.
+\item {\bf automode}: {\it (Only with MD option installed)} This defines the type of automatic adaptation of parameters in the PID used for external reference. Allowed values are 'None', 'PID Auto', 'PID Low', 'PID High', 'PID All'.
+\item {\bf bandwidth}: {\it (Only without MD option installed)} This defines the bandwidth used for external reference. Allowed values are `None', `Low', `High'.
+\item {\bf channel}: {\it (ReadOnly)} Indicates the demodulator connected to the extref channel.
+\item {\bf enable}: Enables the external reference. Allowed Values are `ON' and `OFF'.
+\item {\bf locked}: {\it (ReadOnly)} Indicates whether the external reference is locked.
+\item {\bf oscselect}: {\it (ReadOnly)} Indicates which oscillator is being locked to the external reference.
+\end{itemize}
+In the following example the external reference is switched on, set to low bandwidth and the input is set to the auxiliary input 1:
+% die Leerzeichen vor den # sind abgezählt damit die # übereinander stehen!
+\begin{lstlisting}[frame=single, language=Python]
+er = zidev.submodules['extref1']  # select submodule
+er.enable('ON')                   # switch external reference on
+er.bandwidth('Low')               # select low bandwidth
+dm2 = zidev.submodules['demod2']  # get another submodule
+dm2.signalin('Aux In 1')          # select input for external reference
+\end{lstlisting}
 
 
 \subsection{Signal Output}
-    Combines all the parameters concerning the signal output
-    Parameters:
-            add: The signal supplied to the Aux Input 1 is added to the signal 
-                output. For differential output the added signal is a common mode 
-                offset.
-            autorange: If enabled, selects the most suited output range automatically.
-            differential: Switch between single-ended output (OFF) and differential 
-                output (ON). In differential mode the signal swing is defined between 
-                Signal Output +V / -V.
-            imp50: Select the load impedance between 50 Ohm(ON) and HiZ(OFF). 
-                The impedance of the output is always 50 Ohm. For a load impedance
-                of 50 Ohm the displayed voltage is half the output voltage to 
-                reflect the voltage seen at the load.
-            offset: Defines the DC voltage that is added to the dynamic part of 
-                the output signal.
-            on: Enabling/Disabling the Signal Output. Corresponds to the blue 
-                LED indicator on the instrument front panel.
-            overloaded: Indicates that the signal output is overloaded.
-            range: Sets the output voltage range. Available ranges are 0.075, 0.15,
-                0.75 and 1.5
-            amplitude: Sets the peak amplitude that the oscillator assigned to 
-                the given demodulation channel contributes to the signal output.
-                Should be given as Vpk value
-                TODO To the channum a certain amplitude number is given in 
-                outputamps, should it stay like that?
-            ampdef: the unit for the amplitude Vpk, Vrms or dBm, default is Vpk
-            enable: Enables individual output signal amplitude. When the MD 
-                option is used, it is possible to generate signals being the 
-                linear combination of the available demodulator frequencies.
-                TODO To the channum a certain amplitude number is given in 
-                outputampenable, should it stay like that?
+The device has one signal output with the following parameters:
+\begin{itemize}
+\item {\bf add}: The signal supplied to the Aux Input 1 is added to the signal output. For differential output the added signal is a common mode offset. The allowed values are `ON' and `OFF'.
+\item {\bf autorange}: If enabled, selects the most suited output range automatically. Allowed values are `ON' and `OFF'.
+\item {\bf differential}: Switch between single-ended output (OFF) and differential output (ON). In differential mode the signal swing is defined between Signal Output +V and -V.
+\item {\bf imp50}: Select the load impedance between 50 Ohm (ON) and HiZ (OFF). The impedance of the output is always 50 Ohm. For a load impedance of 50 Ohm the displayed voltage is half the output voltage to reflect the voltage seen at the load.
+\item {\bf offset}: Defines the DC voltage that is added to the dynamic part of the output signal. Currently this value is only valid for the driver in the range from -1.5V to +1.5V.
+\item {\bf on}: Enabling/Disabling the Signal Output. Corresponds to the blue LED indicator on the instrument front panel.
+\item {\bf overloaded}: {\it (ReadOnly)} Indicates that the signal output is overloaded.
+\item {\bf range}: Sets the output voltage range. Currently this value is only valid for the driver in the range from 0.001 to 3.0. The device will select the next higher available range automatically.
+\item {\bf amplitude}: Sets the peak amplitude that the oscillator assigned to the given demodulation channel contributes to the signal output. Should be given as Vpk value.
+\item {\bf ampdef}: Internal storage for the used unit for the amplitude. Possibla values are `Vpk', `Vrms' or `dBm', default is `Vpk'.
+\item {\bf enable}: Enables individual output signal amplitude. {\it When the MD option is installed, it is possible to generate signals being the linear combination of the available demodulator frequencies.}
+\end{itemize}
 
 
 \subsection{Auxilliary Outputs}
-    Combines all parameters of the instrument concerning the AUXOutput 1-4
-    Parameters:
-            scale: Multiplication factor to scale the signal. 
-            preoffset: Add a pre-offset to the signal before scaling is applied.
-            offset: Add the specified offset voltage to the signal after scaling.
-            limitlower: Lower limit for the signal at the Auxiliary Output. 
-                A smaller value will be clipped. Can have a value between -10 an 10 V.
-            limitupper: Upper limit for the signal at the Auxiliary Output. 
-                A larger value will be clipped. Can have a value between -10 an 10 V.
-            channel: channel according to the selected signal source
-            output: signal source of the signal to amplify 
-            value: Voltage present on the Auxiliary Output.
-                Auxiliary Output Value = (Signal+Preoffset)*Scale+Offset
+The device has four auxiliary outputs. The submodules named {\bf aux\_out1} .. {\bf aux\_out4}, the class is named {\it AUXOutputChannel} and has the following parameters:
+\begin{itemize}
+\item {\bf scale}: Multiplication factor to scale the signal.
+\item {\bf preoffset}: Add a pre-offset to the signal before scaling is applied.
+\item {\bf offset}: Add the specified offset voltage to the signal after scaling.
+\item {\bf limitlower}: Lower limit for the signal at the Auxiliary Output. A smaller value will be clipped. Can have a value between -10 an 10 V.
+\item {\bf limitupper}: Upper limit for the signal at the Auxiliary Output. A larger value will be clipped. Can have a value between -10 an 10 V.
+\item {\bf channel}: channel according to the selected signal source
+\item {\bf output}: signal source of the signal to amplify. Allowed values are 'Demod X', 'Demod Y', 'Demod R', 'Demod THETA', 'PID Out', 'PID Shift', 'PID Error', 'TU Filtered Value', 'TU Output Value'
+\item {\bf value}: {\it (ReadOnly)} Voltage present on the Auxiliary Output. \\
+\centerline{Auxiliary Output Value = ( Signal + Preoffset ) * Scale + Offset}
+\end{itemize}
 
 
 \subsection{Trigger Inputs}
-    Combines all the Parameters concerning the TriggerInput
-    Parameters:
-            autothreshold: Automatically adjust the trigger threshold. The level
-                is adjusted to fall in the center of the applied transitions.
-            level: Trigger voltage level at which the trigger input toggles between
-                low and high. Use 50% amplitude for digital input and consider the
-                trigger hysteresis.
+The Lock-In-Amplifier has two TTL compatible trigger input lines. The connectors are on the back side of the device. The submodules are named {\bf trigger\_in1} and {\bf trigger\_in2}, the class is named {\it TriggerInputChannel} and has the following parameters:
+\begin{itemize}
+\item {\bf autothreshold}: Automatically adjust the trigger threshold. The level is adjusted to fall in the center of the applied transitions. Allowed values are `ON' and `OFF'.
+\item {\bf level}: Trigger voltage level at which the trigger input toggles between low and high. Use 50\% amplitude for digital input and consider the trigger hysteresis.
+\end{itemize}
 
 
 \subsection{Trigger Outputs}
-    Combines the parameters concerning the TriggerOutput
-    Parameters: 
-            pulsewidth: Defines the minimal pulse width for the case of Scope events
-                written to the trigger outputs of the device.
-            source: Select the signal assigned to the trigger output.
-                Possible values: 'disabled', 'osc phase of demod 2'(trigger output channel 1)
-                    'osc phase of demod 4'(trigger output channel 2), 
-                    'Threshold Logic Unit 1', 'Threshold Logic Unit 2',
-                    'Threshold Logic Unit 3', 'Threshold Logic Unit 4',
-                    'MDS Sync Out'
+The Lock-In-Amplifier has two TTL compatible trigger output lines. The connectors are on the back side of the device. The submodules are named {\bf trigger\_out1} and {\bf trigger\_out2}, the class is named {\it TriggerOutputChannel} and has the following parameters:
+\begin{itemize}
+\item {\bf pulsewidth}: Defines the minimal pulse width for the case of Scope events written to the trigger outputs of the device. Currently this value is only valid for the driver in the range from 0 to 0.149 seconds.
+\item {\bf source}: Select the signal assigned to the trigger output. Possible values are:
+	\begin{itemize}[ ]
+	\itemsep0pt
+	\item 'disabled'
+	\item 'osc phase of demod 2' {\it (only without installed MD option)}
+	\item 'osc phase of demod 4' {\it (only if MD option is installed)}
+	\item 'Threshold Logic Unit 1'
+	\item 'Threshold Logic Unit 2'
+	\item 'Threshold Logic Unit 3'
+	\item 'Threshold Logic Unit 4'
+	\item 'MDS Sync Out'
+  	\end{itemize}
+\end{itemize}
 
 
 \subsection{Digital Input / Outputs}
-    Combines all the parameters concerning the digital input/output
-    Parameters:
-            decimation: Sets the decimation factor for DIO data streamed to the 
-                host computer.
-            drive: When on, the corresponding 8-bit bus is in output mode. 
-                When off, it is in input mode. Bit 0 corresponds to the least 
-                significant byte. For example, the value 1 drives the least significant
-                byte, the value 8 drives the most significant byte.
-            extclk: OFF: internally clocked with a fixed frequency of 60 MHz
-                    ON:  externally clocked with a clock signal connected to DIO Pin 68.
-                         The available range is from 1 Hz up to the internal clock
-                         frequency
-            mode: Manual: Manual setting of the DIO output value.
-                  Threshold unit: Enables setting of DIO output values by the 
-                      threshold unit.
-            output: Sets the value of the DIO output for those bytes where 'drive'
-                is enabled.
+The Lock-In-Amplifier has 32 digital input / output lines. They are available at a special connector located at the back of the device. The submodule is named {\bf dio}, the class is named {\it DIOChannel} with the following parameters:
+\begin{itemize}
+\item {\bf decimation}: Sets the decimation factor for DIO data streamed to the host computer.
+\item {\bf direction}: The 32 bits are separated into 4 groups of 8 bit. Each 8 bit group can be set to input or output separatly. This bitmask gives the direction and a bit value of 1 means output, a bit value of 0 means input:
+
+% Definition der Block-Styles für die folgenden Flußdiagramme
+\tikzstyle{block2} = [rectangle, draw, fill=white, text centered, minimum height=1.5em]
+\tikzstyle{line} = [draw, -latex']
+\begin{tikzpicture}[trim left=-4.2cm,every text node part/.style={align=center}]
+	\node[block2, fill=yellow!10, text width=2cm] (BITX) at (0,0) {...};
+	\node[block2, fill=yellow!10, anchor=west, text width=0.6cm] (BIT3) at (BITX.east) {3};
+	\node[block2, fill=yellow!10, anchor=west, text width=0.6cm] (BIT2) at (BIT3.east) {2};
+	\node[block2, fill=yellow!10, anchor=west, text width=0.6cm] (BIT1) at (BIT2.east) {1};
+	\node[block2, fill=yellow!10, anchor=west, text width=0.6cm] (BIT0) at (BIT1.east) {0};
+	\node[anchor=east] at (BITX.west) {Bits of {\it direction}:};
+	\node[anchor=north west, yshift=-0.1cm] (TXT0) at (BIT0.south) {for I/O 0 .. 7};
+	\node[anchor=north west, yshift=-0.5cm] (TXT1) at (BIT1.south) {for I/O 8 .. 15};
+	\node[anchor=north west, yshift=-0.9cm] (TXT2) at (BIT2.south) {for I/O 16 .. 23};
+	\node[anchor=north west, yshift=-1.3cm] (TXT3) at (BIT3.south) {for I/O 24 .. 31};
+	\draw [line, -] (BIT0.south) -- (TXT0.north west);
+	\draw [line, <->] (BIT1.south) -- (TXT1.north west);
+	\draw [line, <->] (BIT2.south) -- (TXT2.north west);
+	\draw [line, <->] (BIT3.south) -- (TXT3.north west);
+\end{tikzpicture}
+
+\item {\bf extclk}: `OFF': internally clocked with a fixed frequency of 60 MHz, `ON':  externally clocked with a clock signal connected to DIO Pin 68. The available range is from 1 Hz up to the internal clock frequency
+\item {\bf mode}: `Manual': Manual setting of the DIO output value. `Threshold unit': Enables setting of DIO output values by the threshold unit.
+\item {\bf output}: Sets the value of the DIO output for those bytes where 'direction' is set to output.
+\item The inputs are read in the sample dict of the demodulator.
+\end{itemize}
 
 
 \subsection{Multi device synchronization}
-    Combines all the Parameters concerning the multi device sync
-    Parameters:
-            armed: Indicates whether the mds module is armed and waiting
-                   for pulses, ReadOnly.
-            drive: Enables output of synch pulses on trigger output 1.
-            enable: Enables the mds module.
-            source: Select input source for mds synch signal.
-            syncvalid: Indicates if sync pulses are received, ReadOnly.
-            timestamp: Used to set the resulting adjusted timestamp.
-NO VALIDATOR AND NOT TESTED
+The feature Multi device synchronization can be used to sync more than one Lock.-In Amplifier to use always the same clock phase. For more informations please lokk into the manual. This feature is not tested. The submodule is {\bf mds}, the class is MultiDeviceSync with the following parameters:
+\begin{itemize}
+\item {\bf armed}: {\it (ReadOnly)} Indicates whether the mds module is armed and waiting for pulses.
+\item {\bf drive}: Enables output of synch pulses on trigger output 1.
+\item {\bf enable}: Enables the mds module.
+\item {\bf source}: Select input source for mds synch signal.
+\item {\bf syncvalid}: {\it (ReadOnly)} Indicates if sync pulses are received.
+\item {\bf timestamp}: Used to set the resulting adjusted timestamp.
+\end{itemize}
 
 
 \subsection{Scope Channel}
@@ -519,23 +486,22 @@ NO VALIDATOR AND NOT TESTED
 
 
 \subsection{PID}
-    Combines all parameters concerning the PIDs
+    Combines all parameters concerning the PIDs.
     These Parameters are only available if the MF-PID Quad PID/PLL Controller 
-    option is installed on the MFLI parent Instrument
+    option is installed on the MFLI parent Instrument.
 
 
 \subsection{Sweeper}
-        if "MD" in self.options:
-            self.sweeper = self.daq.sweep()
-            self.sweeper.set('sweep/device', self.device)
-
-class SweeperChannel(InstrumentChannel):
-    Combines all the parameters for the sweeper module.
-
-class Sweep(MultiParameter):
-    Parameter class for the ZIMFLI instrument class for the sweeper.
-    The get method returns a tuple of arrays, where each array contains the
-    values of a signal added to the sweep (e.g. demodulator 4 phase).
+The manual says that the sweeper option is only available if the MD option is installed (Multi Demodulator). In my test device this is not but the sweep function works in the Web-GUI.
+% if "MD" in self.options:
+%            self.sweeper = self.daq.sweep()
+%            self.sweeper.set('sweep/device', self.device)
+%class SweeperChannel(InstrumentChannel):
+%    Combines all the parameters for the sweeper module.
+%class Sweep(MultiParameter):
+%    Parameter class for the ZIMFLI instrument class for the sweeper.
+%    The get method returns a tuple of arrays, where each array contains the
+%    values of a signal added to the sweep (e.g. demodulator 4 phase).
 
 
 \end{document}

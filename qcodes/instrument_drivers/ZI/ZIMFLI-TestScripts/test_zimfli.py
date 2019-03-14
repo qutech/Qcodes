@@ -13,6 +13,26 @@ import time
 
 zidev = ZIMFLI( name='ZIMFLI', device_ID='DEV4039' )
 
+# Test the external reference channel
+er = zidev.submodules['extref1']
+print( "Signalin:", er.signalin() )
+print( "Bandwidth:", er.bandwidth() )
+print( "Channel:", er.channel() )
+print( "Enable:", er.enable() )
+print( "Locked:", er.locked() )
+print( "OscSelect:", er.oscselect() )
+
+#er.enable('ON')
+#time.sleep(0.5)
+
+#print( "Signalin:", er.signalin() )
+#print( "Automode:", er.automode() )
+#print( "Channel:", er.channel() )
+#print( "Enable:", er.enable() )
+#print( "Locked:", er.locked() )
+#print( "OscSelect:", er.oscselect() )
+
+
 #print( "--- Version informations: ---" )
 #print( zidev.version() )
 
@@ -42,7 +62,7 @@ zidev = ZIMFLI( name='ZIMFLI', device_ID='DEV4039' )
 
 """
 Program for the example from Chapter 3.1 of the ziMFLI User Manual
-"""
+
 # Oscillator to 300kHz with readback
 print("current freuqency oscillator1:", zidev.oscillator1_freq())
 zidev.oscillator1_freq( 300000.0 )
@@ -60,4 +80,4 @@ sigout.offset(0)
 
 # Turn output on
 sigout.on('ON')
-
+"""

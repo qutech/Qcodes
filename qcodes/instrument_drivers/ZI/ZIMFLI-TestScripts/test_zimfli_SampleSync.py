@@ -42,24 +42,24 @@ t_start = time.time()
 # damit es keine print() Verzögerungen gibt, werden erstmal alle Daten
 # abgefragt und lokal gespeichert
 sam_val = dmod1.sample()
-t_sam = time.time()
-sam_tim = zidev.lastsampletime / zidev.clockbase
+t_sam   = time.time()
+sam_tim = zidev.getLastSampleTimestamp()[2]
 
 x_val = dmod1.x()
-t_x = time.time()
-x_tim = zidev.lastsampletime / zidev.clockbase
+t_x   = time.time()
+x_tim = zidev.getLastSampleTimestamp()[2]
 
 y_val = dmod1.y()
-t_y = time.time()
-y_tim = zidev.lastsampletime / zidev.clockbase
+t_y   = time.time()
+y_tim = zidev.getLastSampleTimestamp()[2]
 
 r_val = dmod1.R()
-t_r = time.time()
-r_tim = zidev.lastsampletime / zidev.clockbase
+t_r   = time.time()
+r_tim = zidev.getLastSampleTimestamp()[2]
 
 phi_val = dmod1.phi()
-t_phi = time.time()
-phi_tim = zidev.lastsampletime / zidev.clockbase
+t_phi   = time.time()
+phi_tim = zidev.getLastSampleTimestamp()[2]
 
 t_end = time.time()
 
