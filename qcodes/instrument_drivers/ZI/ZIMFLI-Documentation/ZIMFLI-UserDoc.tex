@@ -249,7 +249,7 @@ The following parameters are accessible directly from the main device instance.
 In this section I describe all implemented submodules for this device. For each submodule all available parameters are described.
 
 \subsection{Demodulator}
-	The Lock-In-Amplifier has 2 demodulator channels. Not all parameters are accessible for the second channel. If the MD option is installed, there are more channels available. The Parameters for each channel:
+The Lock-In-Amplifier has two demodulator channels. Not all parameters are accessible for the second channel. If the MD option is installed, there are four channels available. The submodules are named {\bf demod1} and {\bf demod2}, \small{with the MD option up to demod4}. The class is {\it DemodulatorChannel} with the following parameters:
 	\begin{itemize}
 	\item {\bf bypass}: Allows to bypass the demodulator low-pass filter, thus increasing the bandwidth.
 	\item {\bf frequency}: {\it (ReadOnly)} Indicates the frequency used for demodulation and for output generation. The demodulation frequency is calculated with oscillator frequency times the harmonic factor. When the MOD option is used, linear combinations of oscillator frequencies including the harmonic factors define the demodulation frequencies.
@@ -267,7 +267,7 @@ In this section I describe all implemented submodules for this device. For each 
 	\item {\bf harmonic}: Multiplies the demodulator's reference frequency by an integer factor. If the demodulator is used as a phase detector in external reference mode (PLL), the effect is that the internal oscillator locks to the external frequency divided by the integer factor.
 	\item {\bf oscselect}: Connects the demodulator with the supplied oscillator. Number of available oscillators depends on the installed options. Is a number between 0 and the number of oscillators -1.
 	\item {\bf phaseadjust}: Adjust the demodulator phase automatically in order to read 0 degrees.
-	\item {\bf phaseshift}: Phase shift applied to the reference input of the demodulator. The value is clipped to -180 .. +180 degrees.
+	\item {\bf phaseshift}: Phase shift applied to the reference input of the demodulator. The value is clipped by the device to -180 .. +180 degrees.
 	\item {\bf timeconstant}: Sets the integration time constant or in other words, the cutoff frequency of the demodulator low pass filter.
 	\item {\bf samplerate}$^{(*)}$: Defines the demodulator sampling rate, the number of samples that are sent to the host computer per second. A rate of about 7-10 higher as compared to the filter bandwidth usually provides sufficient aliasing suppression. This is also the rate of data received by LabOne Data Server and saved to the computer hard disk. This setting has no impact on the sample rate on the auxiliary outputs connectors. Note: the value inserted by the user may be approximated to the nearest value supported by the instrument.
 	\item {\bf sample}$^{(*)}$: {\it (ReadOnly)} Returns a dict with streamed demodulator samples with sample interval defined by the demodulator data rate. See note below. The dict contains the following entries:
@@ -288,23 +288,23 @@ In this section I describe all implemented submodules for this device. For each 
 	\item {\bf signalinput}: Selects the input signal for the demodulator. Possible values: 'Sig In 1', 'Curr In 1', 'Trigger 1', 'Trigger 2', 'Aux Out 1', 'Aux Out 2', 'Aux Out 3', 'Aux Out 4', 'Aux In 1', 'Aux In 2', 'Constant input'.
 	\item {\bf streaming}$^{(*)}$: Enables the data acquisition for the corresponding demodulator. Possible values are: `ON', `OFF'.
 	\item {\bf trigger}$^{(*)}$: Selects the acquisition mode (i.e. triggering) or the demodulator. The possible values are:
-	\begin{longtable}{p{1.5cm}p{4cm}p{11cm}}
-	&'Continuous' & demodulator data is continuously streamed to the host computer. \\
-	&'Trigger in 1 Rise' & rising edge triggered. \\
-	&'Trigger in 1 Fall' & falling edge triggered. \\
-	&'Trigger in 1 Both' & triggering on both rising and falling edge. \\
-	&'Trigger in 2 Rise' & rising edge triggered. \\
-	&'Trigger in 2 Fall' & falling edge triggered. \\
-	&'Trigger in 2 Both' & triggering on both rising and falling edge. \\
-	&'Trigger in 1$\mid$2 Rise' & rising edge triggered on either input. \\
-	&'Trigger in 1$\mid$2 Fall' & falling edge triggered on either input. \\
-	&'Trigger in 1$\mid$2 Both' & triggering on both rising and falling edge or either trigger input. \\
-	&'Trigger in 1 Low' & demodulator data is streamed to the host computer when the level is low (TTL). \\
-	&'Trigger in 1 High' & demodulator data is streamed to the host computer when the level is high (TTL). \\
-	&'Trigger in 2 Low' & demodulator data is streamed to the host computer when the level is low (TTL). \\
-	&'Trigger in 2 High' & demodulator data is streamed to the host computer when the level is high (TTL). \\
-	&'Trigger in 1$\mid$2 Low' & demodulator data is streamed to the host computer when either level is low (TTL). \\
-	&'Trigger in 1$\mid$2 High' & demodulator data is streamed to the host computer when either level is high (TTL). \\
+	\begin{longtable}{p{0.8cm}p{3.1cm}p{12.6cm}}
+	&'Continuous' & demodulator data is continuously streamed to the host computer \\
+	&'Trigger in 1 Rise' & rising edge triggered \\
+	&'Trigger in 1 Fall' & falling edge triggered \\
+	&'Trigger in 1 Both' & triggering on both rising and falling edge \\
+	&'Trigger in 2 Rise' & rising edge triggered \\
+	&'Trigger in 2 Fall' & falling edge triggered \\
+	&'Trigger in 2 Both' & triggering on both rising and falling edge \\
+	&'Trigger in 1$\mid$2 Rise' & rising edge triggered on either input \\
+	&'Trigger in 1$\mid$2 Fall' & falling edge triggered on either input \\
+	&'Trigger in 1$\mid$2 Both' & triggering on both rising and falling edge or either trigger input \\
+	&'Trigger in 1 Low' & demodulator data is streamed to the host computer when the level is low (TTL) \\
+	&'Trigger in 1 High' & demodulator data is streamed to the host computer when the level is high (TTL) \\
+	&'Trigger in 2 Low' & demodulator data is streamed to the host computer when the level is low (TTL) \\
+	&'Trigger in 2 High' & demodulator data is streamed to the host computer when the level is high (TTL) \\
+	&'Trigger in 1$\mid$2 Low' & demodulator data is streamed to the host computer when either level is low (TTL) \\
+	&'Trigger in 1$\mid$2 High' & demodulator data is streamed to the host computer when either level is high (TTL) \\
 	\end{longtable}
 	\item {\bf x}: {\it (ReadOnly)} get sample of x coordinate. See note below.
 	\item {\bf y}: {\it (ReadOnly)} get sample of y coordinate. See note below.
@@ -317,7 +317,7 @@ In this section I describe all implemented submodules for this device. For each 
 
 
 \subsection{Signal Input (Voltage)}
-The Lock-In-Amplifier has one voltage sensitive input channel with the following parameters:
+The Lock-In-Amplifier has one voltage sensitive input channel. The submodule is named {\bf signal\_in1}, the class is {\it SignalInputChannel} with the following parameters:
 \begin{itemize}
 \item {\bf autorange}: Automatic adjustment of the Range to about two times the maximum signal input amplitude measured over about 100 ms.
 \item {\bf range}: Defines the gain of the analog input amplifier. The range should exceed the incoming signal by roughly a factor two including a potential DC offset. The instrument selects the next higher available range relative to a value inserted by the user. A suitable choice of this setting optimizes the accuracy and signal-to-noise ratio by ensuring that the full dynamic range of the input ADC is used.
@@ -334,7 +334,7 @@ The Lock-In-Amplifier has one voltage sensitive input channel with the following
 
 
 \subsection{Signal Input (Current)}
-The device has one current sensitive input channel with the following parameters:
+The device has one current sensitive input channel. The submodule is named {\bf current\_in1}, the class is {\it CurrentInputChannel} with the following parameters:
 \begin{itemize}
 \item {\bf autorange}: Automatic adjustment of the Range to about two times the maximum signal input amplitude measured over about 100 ms.
 \item {\bf range}: Defines the gain of the analog input amplifier. The range should exceed the incoming signal by roughly a factor two including a potential DC offset. The instrument selects the next higher available range relative to a value inserted by the user. A suitable choice of this setting optimizes the accuracy and signal-to-noise ratio by ensuring that the full dynamic range of the input ADC is used.
@@ -348,7 +348,7 @@ The device has one current sensitive input channel with the following parameters
 
 
 \subsection{Auxiliary Inputs}
-The device has two auxiliary inputs. Because of the demodulator functionality the input values are only available as fields in the dict of the demodulator sample reading. The parameters of the AUXInputs are:
+The device has two auxiliary inputs. Because of the demodulator functionality the input values are only available as fields in the dict of the demodulator sample reading. The submodule is named {\bf aux\_in1}, the class is {\it AUXInputChannel} with the following parameters:
 \begin{itemize}
 \item {\bf averaging}: Defines the number of samples on the input to average as a power of two. Possible values are in the range [0, 16]. A value of 0 corresponds to the sampling rate of the auxiliary input's ADC.
 \item {\bf sample}: This returns the same dict as the demodulator parameter sample.
@@ -356,7 +356,7 @@ The device has two auxiliary inputs. Because of the demodulator functionality th
 
 
 \subsection{External reference}
-The device has the capability to synchronize its internal oscillator used for demodulation with an external reference clock signal. The parameters of the {\bf ExternalReferenceChannel} are:
+The device has the capability to synchronize its internal oscillator used for demodulation with an external reference clock signal. The submodule is named {\bf extref1}, the class is {\bf ExternalReferenceChannel} with the following parameters:
 \begin{itemize}
 \item {\bf signalin}: {\it (ReadOnly)} Indicates the input signal selection for the selected demodulator. Possible Values are 'Sig In 1', 'Curr In 1', `Trigger 1', 'Trigger 2', 'Aux Out 1', 'Aux Out 2', 'Aux Out 3', 'Aux Out 4', 'Aux In 1', 'Aux In 2', `Constant'.
 \item {\bf automode}: {\it (Only with MD option installed)} This defines the type of automatic adaptation of parameters in the PID used for external reference. Allowed values are 'None', 'PID Auto', 'PID Low', 'PID High', 'PID All'.
@@ -378,7 +378,7 @@ dm2.signalin('Aux In 1')          # select input for external reference
 
 
 \subsection{Signal Output}
-The device has one signal output with the following parameters:
+The device has one signal output. The submodule is named {\bf signal\_out1}, the class is {\it SignalOutputChannel} with the following parameters:
 \begin{itemize}
 \item {\bf add}: The signal supplied to the Aux Input 1 is added to the signal output. For differential output the added signal is a common mode offset. The allowed values are `ON' and `OFF'.
 \item {\bf autorange}: If enabled, selects the most suited output range automatically. Allowed values are `ON' and `OFF'.
@@ -395,7 +395,7 @@ The device has one signal output with the following parameters:
 
 
 \subsection{Auxilliary Outputs}
-The device has four auxiliary outputs. The submodules named {\bf aux\_out1} .. {\bf aux\_out4}, the class is named {\it AUXOutputChannel} and has the following parameters:
+The device has four auxiliary outputs. The submodules are named {\bf aux\_out1} .. {\bf aux\_out4}, the class is {\it AUXOutputChannel} and has the following parameters:
 \begin{itemize}
 \item {\bf scale}: Multiplication factor to scale the signal.
 \item {\bf preoffset}: Add a pre-offset to the signal before scaling is applied.
@@ -410,7 +410,7 @@ The device has four auxiliary outputs. The submodules named {\bf aux\_out1} .. {
 
 
 \subsection{Trigger Inputs}
-The Lock-In-Amplifier has two TTL compatible trigger input lines. The connectors are on the back side of the device. The submodules are named {\bf trigger\_in1} and {\bf trigger\_in2}, the class is named {\it TriggerInputChannel} and has the following parameters:
+The Lock-In-Amplifier has two TTL compatible trigger input lines. The connectors are on the back side of the device. The submodules are named {\bf trigger\_in1} and {\bf trigger\_in2}, the class is {\it TriggerInputChannel} and has the following parameters:
 \begin{itemize}
 \item {\bf autothreshold}: Automatically adjust the trigger threshold. The level is adjusted to fall in the center of the applied transitions. Allowed values are `ON' and `OFF'.
 \item {\bf level}: Trigger voltage level at which the trigger input toggles between low and high. Use 50\% amplitude for digital input and consider the trigger hysteresis.
@@ -418,7 +418,7 @@ The Lock-In-Amplifier has two TTL compatible trigger input lines. The connectors
 
 
 \subsection{Trigger Outputs}
-The Lock-In-Amplifier has two TTL compatible trigger output lines. The connectors are on the back side of the device. The submodules are named {\bf trigger\_out1} and {\bf trigger\_out2}, the class is named {\it TriggerOutputChannel} and has the following parameters:
+The Lock-In-Amplifier has two TTL compatible trigger output lines. The connectors are on the back side of the device. The submodules are named {\bf trigger\_out1} and {\bf trigger\_out2}, the class is {\it TriggerOutputChannel} and has the following parameters:
 \begin{itemize}
 \item {\bf pulsewidth}: Defines the minimal pulse width for the case of Scope events written to the trigger outputs of the device. Currently this value is only valid for the driver in the range from 0 to 0.149 seconds.
 \item {\bf source}: Select the signal assigned to the trigger output. Possible values are:
@@ -437,7 +437,7 @@ The Lock-In-Amplifier has two TTL compatible trigger output lines. The connector
 
 
 \subsection{Digital Input / Outputs}
-The Lock-In-Amplifier has 32 digital input / output lines. They are available at a special connector located at the back of the device. The submodule is named {\bf dio}, the class is named {\it DIOChannel} with the following parameters:
+The Lock-In-Amplifier has 32 digital input / output lines. They are available at a special connector located at the back of the device. The submodule is named {\bf dio}, the class is {\it DIOChannel} with the following parameters:
 \begin{itemize}
 \item {\bf decimation}: Sets the decimation factor for DIO data streamed to the host computer.
 \item {\bf direction}: The 32 bits are separated into 4 groups of 8 bit. Each 8 bit group can be set to input or output separatly. This bitmask gives the direction and a bit value of 1 means output, a bit value of 0 means input:
@@ -470,7 +470,7 @@ The Lock-In-Amplifier has 32 digital input / output lines. They are available at
 
 
 \subsection{Multi device synchronization}
-The feature Multi device synchronization can be used to sync more than one Lock.-In Amplifier to use always the same clock phase. For more informations please lokk into the manual. This feature is not tested. The submodule is {\bf mds}, the class is MultiDeviceSync with the following parameters:
+The feature Multi device synchronization can be used to sync more than one Lock.-In Amplifier to use always the same clock phase. For more informations please look into the manual. This feature is not tested. The submodule is named {\bf mds}, the class is {\it MDSChannel} with the following parameters:
 \begin{itemize}
 \item {\bf armed}: {\it (ReadOnly)} Indicates whether the mds module is armed and waiting for pulses.
 \item {\bf drive}: Enables output of synch pulses on trigger output 1.
@@ -492,7 +492,7 @@ The feature Multi device synchronization can be used to sync more than one Lock.
 
 
 \subsection{Sweeper}
-The manual says that the sweeper option is only available if the MD option is installed (Multi Demodulator). In my test device this is not but the sweep function works in the Web-GUI.
+The manual says that the sweeper option is only available if the MD option is installed (Multi Demodulator). In my test device this is not but the sweep function works in the Web-GUI. At the moment the driver disables all Sweeper functions.
 % if "MD" in self.options:
 %            self.sweeper = self.daq.sweep()
 %            self.sweeper.set('sweep/device', self.device)
