@@ -1,6 +1,6 @@
 """
 This module implements a driver for the attocube ANC350 nanopositioner in
-qcodes using the ANC350-python-library found at 
+qcodes using the ANC350-python-library found at
 https://github.com/Laukei/attocube-ANC350-Python-library.
 
 The main functions are the get- and set methods for amplitude (voltage),
@@ -69,7 +69,7 @@ class Attocube_ANC350(Instrument):
         """
         A convenience function to allow for strings such as 'x' as arguments
         for the direction (instead of just the axis numbers 0, 1, 2)
-        
+
         Parameters
             direction   One of {'x', 'y', 'z', 0, 1, 2}
         Returns
