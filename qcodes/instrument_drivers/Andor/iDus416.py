@@ -583,3 +583,15 @@ class Andor_iDus(Instrument):
                 os.makedirs(path)
             path += time.strftime('%H-%M-%S') + '.txt'
         self.andor.SaveAsTxt(path)
+
+    def save_as_bmp_Normalized(self, path: str=''):
+        """
+        Save the data to a text file at *path*. Defaults to
+        ./YYYYmmdd/spectra/HH-MM-SS.bmp
+        """
+        if path == '':
+            path += './' + time.strftime('%Y%m%d') + '/spectra/'
+            if not os.path.isdir(path):
+                os.makedirs(path)
+            path += time.strftime('%H-%M-%S') + '.bmp'
+        self.andor.SaveAsBmpNormalised(path)
