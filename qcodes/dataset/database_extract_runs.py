@@ -4,6 +4,7 @@ import os
 
 import numpy as np
 
+from qcodes.dataset.dependencies import new_to_old
 from qcodes.dataset.data_set import DataSet
 from qcodes.dataset.experiment_container import load_or_create_experiment
 from qcodes.dataset.sqlite_base import (add_meta_data,
@@ -191,7 +192,7 @@ def _extract_single_dataset_into_db(dataset: DataSet,
     if run_id != -1:
         return
 
-    parspecs = dataset.paramspecs.values()
+    parspecs = new_to_old(dataset._interdeps).paramspecs
     metadata = dataset.metadata
     snapshot_raw = dataset.snapshot_raw
 
@@ -243,7 +244,7 @@ def _populate_results_table(source_conn: ConnectionPlus,
 
 
 def _rewrite_timestamps(target_conn: ConnectionPlus, target_run_id: int,
-                        correct_run_timestamp: float,
+                        correct_run_timestamp: Optional[float],
                         correct_completed_timestamp: Optional[float]) -> None:
     """
     Update the timestamp to match the original one
