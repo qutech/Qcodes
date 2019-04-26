@@ -133,7 +133,7 @@ class Andor_iDus(Instrument):
         rates = [float('{:.3f}'.format(rate)) for rate in self.andor.GetHSSpeed()]
         self.add_parameter('readout_rate',
                            label='Readout Rate (Horizontal Shift Speed)',
-                           unit='Hz',
+                           unit='MHz',
                            get_cmd=lambda: self.andor._HSSpeed,
                            set_cmd=self.andor.SetHSSpeed,
                            get_parser=lambda x: self._generic_parser('_HSSpeed'),
@@ -595,3 +595,11 @@ class Andor_iDus(Instrument):
                 os.makedirs(path)
             path += time.strftime('%H-%M-%S') + '.bmp'
         self.andor.SaveAsBmpNormalised(path)
+
+    def disconnect(self):
+        """
+        I disabled the __del__ in the iDus_python_library.Camera.andor file
+        because there are some warnings when the kernel is restarted: __del__
+        calls Shutdown but the connection is already killed by using disconnect
+        """
+        self.andor.ShutDown()
