@@ -6,7 +6,7 @@ Created on Wed Mar  6 20:40:35 2019
 """
 
 from qcodes import Instrument, Parameter
-from qcodes.utils.validators import Numbers
+from qcodes.utils.validators import Ints
 from qcodes.instrument_drivers.attocube.PyAMC100 import MotionController
 
 '''
@@ -58,24 +58,21 @@ class Attocube_AMC100(Instrument):
                            set_cmd = self.set_position1,
                            get_parser = int,
                            label = 'Position Axis 1',
-                           unit = 'u°',
-                           docstring = " Note that the unit depends on the actor type.")
+                           unit = 'u°')
 
         self.add_parameter('pos_2',
                            get_cmd = self.get_position2,
                            set_cmd = self.set_position2,
                            get_parser = int,
                            label = 'Position Axis 2',
-                           unit = 'u°',
-                           docstring = " Note that the unit depends on the actor type.")
+                           unit = 'u°')
 
         self.add_parameter('pos_3',
                            get_cmd = self.get_position3,
                            set_cmd = self.set_position3,
                            get_parser = int,
                            label = 'Position Axis 3',
-                           unit = 'u°',
-                           docstring = " Note that the unit depends on the actor type.")
+                           unit = 'u°')
 
 #%%
 
@@ -84,6 +81,7 @@ class Attocube_AMC100(Instrument):
                            set_cmd = self.set_frequency1,
                            get_parser = int,
                            label = 'Frequency Axis 1',
+                           vals = Ints(0,5000),
                            unit = 'Hz')
 
         self.add_parameter('freq_2',
@@ -91,6 +89,7 @@ class Attocube_AMC100(Instrument):
                            set_cmd = self.set_frequency2,
                            get_parser = int,
                            label = 'Frequency Axis 2',
+                           vals = Ints(0,5000),
                            unit = 'Hz')
 
         self.add_parameter('freq_3',
@@ -98,6 +97,7 @@ class Attocube_AMC100(Instrument):
                            set_cmd = self.set_frequency3,
                            get_parser = int,
                            label = 'Frequency Axis 3',
+                           vals = Ints(0,5000),
                            unit = 'Hz')
 
 #%%
@@ -107,6 +107,7 @@ class Attocube_AMC100(Instrument):
                            set_cmd = self.set_amplitude1,
                            get_parser = int,
                            label = 'Amplitude Axis 1',
+                           vals = Ints(0,45),
                            unit = 'V')
 
         self.add_parameter('amp_2',
@@ -114,6 +115,7 @@ class Attocube_AMC100(Instrument):
                            set_cmd = self.set_amplitude2,
                            get_parser = int,
                            label = 'Amplitude Axis 2',
+                           vals = Ints(0,45),
                            unit = 'V')
 
         self.add_parameter('amp_3',
@@ -121,6 +123,7 @@ class Attocube_AMC100(Instrument):
                            set_cmd = self.set_amplitude3,
                            get_parser = int,
                            label = 'Amplitude Axis 3',
+                           vals = Ints(0,45),
                            unit = 'V')
 
 
