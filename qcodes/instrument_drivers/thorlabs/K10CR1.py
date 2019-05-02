@@ -63,6 +63,7 @@ class RotaryMount(Instrument):
                            get_cmd = self._get_blocking,
                            set_cmd = self._set_blocking,
                            label = 'motor blocking',
+                           vals = Enum(0,1),
                            docstring = 'block any actions until end of motion')
 
         
