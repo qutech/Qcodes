@@ -554,7 +554,7 @@ class QuPulseDACChannel(BufferedReadableArrayParameter):
                 (Only Downsample operations are supported yet)
         """
         if isinstance(operation, Downsample):
-            shape = (1,)
+            shape = ()
         else:
             raise NotImplementedError('Operations of type {} are not supported yet.'.format(type(operation)))
             
@@ -800,10 +800,9 @@ class QuPulseDACInstrument(Instrument):
                 data = dac.measure_program(parameters)
                 if data:
                     self._data = {**self._data, **data}
-                    
-        n = parameter.shape[0]
         
-        values, remaining = np.split(self._data[parameter.name], [n])
+        # something "pop front"y
+        (values,), remaining = np.split(self._data[parameter.name], [1])
         
         # why did you handle None here before? it would have thrown an error if it occured
         if remaining.size != 0:
