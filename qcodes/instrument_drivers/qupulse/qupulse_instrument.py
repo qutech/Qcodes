@@ -6,7 +6,7 @@ Created on Wed Sep 19 10:17:25 2018
 @author: l.lankes
 """
 
-from typing import Callable, Union, Iterable, Optional, Dict, Sequence
+from typing import Callable, Union, Iterable, Optional, Dict, Sequence, Tuple
 from collections import defaultdict
 import numpy as np
 import warnings
@@ -329,12 +329,27 @@ class QuPulseAWGInstrument(Instrument):
         Returns:
             Dictionary of the measurement windows.
         """
+        mcp, measurement_windows = self._build_program()
+
+        self._upload_program(mcp)
+        
+        return measurement_windows
+
+    def _build_program(self) -> Tuple[MultiChannelProgram, Dict[str, Tuple[np.ndarray, np.ndarray]]]:
+        """Build a program based on the current template parameter values and loop structure
+
+        TODO: implement caching
+
+        Returns:
+            Multi channel program
+            Dictionary of the measurement windows.
+        """
         parameter_mapping = {}
         params = self.template_parameters.to_dict()
-        
+
         for p in self.template.get().parameter_names:
             parameter_mapping[p] = p
-        
+
         for loop in self._loops:
             if 'sweep_values' in loop:
                 parameter_mapping[loop['parameter']] = "{}[{}]".format(loop['parameter'], loop['iterator'])
@@ -347,26 +362,12 @@ class QuPulseAWGInstrument(Instrument):
                 pt = ForLoopPT(pt, loop['iterator'], range(len(loop['sweep_values'])))
             elif 'repetitions' in loop:
                 pt = RepetitionPT(pt, loop['repetitions'])
-        
+
         program = pt.create_program(parameters=params,
-                                    channel_mapping=self.channel_mapping.get(),
-                                    measurement_mapping=self.measurement_mapping.get())
-        
-        measurement_windows = self._upload_program(program)
-        
-        return measurement_windows
-        
-        
-    def _upload_program(self, program, update=True) -> Dict:
-        """
-        Sends the buffer to the device and arms it.
-        
-        Args:
-            program: Program object
-        
-        Returns:
-            Dictionary of the measurement windows.
-        """
+                                 channel_mapping=self.channel_mapping.get(),
+                                 measurement_mapping=self.measurement_mapping.get())
+
+        # this is legacy complex multi channeling support
         mcp = MultiChannelProgram(program)
         if mcp.channels - set(self._channel_map.keys()):
             raise KeyError('The following channels are unknown to the HardwareSetup: {}'.format(
@@ -377,6 +378,7 @@ class QuPulseAWGInstrument(Instrument):
             for mw_name, begins_lengths in program.get_measurement_windows().items():
                 temp_measurement_windows[mw_name].append(begins_lengths)
 
+        # this while loop allows the garbage collector to collect stuff we already iterated over
         measurement_windows = dict()
         while temp_measurement_windows:
             mw_name, begins_lengths_deque = temp_measurement_windows.popitem()
@@ -387,6 +389,15 @@ class QuPulseAWGInstrument(Instrument):
                 np.concatenate(lengths)
             )
 
+        return mcp, measurement_windows
+        
+    def _upload_program(self, mcp, update=True):
+        """
+        Sends the buffer to the device and arms it.
+        
+        Args:
+            program: Program object
+        """
         handled_awgs = set()
         for channels, program in mcp.programs.items():
             awgs_to_channel_info = dict()
@@ -429,9 +440,6 @@ class QuPulseAWGInstrument(Instrument):
             else:
                 # The other AWGs should ignore the trigger
                 awg.arm(None)
-        
-        return measurement_windows
-
 
     def _run_program(self, layer):
         """
