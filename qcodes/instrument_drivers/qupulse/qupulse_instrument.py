@@ -22,7 +22,7 @@ from qupulse.hardware.dacs import DAC
 from qupulse.hardware.setup import ChannelID, _SingleChannel, PlaybackChannel, MarkerChannel, MeasurementMask
 from qupulse._program._loop import MultiChannelProgram
 
-from atsaverage.operations import OperationDefinition, Downsample
+from atsaverage.operations import OperationDefinition, Downsample, ChunkedAverage, RepAverage
 
 
 class QuPulseTemplateParameter(BufferedSweepableParameter):
@@ -546,6 +546,8 @@ class QuPulseDACChannel(BufferedReadableArrayParameter):
         """
         if isinstance(operation, Downsample):
             shape = ()
+        elif isinstance(operation, (ChunkedAverage, RepAverage)):
+            shape = (-1,)
         else:
             raise NotImplementedError('Operations of type {} are not supported yet.'.format(type(operation)))
             
@@ -566,10 +568,31 @@ class QuPulseDACChannel(BufferedReadableArrayParameter):
         Reset the parameter to its default state, so it can be used for another
         measurement
         """
-        self.measurement_window = None, None
+        self.sample_masks = None
         self.configured = False
         self.ready = False
-    
+
+        self.update_shape()
+
+    def update_shape(self):
+        if isinstance(self.operation, ChunkedAverage):
+            if self.sample_masks:
+                ((_, (_, lengths),),) = self.sample_masks.values()
+                n_samples = int(np.max(lengths))
+                if n_samples > 0:
+                    n_chunks = ((n_samples - 1) // self.operation.chunkSize) + 1
+                else: n_chunks = 0
+
+                self.shape = (n_chunks,)
+            else:
+                self.shape = (-1,)
+        elif isinstance(self.operation, RepAverage):
+            if self.sample_masks:
+                ((_, (_, lengths),),) = self.sample_masks.values()
+                n_samples = int(np.max(lengths))
+                self.shape = (n_samples,)
+            else:
+                self.shape = (-1,)
 
     def snapshot_base(self, update: bool=False,
                       params_to_skip_update: Sequence[str]=None):
@@ -702,7 +725,7 @@ class QuPulseDACInstrument(Instrument):
 
 
     def _configure_measurement(self, parameter: QuPulseDACChannel,
-                               measurement_windows) -> None:
+                               measurement_windows: Dict[str, Tuple[np.ndarray, np.ndarray]]) -> None:
         """
         Configures a measurement to a parameter
         
@@ -712,23 +735,41 @@ class QuPulseDACInstrument(Instrument):
         """
         if parameter.configured:
             raise Exception('It is not allowed to measure the same parameter ({}) twice.'.format(parameter))
-            
-        mask_name = parameter.operation.maskID
-        
+
+        # only works for atsaverage
+        mask_names = set()
+        if hasattr(parameter.operation, 'maskID'):
+            mask_names.add(parameter.operation.maskID)
+        else:
+            mask_names = mask_names.union(parameter.operation.maskIDs)
+
+        dacs = {}
+        duplicates = []
         for window_name, masks in self._measurement_masks.items():
-            for mask in masks:
-                if mask.mask_name == mask_name:
-                    if window_name in measurement_windows:
-                        parameter.measurement_window = window_name, measurement_windows[window_name]
-                        break
-                    else:
-                        raise Exception('Measurement window "{}" is not given.'.format(window_name))
-            else:
-                continue
-            
-            break
+            time_windows = measurement_windows.get(window_name, None)
+            if time_windows:
+                for mask in masks:
+                    if mask.mask_name in mask_names:
+                        if mask.mask_name in dacs:
+                            # we have multiple masks with this name that have windows configured
+                            duplicates.append((window_name, mask.mask_name))
+
+                        else:
+                            dacs[mask.mask_name] = (mask.dac, time_windows)
+
+        if duplicates:
+            raise RuntimeError('Parameter has multiple window sets for one mask')
+
+        if mask_names - dacs.keys():
+            raise RuntimeError('No windows for mask(s)', mask_names - dacs.keys())
+
+        sample_masks = {mask_name: (dac, dac.set_measurement_mask(self.program_name, mask_name, *time_windows))
+                        for mask_name, (dac, time_windows) in dacs.items()}
         
         parameter.configured = True
+        parameter.sample_masks = sample_masks
+
+        parameter.update_shape()
 
 
     def _arm_measurement(self, parameter: QuPulseDACChannel) -> None:
@@ -752,16 +793,8 @@ class QuPulseDACInstrument(Instrument):
             
             for p in self.parameters.values():
                 if isinstance(p, QuPulseDACChannel) and p.ready:
-                    window_name, window = p.measurement_window
-                    mask_name = p.operation.maskID
-                    masks = self._measurement_masks[window_name]
-                    for mask in masks:
-                        if mask.mask_name == mask_name:
-                            self._affected_dacs[mask.dac][mask.mask_name] = window
-                            break
-            
-            for dac, dac_windows in self._affected_dacs.items():
-                dac.register_measurement_windows(self.program_name, dac_windows)
+                    for mask_name, (dac, sample_masks) in p.sample_masks.items():
+                        self._affected_dacs[dac][mask_name] = sample_masks
             
             for dac in self._affected_dacs.keys():
                 dac.arm_program(self.program_name)
