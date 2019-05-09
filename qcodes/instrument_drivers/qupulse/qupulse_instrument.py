@@ -65,7 +65,8 @@ class QuPulseTemplateParameters(Instrument):
                        sweep_parameter_cmd: Optional[Callable]=None,
                        repeat_parameter_cmd: Optional[Callable]=None,
                        send_buffer_cmd: Optional[Callable]=None,
-                       run_program_cmd: Optional[Callable]=None) -> None:
+                       run_program_cmd: Optional[Callable]=None,
+                       get_meas_windows: Optional[Callable[[], Dict]]=None) -> None:
         """
         Adds sweepable QCoDeS-parameters from qupulse-template-parameters.
         
@@ -86,7 +87,8 @@ class QuPulseTemplateParameters(Instrument):
                                    sweep_parameter_cmd=sweep_parameter_cmd,
                                    repeat_parameter_cmd=repeat_parameter_cmd,
                                    send_buffer_cmd=send_buffer_cmd,
-                                   run_program_cmd=run_program_cmd)
+                                   run_program_cmd=run_program_cmd,
+                                   get_meas_windows=get_meas_windows)
 
 
     def to_dict(self) -> Dict:
@@ -189,7 +191,8 @@ class QuPulseAWGInstrument(Instrument):
                                                     self._sweep_parameter,
                                                     self._repeat_parameter,
                                                     self._send_buffer,
-                                                    self._run_program)
+                                                    self._run_program,
+                                                    self._get_meas_windows)
         else:
             self.template_parameters.set_parameters(None, None, None)
 
@@ -329,13 +332,17 @@ class QuPulseAWGInstrument(Instrument):
         Returns:
             Dictionary of the measurement windows.
         """
-        mcp, measurement_windows = self._build_program()
+        mcp = self._build_program()
+        measurement_windows = _calc_measurement_windows(mcp)
 
         self._upload_program(mcp)
         
         return measurement_windows
 
-    def _build_program(self) -> Tuple[MultiChannelProgram, Dict[str, Tuple[np.ndarray, np.ndarray]]]:
+    def _get_meas_windows(self) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+        return _calc_measurement_windows(self._build_program())
+
+    def _build_program(self) -> MultiChannelProgram:
         """Build a program based on the current template parameter values and loop structure
 
         TODO: implement caching
@@ -373,23 +380,7 @@ class QuPulseAWGInstrument(Instrument):
             raise KeyError('The following channels are unknown to the HardwareSetup: {}'.format(
                 mcp.channels - set(self._channel_map.keys())))
 
-        temp_measurement_windows = defaultdict(list)
-        for program in mcp.programs.values():
-            for mw_name, begins_lengths in program.get_measurement_windows().items():
-                temp_measurement_windows[mw_name].append(begins_lengths)
-
-        # this while loop allows the garbage collector to collect stuff we already iterated over
-        measurement_windows = dict()
-        while temp_measurement_windows:
-            mw_name, begins_lengths_deque = temp_measurement_windows.popitem()
-
-            begins, lengths = zip(*begins_lengths_deque)
-            measurement_windows[mw_name] = (
-                np.concatenate(begins),
-                np.concatenate(lengths)
-            )
-
-        return mcp, measurement_windows
+        return mcp
         
     def _upload_program(self, mcp, update=True):
         """
@@ -871,3 +862,22 @@ class QuPulseDACInstrument(Instrument):
         metadata['parameters'][self.measurement_masks.name]['raw_value'] = masks_metadata
         
         return metadata
+
+
+def _calc_measurement_windows(mcp: MultiChannelProgram) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+    temp_measurement_windows = defaultdict(list)
+    for program in mcp.programs.values():
+        for mw_name, begins_lengths in program.get_measurement_windows().items():
+            temp_measurement_windows[mw_name].append(begins_lengths)
+
+    # this while loop allows the garbage collector to collect stuff we already iterated over
+    measurement_windows = dict()
+    while temp_measurement_windows:
+        mw_name, begins_lengths_deque = temp_measurement_windows.popitem()
+
+        begins, lengths = zip(*begins_lengths_deque)
+        measurement_windows[mw_name] = (
+            np.concatenate(begins),
+            np.concatenate(lengths)
+        )
+    return measurement_windows

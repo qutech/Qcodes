@@ -1932,6 +1932,7 @@ class BufferedSweepableParameter(Parameter):
                  repeat_parameter_cmd: Optional[Callable]=None,
                  send_buffer_cmd: Optional[Callable]=None,
                  run_program_cmd: Optional[Callable]=None,
+                 get_meas_windows: Optional[Callable[[], Dict]]=None,
                  *args, **kwargs):
         """
         Creates a BufferedSweepableParameter that creates buffered sweeps in
@@ -1951,6 +1952,7 @@ class BufferedSweepableParameter(Parameter):
         self._repeat_parameter_cmd = repeat_parameter_cmd
         self._send_buffer_cmd = send_buffer_cmd
         self._run_program_cmd = run_program_cmd
+        self._get_meas_windows = get_meas_windows
         
     def set_buffered(self, sweep_values, layer):
         """
@@ -1987,7 +1989,15 @@ class BufferedSweepableParameter(Parameter):
             return self._run_program_cmd(layer)
         else:
             return None
-        
+
+    def get_meas_windows(self) -> Dict:
+        """
+        Get measurement windows
+        """
+        if self._get_meas_windows is not None:
+            return self._get_meas_windows()
+        else:
+            return {}
 
 class BufferedReadableArrayParameter(ArrayParameter):
     """

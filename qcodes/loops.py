@@ -1331,6 +1331,20 @@ class BufferedActiveLoop(ActiveLoop):
         if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
             self.actions[0]._set_buffered_sweep(layer + 1)
 
+    def _get_meas_windows(self):
+        parameter = self._get_loop_parameter()
+
+        mw = parameter._get_meas_windows()
+        if mw is None: mw = {}
+
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
+            mw_tmp = self.actions[0]._get_meas_windows()
+
+            if mw_tmp is not None:
+                mw = {**mw, **mw_tmp}
+
+        return mw
+
     def _send_buffer(self, layer=0):
         """
         Lets the instrument(s) send the buffer(s) to the hardware (and arms the
