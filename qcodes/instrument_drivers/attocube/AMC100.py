@@ -34,12 +34,12 @@ amc.freq_3() # get frequency of axis 3 (Hz)
 amc.freq_3(8000) # set frequency of axis 3 (Hz)
 
 amc.amp_3() #get amplitude of axis 3 (V)
+FOR WHATEVER REASONS, THE AMPLITUDE CAN ONLY BE EVEN (SAME AS THE GUI)
 amc.amp_3(10) #set amplitude of axis 3 (V)
 
 amc.set_axis_output(2, 0) # disable axis 3
 
 amc.close() # disconnect
-
 '''
 
 #%%
@@ -129,8 +129,10 @@ class Attocube_AMC100(Instrument):
 
 #%%
     def close(self):
-
         self.mc.close()
+
+    def get_serial_number(self):
+        return self.mc.getSerialNumber()
 
     def get_axis_output(self, axis):
         axis = axis-1 # map axis 1,2,3 on the controller to the axis 0,1,2 in the driver
@@ -164,9 +166,9 @@ class Attocube_AMC100(Instrument):
         axis = axis-1 # map axis 1,2,3 on the controller to the axis 0,1,2 in the driver
         self.mc.setControlContinousBkwd(axis, enable)
 
-    def get_actor_type(self, axis):
+    def get_actor_name(self, axis):
         axis = axis-1 # map axis 1,2,3 on the controller to the axis 0,1,2 in the driver
-        return self.mc.getActorType(axis)
+        return self.mc.getActorName(axis)
 
 #%%
 
