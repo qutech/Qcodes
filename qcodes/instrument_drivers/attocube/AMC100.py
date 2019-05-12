@@ -7,7 +7,8 @@ Created on Wed Mar  6 20:40:35 2019
 
 from qcodes import Instrument, Parameter
 from qcodes.utils.validators import Ints
-from qcodes.instrument_drivers.attocube.PyAMC100 import MotionController
+#from qcodes.instrument_drivers.attocube.PyAMC100 import MotionController
+from AMC100_dll.PyAMC100 import MotionController
 
 '''
 Workflow: use axis 3 as an example
