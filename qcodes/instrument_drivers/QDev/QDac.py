@@ -50,7 +50,7 @@ class QDac(VisaInstrument):
 
         # This is the baud rate on power-up. It can be changed later but
         # you must start out with this value.
-        handle.baud_rate = 480600
+        handle.baud_rate = 460800
         handle.parity = visa.constants.Parity(0)
         handle.data_bits = 8
         self.set_terminator('\n')
@@ -61,6 +61,7 @@ class QDac(VisaInstrument):
 
         # The following bool is used in self.write
         self.debugmode = False
+        self.num_chans = num_chans
 
         if self._get_firmware_version() < 0.170202:
             raise RuntimeError('''
@@ -69,7 +70,7 @@ class QDac(VisaInstrument):
                                Contact rikke.lutge@nbi.ku.dk for an update.
                                ''')
         self._update_currents = update_currents
-        self.num_chans = num_chans
+        
 
         # Assigned slopes. Entries will eventually be [chan, slope]
         self._slopes = []
@@ -582,14 +583,14 @@ class QDac(VisaInstrument):
                                                       self.visa_handle.read()))
 
         # take care of the rest of the output
-        for ii in range(50):
+        for ii in range(self.num_chans+2):
             self.visa_handle.read()
 
     def _get_firmware_version(self):
         self.write('status')
         FW_str = self._write_response
         FW_version = float(FW_str.replace('Software Version: ', ''))
-        for ii in range(50):
+        for ii in range(self.num_chans+2):
             self.read()
         return FW_version
 
