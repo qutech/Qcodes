@@ -6,7 +6,7 @@ Created on Wed Sep 19 10:17:25 2018
 @author: l.lankes
 """
 
-from typing import Callable, Union, Iterable, Optional, Dict, Sequence
+from typing import Callable, Union, Iterable, Optional, Dict, Sequence, Tuple
 from collections import defaultdict
 import numpy as np
 import warnings
@@ -22,7 +22,7 @@ from qupulse.hardware.dacs import DAC
 from qupulse.hardware.setup import ChannelID, _SingleChannel, PlaybackChannel, MarkerChannel, MeasurementMask
 from qupulse._program._loop import MultiChannelProgram
 
-from atsaverage.operations import OperationDefinition, Downsample
+from atsaverage.operations import OperationDefinition, Downsample, ChunkedAverage, RepAverage
 
 
 class QuPulseTemplateParameter(BufferedSweepableParameter):
@@ -65,7 +65,8 @@ class QuPulseTemplateParameters(Instrument):
                        sweep_parameter_cmd: Optional[Callable]=None,
                        repeat_parameter_cmd: Optional[Callable]=None,
                        send_buffer_cmd: Optional[Callable]=None,
-                       run_program_cmd: Optional[Callable]=None) -> None:
+                       run_program_cmd: Optional[Callable]=None,
+                       get_meas_windows: Optional[Callable[[], Dict]]=None) -> None:
         """
         Adds sweepable QCoDeS-parameters from qupulse-template-parameters.
         
@@ -86,7 +87,8 @@ class QuPulseTemplateParameters(Instrument):
                                    sweep_parameter_cmd=sweep_parameter_cmd,
                                    repeat_parameter_cmd=repeat_parameter_cmd,
                                    send_buffer_cmd=send_buffer_cmd,
-                                   run_program_cmd=run_program_cmd)
+                                   run_program_cmd=run_program_cmd,
+                                   get_meas_windows=get_meas_windows)
 
 
     def to_dict(self) -> Dict:
@@ -189,7 +191,8 @@ class QuPulseAWGInstrument(Instrument):
                                                     self._sweep_parameter,
                                                     self._repeat_parameter,
                                                     self._send_buffer,
-                                                    self._run_program)
+                                                    self._run_program,
+                                                    self._get_meas_windows)
         else:
             self.template_parameters.set_parameters(None, None, None)
 
@@ -329,12 +332,31 @@ class QuPulseAWGInstrument(Instrument):
         Returns:
             Dictionary of the measurement windows.
         """
+        mcp = self._build_program()
+        measurement_windows = _calc_measurement_windows(mcp)
+
+        self._upload_program(mcp)
+        
+        return measurement_windows
+
+    def _get_meas_windows(self) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+        return _calc_measurement_windows(self._build_program())
+
+    def _build_program(self) -> MultiChannelProgram:
+        """Build a program based on the current template parameter values and loop structure
+
+        TODO: implement caching
+
+        Returns:
+            Multi channel program
+            Dictionary of the measurement windows.
+        """
         parameter_mapping = {}
         params = self.template_parameters.to_dict()
-        
+
         for p in self.template.get().parameter_names:
             parameter_mapping[p] = p
-        
+
         for loop in self._loops:
             if 'sweep_values' in loop:
                 parameter_mapping[loop['parameter']] = "{}[{}]".format(loop['parameter'], loop['iterator'])
@@ -347,46 +369,26 @@ class QuPulseAWGInstrument(Instrument):
                 pt = ForLoopPT(pt, loop['iterator'], range(len(loop['sweep_values'])))
             elif 'repetitions' in loop:
                 pt = RepetitionPT(pt, loop['repetitions'])
-        
+
         program = pt.create_program(parameters=params,
-                                    channel_mapping=self.channel_mapping.get(),
-                                    measurement_mapping=self.measurement_mapping.get())
-        
-        measurement_windows = self._upload_program(program)
-        
-        return measurement_windows
-        
-        
-    def _upload_program(self, program, update=True) -> Dict:
-        """
-        Sends the buffer to the device and arms it.
-        
-        Args:
-            program: Program object
-        
-        Returns:
-            Dictionary of the measurement windows.
-        """
+                                 channel_mapping=self.channel_mapping.get(),
+                                 measurement_mapping=self.measurement_mapping.get())
+
+        # this is legacy complex multi channeling support
         mcp = MultiChannelProgram(program)
         if mcp.channels - set(self._channel_map.keys()):
             raise KeyError('The following channels are unknown to the HardwareSetup: {}'.format(
                 mcp.channels - set(self._channel_map.keys())))
 
-        temp_measurement_windows = defaultdict(list)
-        for program in mcp.programs.values():
-            for mw_name, begins_lengths in program.get_measurement_windows().items():
-                temp_measurement_windows[mw_name].append(begins_lengths)
-
-        measurement_windows = dict()
-        while temp_measurement_windows:
-            mw_name, begins_lengths_deque = temp_measurement_windows.popitem()
-
-            begins, lengths = zip(*begins_lengths_deque)
-            measurement_windows[mw_name] = (
-                np.concatenate(begins),
-                np.concatenate(lengths)
-            )
-
+        return mcp
+        
+    def _upload_program(self, mcp, update=True):
+        """
+        Sends the buffer to the device and arms it.
+        
+        Args:
+            program: Program object
+        """
         handled_awgs = set()
         for channels, program in mcp.programs.items():
             awgs_to_channel_info = dict()
@@ -429,9 +431,6 @@ class QuPulseAWGInstrument(Instrument):
             else:
                 # The other AWGs should ignore the trigger
                 awg.arm(None)
-        
-        return measurement_windows
-
 
     def _run_program(self, layer):
         """
@@ -546,7 +545,9 @@ class QuPulseDACChannel(BufferedReadableArrayParameter):
                 (Only Downsample operations are supported yet)
         """
         if isinstance(operation, Downsample):
-            shape = (1,)
+            shape = ()
+        elif isinstance(operation, (ChunkedAverage, RepAverage)):
+            shape = (-1,)
         else:
             raise NotImplementedError('Operations of type {} are not supported yet.'.format(type(operation)))
             
@@ -567,10 +568,31 @@ class QuPulseDACChannel(BufferedReadableArrayParameter):
         Reset the parameter to its default state, so it can be used for another
         measurement
         """
-        self.measurement_window = None, None
+        self.sample_masks = None
         self.configured = False
         self.ready = False
-    
+
+        self.update_shape()
+
+    def update_shape(self):
+        if isinstance(self.operation, ChunkedAverage):
+            if self.sample_masks:
+                ((_, (_, lengths),),) = self.sample_masks.values()
+                n_samples = int(np.max(lengths))
+                if n_samples > 0:
+                    n_chunks = ((n_samples - 1) // self.operation.chunkSize) + 1
+                else: n_chunks = 0
+
+                self.shape = (n_chunks,)
+            else:
+                self.shape = (-1,)
+        elif isinstance(self.operation, RepAverage):
+            if self.sample_masks:
+                ((_, (_, lengths),),) = self.sample_masks.values()
+                n_samples = int(np.max(lengths))
+                self.shape = (n_samples,)
+            else:
+                self.shape = (-1,)
 
     def snapshot_base(self, update: bool=False,
                       params_to_skip_update: Sequence[str]=None):
@@ -703,7 +725,7 @@ class QuPulseDACInstrument(Instrument):
 
 
     def _configure_measurement(self, parameter: QuPulseDACChannel,
-                               measurement_windows) -> None:
+                               measurement_windows: Dict[str, Tuple[np.ndarray, np.ndarray]]) -> None:
         """
         Configures a measurement to a parameter
         
@@ -713,23 +735,41 @@ class QuPulseDACInstrument(Instrument):
         """
         if parameter.configured:
             raise Exception('It is not allowed to measure the same parameter ({}) twice.'.format(parameter))
-            
-        mask_name = parameter.operation.maskID
-        
+
+        # only works for atsaverage
+        mask_names = set()
+        if hasattr(parameter.operation, 'maskID'):
+            mask_names.add(parameter.operation.maskID)
+        else:
+            mask_names = mask_names.union(parameter.operation.maskIDs)
+
+        dacs = {}
+        duplicates = []
         for window_name, masks in self._measurement_masks.items():
-            for mask in masks:
-                if mask.mask_name == mask_name:
-                    if window_name in measurement_windows:
-                        parameter.measurement_window = window_name, measurement_windows[window_name]
-                        break
-                    else:
-                        raise Exception('Measurement window "{}" is not given.'.format(window_name))
-            else:
-                continue
-            
-            break
+            time_windows = measurement_windows.get(window_name, None)
+            if time_windows:
+                for mask in masks:
+                    if mask.mask_name in mask_names:
+                        if mask.mask_name in dacs:
+                            # we have multiple masks with this name that have windows configured
+                            duplicates.append((window_name, mask.mask_name))
+
+                        else:
+                            dacs[mask.mask_name] = (mask.dac, time_windows)
+
+        if duplicates:
+            raise RuntimeError('Parameter has multiple window sets for one mask')
+
+        if mask_names - dacs.keys():
+            raise RuntimeError('No windows for mask(s)', mask_names - dacs.keys())
+
+        sample_masks = {mask_name: (dac, dac.set_measurement_mask(self.program_name, mask_name, *time_windows))
+                        for mask_name, (dac, time_windows) in dacs.items()}
         
         parameter.configured = True
+        parameter.sample_masks = sample_masks
+
+        parameter.update_shape()
 
 
     def _arm_measurement(self, parameter: QuPulseDACChannel) -> None:
@@ -753,16 +793,8 @@ class QuPulseDACInstrument(Instrument):
             
             for p in self.parameters.values():
                 if isinstance(p, QuPulseDACChannel) and p.ready:
-                    window_name, window = p.measurement_window
-                    mask_name = p.operation.maskID
-                    masks = self._measurement_masks[window_name]
-                    for mask in masks:
-                        if mask.mask_name == mask_name:
-                            self._affected_dacs[mask.dac][mask.mask_name] = window
-                            break
-            
-            for dac, dac_windows in self._affected_dacs.items():
-                dac.register_measurement_windows(self.program_name, dac_windows)
+                    for mask_name, (dac, sample_masks) in p.sample_masks.items():
+                        self._affected_dacs[dac][mask_name] = sample_masks
             
             for dac in self._affected_dacs.keys():
                 dac.arm_program(self.program_name)
@@ -793,16 +825,18 @@ class QuPulseDACInstrument(Instrument):
                 if data:
                     self._data = {**self._data, **data}
         
-        n = parameter.shape[0]
+        # something "pop front"y
+        (values,), remaining = np.split(self._data[parameter.name], [1])
         
-        values = self._data[parameter.name][:n]
-        del self._data[parameter.name][:n]
-        
-        if self._data[parameter.name] != None and not self._data[parameter.name]:
+        # why did you handle None here before? it would have thrown an error if it occured
+        if remaining.size != 0:
+            self._data[parameter.name] = remaining
+        else:
             del self._data[parameter.name]
-        
-        if self._data != None and not self._data:
-            del self._data
+            
+        # whats difference of data being None to an empty dict?
+        if not self._data:
+            # does not make sense to me
             self._data = None
             
         return values
@@ -861,3 +895,22 @@ class QuPulseDACInstrument(Instrument):
         metadata['parameters'][self.measurement_masks.name]['raw_value'] = masks_metadata
         
         return metadata
+
+
+def _calc_measurement_windows(mcp: MultiChannelProgram) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+    temp_measurement_windows = defaultdict(list)
+    for program in mcp.programs.values():
+        for mw_name, begins_lengths in program.get_measurement_windows().items():
+            temp_measurement_windows[mw_name].append(begins_lengths)
+
+    # this while loop allows the garbage collector to collect stuff we already iterated over
+    measurement_windows = dict()
+    while temp_measurement_windows:
+        mw_name, begins_lengths_deque = temp_measurement_windows.popitem()
+
+        begins, lengths = zip(*begins_lengths_deque)
+        measurement_windows[mw_name] = (
+            np.concatenate(begins),
+            np.concatenate(lengths)
+        )
+    return measurement_windows
