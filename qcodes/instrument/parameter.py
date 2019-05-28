@@ -2012,6 +2012,134 @@ class ScaledParameter(Parameter):
         self._wrapped_parameter.set(instrument_value)
 
 
+class BufferedSweepableParameter(Parameter):
+    """
+    A parameter that creates buffered sweeps in the instrument.
+    """
+    
+    def __init__(self, name: str,
+                 instrument: 'Instrument',
+                 sweep_parameter_cmd: Optional[Callable]=None,
+                 repeat_parameter_cmd: Optional[Callable]=None,
+                 send_buffer_cmd: Optional[Callable]=None,
+                 run_program_cmd: Optional[Callable]=None,
+                 *args, **kwargs):
+        """
+        Creates a BufferedSweepableParameter that creates buffered sweeps in
+        the instrument.
+        
+        Args:
+            name: Name of the parameter
+            instrument: Parent instrument
+            sweep_parameter_cmd: Function that is called when the parameter is
+                swept in a buffered loop.
+            send_buffer_cmd: Function that is called when the buffer should be
+                sent to the device.
+        """
+        super().__init__(name, instrument=instrument, *args, **kwargs)
+        
+        self._sweep_parameter_cmd = sweep_parameter_cmd
+        self._repeat_parameter_cmd = repeat_parameter_cmd
+        self._send_buffer_cmd = send_buffer_cmd
+        self._run_program_cmd = run_program_cmd
+        
+    def set_buffered(self, sweep_values, layer):
+        """
+        Define a buffered sweep for the parameter.
+        """
+        if self._sweep_parameter_cmd is not None:
+            return self._sweep_parameter_cmd(self, sweep_values, layer)
+        else:
+            raise NotImplementedError('The callable "sweep_parameter_cmd" was not set for the parameter "{}".'.format(self.name))
+        
+    def repeat_buffered(self, repetition_count, layer):
+        """
+        Define a buffered sweep for the parameter.
+        """
+        if self._repeat_parameter_cmd is not None:
+            return self._repeat_parameter_cmd(repetition_count, layer)
+        else:
+            raise NotImplementedError('The callable "repeat_parameter_cmd" was not set for the parameter "{}".'.format(self.name))
+            
+    def send_buffer(self, layer):
+        """
+        Send the buffer to the device.
+        """
+        if self._send_buffer_cmd is not None:
+            return self._send_buffer_cmd(layer)
+        else:
+            raise NotImplementedError('The callable "send_buffer_cmd" was not set for the parameter "{}".'.format(self.name))
+            
+    def run_program(self, layer):
+        """
+        Send the buffer to the device.
+        """
+        if self._run_program_cmd is not None:
+            return self._run_program_cmd(layer)
+        else:
+            raise NotImplementedError('The callable "run_program_cmd" was not set for the parameter "{}".'.format(self.name))
+
+
+class BufferedReadableArrayParameter(ArrayParameter):
+    """
+    An ArrayParameter for buffered measurements.
+    """
+    
+    def __init__(self, name: str,
+                 get_buffered_cmd: Callable,
+                 config_meas_cmd: Optional[Callable]=None,
+                 arm_meas_cmd: Optional[Callable]=None,
+                 shape: Sequence[int]=(1,),
+                 **kwargs) -> None:
+        """
+        Creates a BufferdReadableParameter for buffered measurements.
+        
+        Args:
+            name: Name of the parameter
+            get_buffered_cmd: Function which is called when this parameter is
+                measured.
+            config_meas_cmd: Function which is called when a measurement is
+                configured for this parameter.
+            arm_meas_cmd: Function which is called when the parameter should be
+                armed.
+        """
+        super().__init__(name, shape, **kwargs)
+        
+        self._get_buffered_cmd = get_buffered_cmd
+        self._config_meas_cmd = config_meas_cmd
+        self._arm_meas_cmd = arm_meas_cmd
+        
+    def get_raw(self):
+        """
+        Overridden function for the measurements.
+        
+        Returns:
+            Measurement values.
+        """
+        return self._get_buffered_cmd(self)
+        
+    def configure_measurement(self, measurement_windows) -> None:
+        """
+        Configure the measurement for this parameter in the instrument.
+        
+        Args:
+            measurement_windows: Time windows where the parameter is measured.
+        """
+        if self._config_meas_cmd is not None:
+            self._config_meas_cmd(self, measurement_windows)
+        else:
+            raise NotImplementedError('The callable "config_meas_cmd" was not set for the parameter "{}".'.format(self.name))
+        
+    def arm_measurement(self) -> None:
+        """
+        Arm the measurement for this parameter in the instrument.
+        """
+        if self._arm_meas_cmd is not None:
+            self._arm_meas_cmd(self)
+        else:
+            raise NotImplementedError('The callable "arm_meas_cmd" was not set for the parameter "{}".'.format(self.name))
+
+
 def expand_setpoints_helper(parameter: ParameterWithSetpoints) -> List[
         Tuple[_BaseParameter, numpy.ndarray]]:
     """
@@ -2042,3 +2170,4 @@ def expand_setpoints_helper(parameter: ParameterWithSetpoints) -> List[
         res.append((param, grid))
     res.append((parameter, parameter.get()))
     return res
+
