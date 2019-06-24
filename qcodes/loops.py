@@ -1842,6 +1842,20 @@ class BufferedActiveRepetition(ActiveRepetition):
         
         return mw
     
+    def _get_meas_windows(self):
+        parameter = self._get_loop_parameter()
+
+        mw = parameter._get_meas_windows()
+        if mw is None: mw = {}
+
+        if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
+            mw_tmp = self.actions[0]._get_meas_windows()
+
+            if mw_tmp is not None:
+                mw = {**mw, **mw_tmp}
+
+        return mw
+    
     def _configure_measurement(self, measurement_windows):
         """
         Configures the measurement on the instrument by setting the measurement
@@ -1873,6 +1887,30 @@ class BufferedActiveRepetition(ActiveRepetition):
         if len(self.actions) == 1 and isinstance(self.actions[0], (BufferedActiveLoop, BufferedActiveRepetition)):
             self.actions[0]._run_program(layer + 1)
 
+    def containers(self):
+        """Configure the measurement to set container size of variable length parameters"""
+        if self._is_most_outer_buffered_loop():
+            self._set_buffered_sweep()
+            measurement_windows = self._get_meas_windows()
+            self._configure_measurement(measurement_windows)
+
+        # TODO: use context manager to attempt cleanup on failure
+
+        for action in self.actions:
+            if -1 in getattr(action, 'shape', []):
+                raise RuntimeError('{} has an undetermined length.')
+        containers = super().containers()
+
+        if self._is_most_outer_buffered_loop():
+            # TODO: this is not nice. There should be some method to clear the runtime state
+            self._get_loop_parameter()._sweep_parameter_cmd.__self__.reset_programs()
+
+        for action in self.actions:
+            if isinstance(action, BufferedReadableArrayParameter):
+                action.reset()
+
+        return containers
+    
     def _run_loop(self, first_delay=0, action_indices=(),
                   loop_indices=(), current_values=(),
                   **ignore_kwargs):
