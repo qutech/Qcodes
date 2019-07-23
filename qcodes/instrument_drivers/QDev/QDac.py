@@ -56,6 +56,7 @@ class QDac(VisaInstrument):
         self.set_terminator('\n')
         # TODO: do we want a method for write termination too?
         handle.write_termination = '\n'
+        handle.read_termination = '\n'
         # TODO: do we need a query delay for robust operation?
         self._write_response = ''
 
@@ -70,7 +71,7 @@ class QDac(VisaInstrument):
                                Contact rikke.lutge@nbi.ku.dk for an update.
                                ''')
         self._update_currents = update_currents
-        
+
 
         # Assigned slopes. Entries will eventually be [chan, slope]
         self._slopes = []
