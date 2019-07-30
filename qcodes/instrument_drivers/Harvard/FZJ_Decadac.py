@@ -612,10 +612,9 @@ class Decadac(VisaInstrument):
     enable_output = False
 
     def __init__(self, name, address,
-                 reset=_DEFAULT_RESET,
-                 baudrate=_DEFAULT_BAUDRATE,
-                 timeout=_DEFAULT_TIMEOUT,
-                 default_switch_pos=DacBase._DEFAULT_SWITCH_POS,
+                 reset=None,
+                 timeout=None,
+                 default_switch_pos=None,
                  terminator='\n',
                  run_buffered_cmd=None,
                  **kwargs):
@@ -635,6 +634,14 @@ class Decadac(VisaInstrument):
             slots (ChannelList):      list of all slots
             channels (ChannelList):   list of all channels
         """
+        if reset is None:
+            reset = self._DEFAULT_RESET
+
+        if timeout is None:
+            timeout = self._DEFAULT_TIMEOUT
+
+        if default_switch_pos is None:
+            default_switch_pos = DacBase._DEFAULT_SWITCH_POS
 
         super().__init__(name, address, timeout=timeout, terminator=terminator,
                          **kwargs)
