@@ -18,15 +18,12 @@ zidev = ZIMFLI( name='ZIMFLI', device_ID='DEV4039' )
 # Create a base configuration: Disable all available outputs, awgs, demods, scopes,...
 zhinst.utils.disable_everything( zidev.daq, zidev.device )
 
-amplitude=0.5
-do_plot=False
-
 # Now configure the instrument for this experiment. The following channels
 # and indices work on all device configurations. The values below may be
 # changed if the instrument has multiple input/output channels and/or either
 # the Multifrequency or Multidemodulator options installed.
+amplitude=0.5
 out_channel = 0
-out_mixer_channel = zhinst.utils.default_output_mixer_channel(zidev.props)
 in_channel = 0
 in_chanstring = 'Sig In 1'
 demod_index = 0 # zero based!
@@ -34,6 +31,7 @@ osc_index = 0
 demod_rate = 1e3
 time_constant = 0.01
 frequency = 400e3
+# out_mixer_channel = zhinst.utils.default_output_mixer_channel(zidev.props)
 
 sigin = zidev.submodules['signal_in{}'.format(in_channel+1)]
 demod = zidev.submodules['demod{}'.format(demod_index+1)]

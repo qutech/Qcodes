@@ -10,24 +10,6 @@ Purpose: Program to read the demod Parameters to check synchronisation of
 from qcodes.instrument_drivers.ZI.ZIMFLI import ZIMFLI
 import time
 
-# helper function to go through all parameters of one module
-def helper( mod, params ):
-    global notreadlist
-    for p in params:
-        par = params[p]
-        try:
-            val = str( par() ) #+ " " + par.unit
-        except:
-            val = "** not readable **"
-            notreadlist.append( mod + "." + p )
-        #print( "wrhelper( '" + mod + "', '" + p + "', " + val + " )" )
-        if hasattr(par, 'label'):
-            print( par.label, ": ", val )
-        elif p == "Scope":
-            continue
-        else:
-            print( mod + "." + p + ": ", val )
-
 # Open Device. Be sure that the device-id is correct
 zidev = ZIMFLI( name='ZIMFLI', device_ID='DEV4039' )
 

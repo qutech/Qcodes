@@ -59,25 +59,3 @@ print( "OscSelect:", er.oscselect() )
 #Set the harmonic factor of the demodulator to 2 and print out the frequency
 #demodulator.harmonic(2)
 #print("frequency of demodulator1", demodulator.frequency())
-
-"""
-Program for the example from Chapter 3.1 of the ziMFLI User Manual
-
-# Oscillator to 300kHz with readback
-print("current freuqency oscillator1:", zidev.oscillator1_freq())
-zidev.oscillator1_freq( 300000.0 )
-time.sleep( 0.1 )
-print("freuqency of oscillator1 now:", zidev.oscillator1_freq())
-
-# Output Amplitude set to 500mV and output enabled
-sigout = zidev.submodules["signal_out1"]
-sigout.amplitude(0.5)
-sigout.enable('ON')
-
-# Range to 1V and Offset to 0V
-sigout.range(1)
-sigout.offset(0)
-
-# Turn output on
-sigout.on('ON')
-"""
