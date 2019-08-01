@@ -6,6 +6,7 @@ Author: Michael Wagener, ZEA-2, m.wagener@fz-juelich.de
         Sarah Fleitmann, ZEA-2, s.fleitmann@fz-juelich.de
         Rene Otten and other, RWTH
 Purpose: Main instrument driver for the Zurich Instruments Lock-In Amplifier
+
 """
 
 
@@ -19,14 +20,20 @@ from enum import IntEnum
 
 from typing import Callable, List, Union
 
+softSweep = True  # set to False to disable the software sweep function and
+                  #  use only the hardware sweep if it is installed (MD-Option)
+
+realFlag = True   # False=use simulation
 try:
     import zhinst.utils
     import zhinst.ziPython
 except ImportError:
-    raise ImportError('''Could not find Zurich Instruments Lab One software.
-                         Please refer to the Zi MFLI User Manual for
-                         download and installation instructions.
-                      ''')
+    realFlag = False
+    print("no zhinst.* found")
+    #raise ImportError('''Could not find Zurich Instruments Lab One software.
+    #                     Please refer to the Zi MFLI User Manual for
+    #                     download and installation instructions.
+    #                  ''')
 
 from qcodes.instrument.parameter import MultiParameter
 from qcodes.instrument.base import Instrument
@@ -172,8 +179,6 @@ class AUXOutputChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, Mode.DOUBLE, 'limitupper'),
                            vals=vals.Numbers(-10, 10))
-        # TODO the validator does not catch that there are only
-        # 2 valid output channels for AU types
         self.add_parameter('channel',
                            label='Channel',
                            unit='',
@@ -181,17 +186,15 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, Mode.INT, 'demodselect'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, Mode.INT, 'demodselect'),
-                           get_parser=lambda x: x+1,
-                           set_parser=lambda x: x-1,
-                           vals=vals.Ints(0,7) #TODO is the validation here correct?
+                           get_parser=lambda x: x+1,  # internal: 0, 1, ...
+                           set_parser=lambda x: x-1,  # for the user: 1, 2, ...
+                           vals=vals.Ints( 1, self._parent.demodulator_no )
                            )
         outputvalmapping = {'Demod X': 0,
                             'Demod Y': 1,
                             'Demod R': 2,
                             'Demod THETA': 3,
                             'PID Out': 5,
-                            #'AU Cartesian': 7,
-                            #'AU Polar': 8, #7 and 8 are not documented in the Manual, what are they?
                             'PID Shift': 9,
                             'PID Error': 10,
                             'TU Filtered Value': 11,
@@ -211,7 +214,7 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, Mode.DOUBLE, 'value'),
                            set_cmd=False)
                            
-                           
+
 class DemodulatorChannel(InstrumentChannel):
     """
     Combines all parameters of the parent concerning the demodulators
@@ -308,8 +311,7 @@ class DemodulatorChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'order'),
                            vals=vals.Ints(1, 8) )
         self.add_parameter('harmonic',
-                           label=('Reference frequency multiplication' +
-                                  ' factor'),
+                           label=('Reference frequency multiplication factor'),
                            get_cmd=partial(self._parent._getter, 'demods',
                                            channum-1, Mode.DOUBLE, 'harmonic'),
                            set_cmd=partial(self._parent._setter, 'demods',
@@ -317,9 +319,9 @@ class DemodulatorChannel(InstrumentChannel):
                            vals=vals.Ints(1, 999) # same range as input field in web
                            )
         if self._parent.no_oscs == 1:
-            # Bei nur einem vorhandenen Oszillator kann kein Validator genutzt
-            # werden. Ist zwar auch blöd, aber der Validator kann nicht mit
-            # min == max aufgerufen werden.
+            # The validator checks the range min <= val <= max and cannot be
+            # initialized with min==max. So, if there is only one oscillator,
+            # a local setter function is used with a special validation.
             self.add_parameter('oscselect',
                            label='Select oscillator',
                            get_cmd=partial(self._parent._getter, 'demods',
@@ -369,18 +371,17 @@ class DemodulatorChannel(InstrumentChannel):
                            unit='1/s',
                            vals=vals.Numbers(),
                            docstring="""
-                                     Note: the value inserted by the user
-                                     may be approximated to the
-                                     nearest value supported by the
-                                     instrument.
+                                     Note: the value inserted by the user may
+                                     be approximated to the nearest value
+                                     supported by the instrument.
                                      """)
         if channum == 1:
             self.add_parameter('sample',
                                label='Sample',
                                get_cmd=partial(self._parent._getter, 'demods',
                                                channum-1, Mode.SAMPLE, 'sample'),
-                                               set_cmd=False,
-                                               snapshot_value=False )
+                               set_cmd=False,
+                               snapshot_value=False )
         self.add_parameter('sinc',
                            label='Sinc filter',
                            get_cmd=partial(self._parent._getter, 'demods',
@@ -858,8 +859,6 @@ class SignalOutputChannel(InstrumentChannel):
                                           channum-1, Mode.DOUBLE, outputamps[channum]),
                            unit='V',
                            vals=vals.Numbers() )
-        #TODO: is this really needed as it does not belong to the instrument directly
-        #Does it work properly like this?
         self.add_parameter('ampdef',
                            label="Signal output amplitude's definition",
                            get_cmd=None, 
@@ -961,7 +960,7 @@ class SignalOutputChannel(InstrumentChannel):
                                 ' Cannot set range as autorange is turned on.')
 
             # The usermanual shows no limitations for this parameter. The instrument
-            #  can select 10mV, ,100mV, 1V, 10V and will use the next higher than
+            #  can select 10mV, 100mV, 1V, 10V and will use the next higher than
             #  set with this parameter.
             #if value not in imp50_dic[imp50_val]:
             #    raise ValueError('Signal Output: Choose a valid range:'
@@ -1113,19 +1112,18 @@ class TriggerOutputChannel(InstrumentChannel):
                            
         sources = {'disabled': 0, 
                    'osc phase of demod 2' if channum == 1 else 'osc phase of demod 4': 1,
-                   #Requires DIG Option
-                   #'Scope Trigger': 2,
-                   #'Scope /Trigger': 3,
-                   #'Scope Armed': 4,
-                   #'Scope /Armed': 5,
-                   #'Scope Active': 6,
-                   #'Scope /Active': 7,
                    'Threshold Logic Unit 1': 36,
                    'Threshold Logic Unit 2': 37,
                    'Threshold Logic Unit 3': 38,
                    'Threshold Logic Unit 4': 39,
                    'MDS Sync Out': 52}
-        
+        if 'DIG' in parent.options:
+            sources.update( {'Scope Trigger': 2,
+                             'Scope /Trigger': 3,
+                             'Scope Armed': 4,
+                             'Scope /Armed': 5,
+                             'Scope Active': 6,
+                             'Scope /Active': 7} )
         self.add_parameter('source',
                            label='signal source',
                            set_cmd=partial(self._parent._setter, 'triggers/out',
@@ -1257,31 +1255,6 @@ class ExternalReferenceChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'oscselect'),
                            set_cmd=False
                            )
-
-
-    def _setter(self, module, number, mode, setting, value):
-        """
-        Copy of _parent._setter() function. This is needed for the setting of
-        the selected oscillator channel if only one exists. The used validator
-        cannot be called with min == max (in this case both 0).
-        """
-        
-        if value != 0:
-            context = "class ExternalReferenceChannel, function set oscillator channel"
-            # This code is copied from the validator function
-            if not isinstance(value, (int, np.integer) ):
-                raise TypeError(
-                        '{} is not an int; {}'.format(repr(value), context))
-            raise ValueError(
-                        '{} is invalid: must be zero; {}'
-                        .format(repr(value), context))
-
-        setstr = '/{}/{}/{}/{}'.format(self._parent.device, module, number, setting)
-
-        if mode == 0:
-            self._parent.daq.setInt(setstr, value)
-        if mode == 1:
-            self._parent.daq.setDouble(setstr, value)
 
 
 class DIOChannel(InstrumentChannel):
@@ -1742,10 +1715,12 @@ class SweeperChannel(InstrumentChannel):
             param: the device parameter to be swept
                 Possible values: 'Aux Out 1 Offset', 'Aux Out 2 Offset',
                     'Aux Out 3 Offset', 'Aux Out 4 Offset', 'Demod 1 Phase Shift'
-                    'Osc 1 Frequency', 'Osc 2 Frequency', 'Output 1 Amplitude 4',
-                    'Output 1 Offset', 'Output 2 Amplitude 8', 'Output 2 Offset'
+                    'Demod 2 Phase Shift', 'Osc 1 Frequency', 'Output 1 Amplitude 2',
+                    'Output 1 Offset'
                 for devices with the MF-MD option there are also the values:
-                    'Demod 2 Phase Shift', 'Demod 3 Phase Shift', 'Demod 4 Phase Shift'
+                    'Osc 2 Frequency', 'Demod 2 Phase Shift', 'Demod 3 Phase Shift',
+                    'Demod 4 Phase Shift', 'Output 1 Amplitude 4',
+                    'Output 2 Amplitude 8', 'Output 2 Offset'
             start: start value of the sweep parameter
             stop: stop value of the sweep parameter
             samplecount: number of measurement points to set the sweep on
@@ -1843,32 +1818,29 @@ class SweeperChannel(InstrumentChannel):
     def __init__(self, parent: 'ZIMFLI', name: str):
         super().__init__(parent, name)
         # val_mapping for sweeper_param parameter
-        sweepparams = {'Aux Out 1 Offset': 'auxouts/0/offset',  # TODO which other values may be sensefull to sweep?
-                       'Aux Out 2 Offset': 'auxouts/1/offset',
-                       'Aux Out 3 Offset': 'auxouts/2/offset',
-                       'Aux Out 4 Offset': 'auxouts/3/offset',
-                       'Demod 1 Phase Shift': 'demods/0/phaseshift',
-                       #'Demod 5 Phase Shift': 'demods/4/phaseshift', #there are only 4 demodulators?
-                       #'Demod 6 Phase Shift': 'demods/5/phaseshift',
-                       #'Demod 7 Phase Shift': 'demods/6/phaseshift',
-                       #'Demod 8 Phase Shift': 'demods/7/phaseshift',
-                       'Osc 1 Frequency': 'oscs/0/freq',
-                       'Osc 2 Frequency': 'oscs/1/freq',
-                       'Output 1 Amplitude 4': 'sigouts/0/amplitudes/3',
-                       'Output 1 Offset': 'sigouts/0/offset',
-                       'Output 2 Amplitude 8': 'sigouts/1/amplitudes/7',
-                       'Output 2 Offset': 'sigouts/1/offset'
+        sweepparams = {'Aux Out 1 Offset':     'auxouts/0/offset',
+                       'Aux Out 2 Offset':     'auxouts/1/offset',
+                       'Aux Out 3 Offset':     'auxouts/2/offset',
+                       'Aux Out 4 Offset':     'auxouts/3/offset',
+                       'Demod 1 Phase Shift':  'demods/0/phaseshift',
+                       'Demod 2 Phase Shift':  'demods/1/phaseshift',
+                       'Osc 1 Frequency':      'oscs/0/freq',
+                       'Output 1 Amplitude 2': 'sigouts/0/amplitudes/1',
+                       'Output 1 Offset':      'sigouts/0/offset',
                        }
         if 'MD' in parent.options:
-            demodulators = {'Demod 2 Phase Shift': 'demods/1/phaseshift',
-                            'Demod 3 Phase Shift': 'demods/2/phaseshift',
-                            'Demod 4 Phase Shift': 'demods/3/phaseshift'}
-            sweepparams.update(demodulators)
+            sweepparams.update( {'Demod 3 Phase Shift':  'demods/2/phaseshift',
+                                 'Demod 4 Phase Shift':  'demods/3/phaseshift',
+                                 'Osc 2 Frequency':      'oscs/1/freq',
+                                 'Output 1 Amplitude 4': 'sigouts/0/amplitudes/3',
+                                 'Output 2 Amplitude 8': 'sigouts/1/amplitudes/7',
+                                 'Output 2 Offset':      'sigouts/1/offset'
+                                 } )
         self.add_parameter('param',
                            label='Parameter to sweep (sweep x-axis)',
                            set_cmd=partial(self._setter, 'sweep/gridnode'),
                            get_cmd=partial(self._getter, 'sweep/gridnode'),
-                           val_mapping=sweepparams,)
+                           val_mapping=sweepparams)
         self.add_parameter('start',
                             label='Start value of the sweep',
                             set_cmd=partial(self._setter, 'sweep/start'),
@@ -1900,10 +1872,16 @@ class SweeperChannel(InstrumentChannel):
                            set_cmd=partial(self._setter, 'sweep/averaging/sample'),
                            get_cmd=partial(self._getter,'sweep/averaging/sample'),
                            vals=vals.Ints(1, 2**64-1))
-        self.add_parameter('averaging_time',
-                           label=('Minimal averaging time'),
+        self.add_parameter('averaging_tc',
+                           label=('Minimal averaging time constant'),
                            set_cmd=partial(self._setter, 'sweep/averaging/tc'),
                            get_cmd=partial(self._getter, 'sweep/averaging/tc'),
+                           unit='s',
+                           vals=vals.Numbers())
+        self.add_parameter('averaging_time',
+                           label=('Minimal averaging time'),
+                           set_cmd=partial(self._setter, 'sweep/averaging/time'),
+                           get_cmd=partial(self._getter, 'sweep/averaging/time'),
                            unit='s',
                            vals=vals.Numbers())
         self.add_parameter('bandwidth_mode', #before BWmode
@@ -2003,9 +1981,8 @@ class SweeperChannel(InstrumentChannel):
                            set_cmd=partial(self._setter, 'sweep/filefomat'),
                            get_cmd=partial(self._getter, 'sweep(fileformat'),
                            val_mapping={'Matlab': 0, 'CSV': 1})
-        ########################################################################################
         # val_mapping for sweeper_units parameter
-        sweepunits = {'Aux Out 1 Offset': 'V',  # TODO
+        sweepunits = {'Aux Out 1 Offset': 'V',
                       'Aux Out 2 Offset': 'V',
                       'Aux Out 3 Offset': 'V',
                       'Aux Out 4 Offset': 'V',
@@ -2013,12 +1990,9 @@ class SweeperChannel(InstrumentChannel):
                       'Demod 2 Phase Shift': 'degrees',
                       'Demod 3 Phase Shift': 'degrees',
                       'Demod 4 Phase Shift': 'degrees',
-                      'Demod 5 Phase Shift': 'degrees',
-                      'Demod 6 Phase Shift': 'degrees',
-                      'Demod 7 Phase Shift': 'degrees',
-                      'Demod 8 Phase Shift': 'degrees',
                       'Osc 1 Frequency': 'Hz',
                       'Osc 2 Frequency': 'Hz',
+                      'Output 1 Amplitude 2': 'V',
                       'Output 1 Amplitude 4': 'V',
                       'Output 1 Offset': 'V',
                       'Output 2 Amplitude 8': 'V',
@@ -2026,7 +2000,7 @@ class SweeperChannel(InstrumentChannel):
                       }
         self.add_parameter('units',
                            label='Units of sweep x-axis',
-                           get_cmd=self.parameters['param'].get(),
+                           get_cmd=self.parameters['param'],
                            get_parser=lambda x:sweepunits[x])
         self.add_parameter('sweeptime',
                            label='Expected sweep time',
@@ -2057,8 +2031,6 @@ class SweeperChannel(InstrumentChannel):
             setting (str): the path used by ZI to describe the setting,
             e.g. 'sweep/settling/time'
         """
-        # TODO: Should this look up in _sweepdict rather than query the
-        # instrument?
         returndict = self._parent.sweeper.get(setting)  # this is a dict
         # The dict may have different 'depths' depending on the parameter.
         # The depth is encoded in the setting string (number of '/')
@@ -2085,11 +2057,9 @@ class SweeperChannel(InstrumentChannel):
         Raises:
             ValueError: if no signals are added to the sweep
         """
-        # Possible TODO: cut down on the number of instrument
-        # queries. what does this mean?
         if self._parent._sweeper_signals == []:
             raise ValueError('No signals selected! Can not find sweep time.')
-        mode = self.sweeper_BWmode.get()
+        mode = self.bandwidth_mode()
         # The effective time constant of the demodulator depends on the
         # sweeper/bandwidthcontrol setting.
         # If this setting is 'current', the largest current
@@ -2097,7 +2067,7 @@ class SweeperChannel(InstrumentChannel):
         # If the setting is 'fixed', the NEP BW specified under
         # sweep/bandwidth is used. The filter order is needed to convert
         # the NEP BW to a time constant
-        demods = set([sig.split('/')[3] for sig in self._sweeper_signals]) #what should that do?
+        demods = set( [sig for sig in range(self._parent.demodulator_no)] )
         rates = []
         for demod in demods:
             rates.append(self._parent._getter('demods', demod, 1, 'rate')) #get the rate of the demodulators
@@ -2117,11 +2087,11 @@ class SweeperChannel(InstrumentChannel):
                            self.parameters['settling_time'].get())
         averagingtime = max(self.parameters['averaging_time'].get()*tau_c*rate,
                             self.parameters['averaging_samples'].get())/rate
-        time_est = (settlingtime+averagingtime)*self.sweeper_samplecount.get()
+        time_est = (settlingtime+averagingtime)*self.samplecount()
         return time_est
 
     #@staticmethod why should this be static?
-    def NEPBW_to_timeconstant(NEPBW, order):  # TODO
+    def NEPBW_to_timeconstant(self, NEPBW, order):
         """
         Helper function to translate a NEP BW and a filter order
         to a filter time constant. Meant to be used when calculating
@@ -2184,8 +2154,15 @@ class Sweep(MultiParameter):
 
         log.info('Built a sweep')
 
-        sigunits = {'X': 'V', 'Y': 'V', 'R': 'Vrms', 'Xrms': 'Vrms',
-                    'Yrms': 'Vrms', 'Rrms': 'Vrms', 'phase': 'degrees'}
+        # Combination <username> -> <unit>
+        sigunits = {'X': 'V', 'Y': 'V', 'R': 'Vrms', 'phase': 'degrees',
+                    'Xrms': 'Vrms', 'Yrms': 'Vrms', 'Rrms': 'Vrms',
+                    'phasePwr': '',
+                    'Freq': 'Hz', 'FreqPwr': 'Hz',
+                    'In1': 'V', 'In2': 'V',
+                    'In1Pwr': 'V', 'In2Pwr': 'V'
+                    }
+
         names = []
         units = []
         for sig in signals:
@@ -2196,7 +2173,6 @@ class Sweep(MultiParameter):
         self.units = tuple(units)
         self.labels = tuple(names)  # TODO: What are good labels?
 
-        # TODO: what are good set point names?
         spnamedict = {'auxouts/0/offset': 'Volts',
                       'auxouts/1/offset': 'Volts',
                       'auxouts/2/offset': 'Volts',
@@ -2205,10 +2181,6 @@ class Sweep(MultiParameter):
                       'demods/1/phaseshift': 'degrees',
                       'demods/2/phaseshift': 'degrees',
                       'demods/3/phaseshift': 'degrees',
-                      #'demods/4/phaseshift': 'degrees', #there are only up to 4 dul-phase demodulators
-                      #'demods/5/phaseshift': 'degrees',
-                      #'demods/6/phaseshift': 'degrees',
-                      #'demods/7/phaseshift': 'degrees',
                       'oscs/0/freq': 'Hz',
                       'oscs/1/freq': 'Hz',
                       'sigouts/0/amplitudes/3': 'Volts',
@@ -2246,7 +2218,7 @@ class Sweep(MultiParameter):
     def get(self):
         """
         Execute the sweeper and return the data corresponding to the
-        subscribed signals.
+        subscribed signals, used in qc.Loop().
         Returns:
             tuple: Tuple containing N numpy arrays where N is the number
               of signals added to the sweep.
@@ -2289,7 +2261,7 @@ class Sweep(MultiParameter):
             sweeper.subscribe(path)
 
         sweeper.execute()
-        timeout = self._instrument.sweeper_timeout.get()
+        timeout = self._instrument.submodules['sweeper_channel'].sweeper_timeout()
         start = time.time()
         while not sweeper.finished():  # Wait until the sweep is done/timeout
             time.sleep(0.2)  # Check every 200 ms whether the sweep is done
@@ -2303,6 +2275,7 @@ class Sweep(MultiParameter):
                 # should exit function with error message instead of returning
                 sweeper.finish()
 
+        print( "DBG: Sweeper execution time =", time.time() - start, "sec" )
         return_flat_dict = True
         data = sweeper.read(return_flat_dict)
 
@@ -2322,9 +2295,15 @@ class Sweep(MultiParameter):
         Returns:
             tuple: The requested signals in a tuple
         """
-        trans = {'X': 'x', 'Y': 'y', 'Aux Input 1': 'auxin0',
-                 'Aux Input 2': 'auxin1', 'R': 'r', 'phase': 'phase',
-                 'Xrms': 'xpwr', 'Yrms': 'ypwr', 'Rrms': 'rpwr'}
+        # Translation <username> -> <dataname>
+        trans = {'X': 'x',  'Y': 'y', 'R': 'r', 'phase': 'phase',
+                 'Xrms': 'xpwr', 'Yrms': 'ypwr', 'Rrms': 'rpwr',
+                 'phasePwr': 'phasepwr',
+                 'Freq': 'frequency', 'FreqPwr': 'frequencypwr',
+                 'In1': 'auxin0', 'In2': 'auxin1',
+                 'In1Pwr': 'auxin0pwr', 'In2Pwr': 'auxin1pwr'
+                 }
+
         returndata = []
 
         for signal in self._instrument._sweeper_signals:
@@ -2588,13 +2567,13 @@ class ScopeChannel(InstrumentChannel):
                            vals=vals.Enum('run', 'stop'),
                            docstring='This parameter corresponds to the '
                                       'run/stop button in the GUI.')
-        self.add_parameter('mode',  # TODO -unklar- not readable
-                           label="mode: time or frequency domain",
+        scopemodes = {'Time Domain': 1,
+                      'Freq Domain FFT': 3}
+        self.add_parameter('mode',
+                           label='set mode to time or frequency domain',
                            set_cmd=partial(self._setter, 1, 0, 'mode'),
-                           get_cmd=partial(self._getter, 'mode'),
-                           val_mapping={'Time Domain': 1,
-                                        'Freq Domain FFT': 3},
-                           vals=vals.Enum('Time Domain', 'Freq Domain FFT'))
+                           get_cmd=False,
+                           val_mapping=scopemodes)
         self.add_parameter('scope_channels',
                            label='Recorded scope channels',
                            set_cmd=partial(self._setter, 0, 0, 'channel'),
@@ -2709,6 +2688,13 @@ class ScopeChannel(InstrumentChannel):
                             get_cmd=partial(self._getter,
                                             'averager/weight'),
                             vals=vals.Numbers(min_value=1))
+        self.add_parameter('historylength',
+                            label="History Length",
+                            set_cmd=partial(self._setter, 1, 0,
+                                            'historylength'),
+                            get_cmd=partial(self._getter,
+                                            'historylength'),
+                            vals=vals.Numbers())
         self.add_parameter('singleshot',
                             label="Puts the scope into single shot mode.",
                             set_cmd=partial(self._parent._setter, 'scopes', 0,
@@ -3268,8 +3254,8 @@ class Scope(MultiParameter):
         log.info('Scope get method called')
 
         if not self._instrument.scope_correctly_built:
-            raise ValueError('Scope not properly prepared. Please run '
-                             'prepare_scope before measuring.')
+            raise RuntimeError('Scope not properly prepared. Please run '
+                               'prepare_scope before measuring.')
 
         # A convenient reference
         params = self._instrument.parameters
@@ -3410,16 +3396,11 @@ class ZIMFLI(Instrument):
     """
     QCoDeS driver for ZI MFLI.
 
-    Currently implementing demodulator settings and the sweeper functionality.
-
     Requires ZI Lab One software to be installed on the computer running QCoDeS.
     Furthermore, the Data Server and Web Server must be running and a connection
     between the two must be made.
-
-    TODOs:
-        * Add zoom-FFT
     """
-
+    
     def __init__(self, name: str, device_ID: str, **kwargs) -> None:
         """
         Create an instance of the instrument.
@@ -3428,12 +3409,24 @@ class ZIMFLI(Instrument):
             name (str): The internal QCoDeS name of the instrument
             device_ID (str): The device name as listed in the web server.
         """
+        global realFlag
 
         super().__init__(name, **kwargs)
+            
         self.device_ID = device_ID
         self.api_level = 6 # old: 5
-        zisession = zhinst.utils.create_api_session(device_ID, self.api_level)
-        (self.daq, self.device, self.props) = zisession
+        if realFlag:
+            try:
+                zisession = zhinst.utils.create_api_session(device_ID, self.api_level)
+                (self.daq, self.device, self.props) = zisession
+            except RuntimeError:
+                realFlag = False
+        if not realFlag:
+            from qcodes.instrument_drivers.ZI.ZIMFLIsim import ZIMFLIsim
+            self.daq    = ZIMFLIsim()
+            self.device = device_ID
+            self.props  = { 'devicetype': 'MFLI', 'options': 'M5F' }
+            print("*** Use SIMULATION mode ***")
         
         # The device I used for the tests has version 18.05
         # The latest library version is 18.12
@@ -3455,19 +3448,16 @@ class ZIMFLI(Instrument):
         # Options = "F5M" or "MD"
 
         # create (instantiate) an instance of each module we will use
-        if "MD" in self.options:
+        if softSweep or "MD" in self.options:
             self.sweeper = self.daq.sweep()
             self.sweeper.set('sweep/device', self.device)
-            
-        self.scope = self.daq.scopeModule()
-        self.scope.subscribe('/{}/scopes/0/wave'.format(self.device))
-        # Because setpoints need to be built
-        self.scope_correctly_built = False
         
-        #self.zoomFFT = self.daq.zoomFFT()
-        #self.zoomFFT.execute()
-        # not used ...
-
+        if realFlag:
+            self.scope = self.daq.scopeModule()
+            self.scope.subscribe('/{}/scopes/0/wave'.format(self.device))
+            # Because setpoints need to be built
+            self.scope_correctly_built = False
+        
         ########################################
         # INSTRUMENT PARAMETERS
 
@@ -3494,7 +3484,7 @@ class ZIMFLI(Instrument):
         #demodulator submodules
         demodulatorchannels = ChannelList(self, "DemodulatorChannels", DemodulatorChannel,
                                           snapshotable=False)
-        # In the demodulator we have 2 channels, the second has only not all
+        # In the demodulator we have 2 channels, the second has not all
         # parameters available.
         self.demodulator_no = 2
         if 'MD' in self.options:
@@ -3617,7 +3607,7 @@ class ZIMFLI(Instrument):
         mdschannel = MDSChannel(self, "mds")
         self.add_submodule('mds', mdschannel)
         
-        if "MD" in self.options:
+        if softSweep or "MD" in self.options:
             ########################################
             # SWEEPER PARAMETERS
             sweeperchannel = SweeperChannel(self, 'sweeper_channel')
@@ -3654,21 +3644,22 @@ class ZIMFLI(Instrument):
         
         ########################################
         # scope submodule for the settings of the scope
-        scopechannels = ChannelList(self, "ScopeChannels", ScopeChannel,
-                                          snapshotable=False)
-        self.scopechan_no = 2
-        for scchan in range(1, self.scopechan_no+1):
-            name = 'scope_channel{}'.format(scchan)
-            scopechan = ScopeChannel(self, name)
-            scopechannels.append(scopechan)
-            self.add_submodule(name, scopechan)
-        scopechannels.lock()
-        self.add_submodule('scopechannels_channels', scopechannels)
-        
-        # THE SCOPE ITSELF
-        self.add_parameter('Scope',
-                           parameter_class=Scope,
-                           )
+        if realFlag:
+            scopechannels = ChannelList(self, "ScopeChannels", ScopeChannel,
+                                              snapshotable=False)
+            self.scopechan_no = 2
+            for scchan in range(1, self.scopechan_no+1):
+                name = 'scope_channel{}'.format(scchan)
+                scopechan = ScopeChannel(self, name)
+                scopechannels.append(scopechan)
+                self.add_submodule(name, scopechan)
+            scopechannels.lock()
+            self.add_submodule('scopechannels_channels', scopechannels)
+            
+            # THE SCOPE ITSELF
+            self.add_parameter('Scope',
+                               parameter_class=Scope,
+                               )
         
 
     def _setter(self, module, number, mode, setting, value):
@@ -3762,11 +3753,21 @@ class ZIMFLI(Instrument):
             ValueError: if an attribute not in the list of allowed attributes
               is selected
         """
-        if not "MD" in self.options:
+        if not softSweep and not "MD" in self.options:
             raise RuntimeError('no MD option installed')
 
-        # TODO: implement all possibly returned attributes
-        valid_attributes = ['X', 'Y', 'R', 'phase', 'Xrms', 'Yrms', 'Rrms']
+        # List of all possible <username>
+        valid_attributes = ['X', 'Y', 'R', 'phase',  # the sample measurements
+                            'Xrms', 'Yrms', 'Rrms',  # the square values
+                            'phasePwr',
+                            'Freq', 'FreqPwr',       # Frequency and its square
+                            'In1', 'In2',            # Aux-Inputs
+                            'In1Pwr', 'In2Pwr'       # and the squares
+                            ]
+        # Other values possible but I see no need for them:
+        #  bandwidth, settling, tc, tcmeas, grid, count,
+        #  auxin0stddev, auxin1stddev, frequencystddev, phasestddev,
+        #  rstddev, xstddev, ystddev, nexttimestamp, settimestamp
 
         # Validation
         if demodulator not in range(1, 9):
@@ -3799,7 +3800,7 @@ class ZIMFLI(Instrument):
               different attributes, e.g. demod1 X, demod1 phase
             attribute (str): The attribute to record, e.g. phase or Y
         """
-        if not "MD" in self.options:
+        if not softSweep and not "MD" in self.options:
             raise RuntimeError('no MD option installed')
 
         signalstring = ('/' + self.device +
@@ -3818,26 +3819,25 @@ class ZIMFLI(Instrument):
         If Sweep.build_sweep and Sweep.get are called, the sweep described
         here will be performed.
         """
-        if not "MD" in self.options:
+        if not softSweep and not "MD" in self.options:
             raise RuntimeError('no MD option installed')
-
+        
+        swchan = self.submodules['sweeper_channel']
+        
         print('ACQUISITION')
-        toprint = ['sweeper_BWmode', 'sweeper_BW', 'sweeper_order',
-                   'sweeper_averaging_samples', 'sweeper_averaging_time',
-                   'sweeper_settlingtime', 'sweeper_settlingtc']
+        toprint = ['bandwidth_mode', 'bandwidth', 'order',
+                   'averaging_samples', 'averaging_time',
+                   'settling_time', 'settling_tc']
         for paramname in toprint:
-            parameter = self.parameters[paramname]
-            print('    {}: {} ({})'.format(parameter.label, parameter.get(),
-                                           parameter.unit))
+            parameter = swchan.parameters[paramname]
+            print('    {}: {} {}'.format(parameter.label, parameter.get(),
+                                         parameter.unit))
 
         print('HORIZONTAL')
-        toprint = ['sweeper_start', 'sweeper_stop',
-                   'sweeper_units',
-                   'sweeper_samplecount',
-                   'sweeper_param', 'sweeper_mode',
+        toprint = ['start', 'stop', 'units', 'samplecount', 'param', 'mode',
                    'sweeper_timeout']
         for paramname in toprint:
-            parameter = self.parameters[paramname]
+            parameter = swchan.parameters[paramname]
             print('    {}: {}'.format(parameter.label, parameter.get()))
 
         print('VERTICAL')
@@ -3856,17 +3856,17 @@ class ZIMFLI(Instrument):
         demods = set(demods)
         for dm in demods:
             for feat in features:
-                parameter = self.parameters['demod{:d}_{}'.format(dm+1, feat)]
+                demod = self.submodules['demod{:d}'.format(dm+1)]
+                parameter = demod.parameters[feat]
                 fmt = (dm+1, parameter.label, parameter.get(), parameter.unit)
-                print('    Demodulator {}: {}: {:.6f} ({})'.format(*fmt))
+                print('    Demodulator {}: {}: {:.6f} {}'.format(*fmt))
         print('META')
-        swptime = self.sweeper_sweeptime()
+        swptime = swchan.parameters['sweeptime'].get()
         if swptime is not None:
-            print('    Expected sweep time: {:.1f} (s)'.format(swptime))
+            print('    Expected sweep time: {:.1f} s'.format(swptime))
         else:
             print('    Expected sweep time: N/A in auto mode')
-        print('    Sweep timeout: {} ({})'.format(self.sweeper_timeout.get(),
-                                                  's'))
+        print('    Sweep timeout: {} s'.format(swchan.sweeper_timeout()))
         ready = self.sweep_correctly_built
         print('    Sweep built and ready to execute: {}'.format(ready))
 
@@ -3874,13 +3874,14 @@ class ZIMFLI(Instrument):
         """
         Override of the base class' close function
         """
-        self.scope.unsubscribe('/{}/scopes/0/wave'.format(self.device))
-        self.scope.clear()
-        if "MD" in self.options:
+        if realFlag:
+            self.scope.unsubscribe('/{}/scopes/0/wave'.format(self.device))
+            self.scope.clear()
+        if softSweep or "MD" in self.options:
             self.sweeper.clear()
         self.daq.disconnect()
         super().close()
-        
+
     def version(self):
         """
         Read all possible version informations and returns them as a dict
@@ -3897,9 +3898,12 @@ class ZIMFLI(Instrument):
         retval['DevType'   ] = self.daq.getString(dev+'FEATURES/DEVTYPE')
         retval['Options'   ] = self.daq.getString(dev+'FEATURES/OPTIONS').strip()
         retval['Serial'    ] = self.daq.getString(dev+'FEATURES/SERIAL')
-        tdev = self.daq.getInt(dev+'STATUS/TIME')
-        tsys = zhinst.utils.systemtime_to_datetime(tdev)
-        retval['DevTime'   ] = tsys.strftime('%d.%m.%Y %H:%M:%S.%f')
+        if realFlag:
+            tdev = self.daq.getInt(dev+'STATUS/TIME')
+            tsys = zhinst.utils.systemtime_to_datetime(tdev)
+            retval['DevTime'   ] = tsys.strftime('%d.%m.%Y %H:%M:%S.%f')
+        else:
+            retval['DevTime'   ] = time.strftime('%d.%m.%Y %H:%M:%S')
         retval['Owner'     ] = self.daq.getString(dev+'SYSTEM/OWNER')
         retval['FPGARev'   ] = self.daq.getInt(dev+'SYSTEM/FPGAREVISION')
         retval['DevFWRev'  ] = self.daq.getInt(dev+'SYSTEM/FWREVISION')
@@ -4036,3 +4040,4 @@ class ZIMFLI(Instrument):
         return [ self.lastSampleSecs,                   # in seconds
                  self.lastsampletime,                   # in device timestamp
                  self.lastsampletime/self.clockbase ]   # dev timestamp in seconds
+

@@ -15,6 +15,8 @@ zidev = ZIMFLI( name='ZIMFLI', device_ID='DEV4039' )
 nodes = []
 # High-Speed nodes are never listed (e.g. demods/0/sample)
 tmp = zidev._list_nodes("*")
+#node_list = self.daq.getList('/{}/{}/'.format(self.device, node), 0 )
+
 for t in tmp:
     nodes.append(t[0].lower())
 #    print( t[0] )

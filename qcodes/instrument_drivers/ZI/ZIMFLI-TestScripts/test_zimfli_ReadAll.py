@@ -70,3 +70,4 @@ print( "       Version = ", t_version - t_open, " sec" )
 if len(notreadlist) > 0:
     print( "\nNot readable: ", notreadlist )
 
+zidev.close()

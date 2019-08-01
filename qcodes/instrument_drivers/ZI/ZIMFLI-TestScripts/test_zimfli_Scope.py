@@ -176,23 +176,33 @@ scchan.scope_trig_holdoffseconds( scope_trigholdoff )
 #daq.setInt('/%s/scopes/0/segments/enable' % device, 0)
 scchan.scope_segments( 'OFF' )
 
-"""
 # Now initialize and configure the Scope Module.
-scopeModule = daq.scopeModule()
+#scopeModule = daq.scopeModule()
+# --- scopeModule = zidev.Scope()
+# --- ruft direkt get_raw() auf. Dort klappt nichts, da die Initialisierung
+# --- noch nicht gemacht wurde. Den Code teste ich ja hier erst aus
+
 # 'scopeModule/mode' : Scope data processing mode.
 # 0 - Pass through scope segments assembled, returned unprocessed, non-interleaved.
 # 1 - Moving average, scope recording assembled, scaling applied, averaged, if averaging is enabled.
 # 2 - Not yet supported.
 # 3 - As for mode 1, except an FFT is applied to every segment of the scope recording.
-scopeModule.set('scopeModule/mode', 1)
+#scopeModule.set('scopeModule/mode', 1)
+scchan.mode( 'Time Domain' )
+
 # 'scopeModule/averager/weight' : Averager behaviour.
 #   weight=1 - don't average.
 #   weight>1 - average the scope record shots using an exponentially weighted moving average.
-scopeModule.set('scopeModule/averager/weight', module_averager_weight)
+#scopeModule.set('scopeModule/averager/weight', module_averager_weight)
+scchan.average_weight( module_averager_weight )
+
 # 'scopeModule/historylength' : The number of scope records to keep in the Scope Module's memory, when more records
 #   arrive in the Module from the device the oldest records are overwritten.
-scopeModule.set('scopeModule/historylength', module_historylength)
+#scopeModule.set('scopeModule/historylength', module_historylength)
+scchan.historylength( module_historylength )
+print( "History Length", scchan.historylength() )
 
+"""
 # Subscribe to the scope's data in the module.
 wave_nodepath = '/{}/scopes/0/wave'.format(device)
 scopeModule.subscribe(wave_nodepath)
