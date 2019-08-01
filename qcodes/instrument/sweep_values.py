@@ -62,6 +62,9 @@ class SweepValues(Metadatable):
             raise TypeError('parameter {} is not settable'.format(parameter))
 
         self.set = parameter.set
+        
+        if (getattr(parameter, 'set_buffered', None) and getattr(parameter, 'has_set_buffered', True)):
+            self.set_buffered = parameter.set_buffered
 
     def validate(self, values):
         """
@@ -197,6 +200,7 @@ class SweepFixedValues(SweepValues):
         self.validate((value,))
         self._values.append(value)
         self._value_snapshot.append({'item': value})
+        return self
 
     def extend(self, new_values):
         """
@@ -222,6 +226,7 @@ class SweepFixedValues(SweepValues):
         else:
             raise TypeError(
                 'cannot extend SweepFixedValues with {}'.format(new_values))
+        return self
 
     def copy(self):
         """
@@ -244,6 +249,13 @@ class SweepFixedValues(SweepValues):
         for snap in self._value_snapshot:
             if 'first' in snap and 'last' in snap:
                 snap['last'], snap['first'] = snap['first'], snap['last']
+        return self
+
+    def repeat(self, n):
+        """ Repeat SweepFixValues n times. """
+        self._values = list(self._values) * n
+        self._value_snapshot = list(self._value_snapshot) * n
+        return self
 
     def snapshot_base(self, update=False):
         """

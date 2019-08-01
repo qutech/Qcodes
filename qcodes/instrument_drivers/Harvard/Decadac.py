@@ -445,7 +445,7 @@ class Decadac(VisaInstrument, DacReader):
 
         """
 
-        super().__init__(name, address, **kwargs)
+        super().__init__(name, address, terminator='\n', **kwargs)
 
         # Do feature detection
         self._feature_detect()
@@ -454,10 +454,12 @@ class Decadac(VisaInstrument, DacReader):
         channels = ChannelList(self, "Channels", self.DAC_CHANNEL_CLASS,
                                snapshotable=False)
         slots = ChannelList(self, "Slots", self.DAC_SLOT_CLASS)
+        
         for i in range(5):  # Create the 6 DAC slots
             slots.append(self.DAC_SLOT_CLASS(self, "Slot{}".format(i), i,
                                              min_val, max_val))
             channels.extend(slots[i].channels)
+        
         slots.lock()
         channels.lock()
         self.add_submodule("slots", slots)
