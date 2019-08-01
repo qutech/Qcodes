@@ -259,7 +259,7 @@ class DacChannel(InstrumentChannel, DacBase):
         if switch_pos is None:
             raise ValueError("Switch position has not been set")
         else:
-            return DacBase._SWITCH_POS_TO_RANGE(switch_pos)
+            return DacBase._SWITCH_POS_TO_RANGE[switch_pos]
     
     def _send_buffer(self, layer) -> Dict:
         """
