@@ -7,7 +7,7 @@
 # Date:   July 2018
 
 
-from typing import Dict
+from typing import Dict, Tuple
 from qcodes import  InstrumentChannel, ChannelList, BufferedSweepableParameter, SweepFixedValues
 from qcodes.utils import validators as vals
 from qcodes.instrument.visa import VisaInstrument
@@ -29,6 +29,10 @@ class DacBase(object):
     SWITCH_MID   = 0  #   0 <= U <= 10 [V]
     SWITCH_RIGHT = 1  # -10 <= U <= 10 [V]
 
+    _SWITCH_POS_TO_RANGE = {SWITCH_LEFT:  (-10., 0.),
+                            SWITCH_MID:   (0,    10.),
+                            SWITCH_RIGHT: (-10., 10.)}
+
     # Slot mode values
     SLOT_MODE_OFF    = 0 # Channel outputs are disconnected from the input, grounded with 10MOhm.
     SLOT_MODE_FINE   = 1 # 2-channel mode. Channels 0 and 1 are output, use 2 and 3 for fine adjustment of Channels 0 and 1 respectively
@@ -48,7 +52,7 @@ class DacBase(object):
     TRIG_2_UPDATE_UNTIL_RISING_EDGE  = 5
     TRIG_2_UPDATE_UNTIL_FALLING_EDGE = 7
     TRIG_2_UPDATE_AFTER_RISING_EDGE  = 13
-    TRIG_2_UDPATE_AFTER_FALLING_EDGE = 15
+    TRIG_2_UPDATE_AFTER_FALLING_EDGE = 15
     
     # Validators
     _CHANNEL_VAL   = vals.Ints(0, 3)
@@ -67,7 +71,7 @@ class DacBase(object):
     _DEFAULT_TRIG_MODE     = TRIG_UPDATE_ALWAYS
     _DEFAULT_SLOT_MODE     = SLOT_MODE_COARSE
     
-    # Commands to send to the device
+    # Commands to send to the device (set parameters)
     _COMMAND_SET_SLOT          = "B{};"
     _COMMAND_SET_CHANNEL       = "C{};"
     _COMMAND_SET_VOLT          = "D{};"
@@ -77,8 +81,11 @@ class DacBase(object):
     _COMMAND_SET_SLOPE         = "S{};"
     _COMMAND_SET_UPDATE_PERIOD = "T{};"
     _COMMAND_SET_SLOT_MODE     = "M{};"
-    _COMMAND_GET_VOLT          = "d;"
     
+    # Commands to send to the device (get parameters) others are not gettable
+    _COMMAND_GET_VOLT          = "d;"
+    _COMMAND_GET_SLOPE         = "s;"
+    _COMMAND_GET_SLOT_MODE     = "m;"
     
     @staticmethod
     def _dac_v_to_code(volt, min_volt, max_volt):
@@ -187,10 +194,15 @@ class DacChannel(InstrumentChannel, DacBase):
         self._volt_val = DacVoltValidator(self)
         self._volt_raw_val = vals.Ints(0, 65535)
         self._ramp_val = vals.Numbers(0, 10)
-        self._min_volt = None
-        self._max_volt = None
-        self._switch_pos = None
+
         self._default_switch_pos = default_switch_pos
+
+        # these are pure software parameters
+        self._max_ramp_rate = None
+
+        # internal setting whether to set via ramping
+        # there is no (public) set functionality yet
+        self._set_volt_via_ramp = True
         
         # Channel parameters
         # Voltage
@@ -198,24 +210,36 @@ class DacChannel(InstrumentChannel, DacBase):
                            sweep_parameter_cmd=self._sweep_parameter, send_buffer_cmd=self._send_buffer, run_program_cmd=self._run_program,
                            get_cmd=self._get_volt, get_parser=self._dac_code_to_v, set_cmd=self._set_volt, set_parser=self._dac_v_to_code, vals=self._volt_val, label="Voltage", unit="V")
         self.add_parameter("volt_raw", get_cmd=self._get_volt, set_cmd=self._set_volt, vals=self._volt_raw_val, label="Voltage (raw data)")
-        
+
+        # Slope
+        self.add_parameter("slope",
+                           get_cmd=self._get_slope, get_parser=int,
+                           set_cmd=self._set_slope, set_parser=int,
+                           vals=vals.Ints(-(2 ** 32), 2 ** 32), label="Ramp Slope (bin/s)")
+
+        # The following parameters cannot read out from the device
         # The limit commands are used to sweep dac voltages. They are not safety features.
-        self.add_parameter("lower_ramp_limit", get_cmd=self._get_lower_limit, get_parser=self._dac_code_to_v, set_cmd=self._set_lower_limit, set_parser=self._dac_v_to_code, vals=self._volt_val, label="Lower Ramp Limit", unit="V")
-        self.add_parameter("upper_ramp_limit", get_cmd=self._get_upper_limit, get_parser=self._dac_code_to_v, set_cmd=self._set_upper_limit, set_parser=self._dac_v_to_code, vals=self._volt_val, label="Upper Ramp Limit", unit="V")
-        self.add_parameter("lower_ramp_limit_raw", get_cmd=self._get_lower_limit, set_cmd=self._set_lower_limit, vals=self._volt_raw_val, label="Lower Ramp Limit (raw data)")
-        self.add_parameter("upper_ramp_limit_raw", get_cmd=self._get_upper_limit, set_cmd=self._set_upper_limit, vals=self._volt_raw_val, label="Upper Ramp Limit (raw data)")
+        self.add_parameter("lower_ramp_limit", get_parser=self._dac_code_to_v, set_cmd=self._set_lower_limit, set_parser=self._dac_v_to_code, vals=self._volt_val, label="Lower Ramp Limit", unit="V")
+        self.add_parameter("upper_ramp_limit", get_parser=self._dac_code_to_v, set_cmd=self._set_upper_limit, set_parser=self._dac_v_to_code, vals=self._volt_val, label="Upper Ramp Limit", unit="V")
+        self.add_parameter("lower_ramp_limit_raw", set_cmd=self._set_lower_limit, vals=self._volt_raw_val, label="Lower Ramp Limit (raw data)")
+        self.add_parameter("upper_ramp_limit_raw", set_cmd=self._set_upper_limit, vals=self._volt_raw_val, label="Upper Ramp Limit (raw data)")
         
         # Ramping parameters
-        self.add_parameter("update_period", get_cmd=self._get_update_period, get_parser=int, set_cmd=self._set_update_period, set_parser=int, vals=vals.Ints(50, 65535), label="Update Period", unit="us")
-        self.add_parameter("slope", get_cmd=self._get_slope, get_parser=int, set_cmd=self._set_slope, set_parser=int, vals=vals.Ints(-(2**32), 2**32), label="Ramp Slope")
+        self.add_parameter("update_period", get_parser=int, set_cmd=self._set_update_period, set_parser=int, vals=vals.Ints(50, 65535), label="Update Period", unit="us")
         
-        self.add_parameter("switch_pos", get_cmd=self._get_switch_pos, set_cmd=self._set_switch_pos, vals=self._SWITCH_VAL, label="Switch Position")
-        self.add_parameter("trig_mode", get_cmd=self._get_trig_mode, set_cmd=self._set_trig_mode, vals=self._TRIG_MODE_VAL, label="Trigger Mode")
+        self.add_parameter("switch_pos", set_cmd=None, get_cmd=None,
+                           vals=self._SWITCH_VAL, label="Switch Position")
+        self.add_parameter("trig_mode", set_cmd=self._set_trig_mode, vals=self._TRIG_MODE_VAL, label="Trigger Mode")
+
+        # inferred from the switch position: not settable
+        self.add_parameter("voltage_range", get_cmd=self._get_voltage_range, set_cmd=False,
+                           label="Full output range",
+                           docstring="Output range. Depends on the switch position.")
         
         # Add ramp function to the list of functions
         self.add_function("ramp", call_cmd=self._ramp, args=(self._volt_val, self._ramp_val))
         self.add_function("ramp_wait", call_cmd=self._ramp_wait, args=(self._volt_val, self._ramp_val))
-        
+
     def _sweep_parameter(self, parameter, sweep_values, layer) -> None:
         """
         Adds the sweep information to a list, to build up a single buffer later
@@ -226,6 +250,16 @@ class DacChannel(InstrumentChannel, DacBase):
             layer: nnumber of nested loop (most outer loop: 0)
         """
         self._parent._sweep_parameter(self, parameter, sweep_values, layer)
+
+    def _get_voltage_range(self) -> Tuple[float, float]:
+        """Return the minimal and maximal output voltage in Volts.
+        Raises a Value error if the switch position is not set yet."""
+        switch_pos = self.switch_pos.get()
+
+        if switch_pos is None:
+            raise ValueError("Switch position has not been set")
+        else:
+            return DacBase._SWITCH_POS_TO_RANGE(switch_pos)
     
     def _send_buffer(self, layer) -> Dict:
         """
@@ -252,12 +286,14 @@ class DacChannel(InstrumentChannel, DacBase):
         """
         Resets all parameters to default
         """
-        self._volt = DacBase._DEFAULT_VOLT
-        self._lower_limit = DacBase._DEFAULT_LOWER_LIMIT
-        self._upper_limit = DacBase._DEFAULT_UPPER_LIMIT
-        self._update_period = DacBase._DEFAULT_UPDATE_PERIOD
-        self._slope = DacBase._DEFAULT_SLOPE
-        self._trig_mode = DacBase._DEFAULT_TRIG_MODE
+        raise NotImplementedError("Reset logic is not sound")
+
+        self.volt.set(DacBase._DEFAULT_VOLT)
+        self.lower_limit.set(DacBase._DEFAULT_LOWER_LIMIT)
+        self.upper_limit.set(DacBase._DEFAULT_UPPER_LIMIT)
+        self.update_period.set(DacBase._DEFAULT_UPDATE_PERIOD)
+        self.slope.set(DacBase._DEFAULT_SLOPE)
+        self.trig_mode.set(DacBase._DEFAULT_TRIG_MODE)
         
         self.switch_pos.set(self._default_switch_pos)
         
@@ -270,121 +306,101 @@ class DacChannel(InstrumentChannel, DacBase):
               + DacBase._COMMAND_SET_SLOPE.format(self._slope)
               + DacBase._COMMAND_SET_UPDATE_PERIOD.format(self._update_period))
 
-    def _get_volt(self):
+    def _get_volt(self) -> int:
         """
         Reads out the voltage of the channel as dac-code
         """
         buf = self._parent._write(self, DacBase._COMMAND_GET_VOLT)
-        self._volt = int(buf[1:-1])
-        
-        return self._volt
+        return int(buf[1:-1])
 
-
-    def _set_volt(self, volt):
+    def _set_volt(self, volt: int):
         """
         Sets the voltage for the channel as dac-code
         """
+        #self._ramp_help_dac_units(volt, )
         self._parent._write(self, DacBase._COMMAND_SET_VOLT.format(volt))
-        self._volt = volt
-        
-        
-    def _get_switch_pos(self):
-        """
-        Gets the switch_pos
-        """
-        if self._switch_pos is None:
-            raise ValueError('The switch position has not been set.')
-        
-        return self._switch_pos
-
-
-    def _set_switch_pos(self, pos):
-        """
-        Stores the set switch position of the channel
-        {SWITCH_LEFT = -1, SWITCH_MID = 0, SWITCH_RIGHT = 1}
-        
-        This does not change the physical switch position; synchronisation has to be made manually
-        """
-        self._min_volt, self._max_volt = DacBase._evaluate_switchpos(pos)
-        self._switch_pos = pos
-        
-
-    def _get_lower_limit(self):
-        """
-        Gets the lower ramp limit as dac-code
-        """
-        return self._lower_limit
-
 
     def _set_lower_limit(self, lower_limit):
         """
         Sets the lower ramp limit as dac-code
         """
         self._parent._write(self, DacBase._COMMAND_SET_LOWER_LIMIT.format(lower_limit))
-        self._lower_limit = lower_limit
-        
-
-    def _get_upper_limit(self):
-        """
-        Gets the upper ramp limit as dac-code
-        """
-        return self._upper_limit
-
 
     def _set_upper_limit(self, upper_limit):
         """
         Sets the upper ramp limit as dac-code
         """
         self._parent._write(self, DacBase._COMMAND_SET_UPPER_LIMIT.format(upper_limit))
-        self._upper_limit = upper_limit
-
-
-    def _get_trig_mode(self):
-        """
-        Gets the update trigger mode
-        """
-        return self._trig_mode
-
 
     def _set_trig_mode(self, trig_mode):
         """
         Sets the update trigger mode
         """
         self._parent._write(self, DacBase._COMMAND_SET_TRIG_MODE.format(trig_mode))
-        self._trig_mode = trig_mode
-        
-        
-    def _get_update_period(self):
-        """
-        Gets the update period (time between to refreshs in us)
-        """
-        return self._update_period
-
 
     def _set_update_period(self, update_period):
         """
         Sets the update period (time between to refreshs in us)
         """
         self._parent._write(self, DacBase._COMMAND_SET_UPDATE_PERIOD.format(update_period))
-        self._update_period = update_period
-    
-    
-    def _get_slope(self):
+
+    def _get_slope(self) -> int:
         """
         Gets the ramp slope
         """
-        return self._slope
-
+        buf = self._parent._write(self, DacBase._COMMAND_GET_SLOPE)
+        return int(buf[1:-1])
 
     def _set_slope(self, slope):
         """
         Sets the ramp slope
         """
         self._parent._write(self, DacBase._COMMAND_SET_SLOPE.format(slope))
-        self._slope = slope
+
+    def _ramp_help_dac_units(self, target: int, rate: float, wait: bool):
+        """
+        Ramp the DAC to a given voltage. And eventually wait until it's done.
+
+        Params:
+            val (int):  The voltage to ramp to in DAC units
+            rate (float): The ramp rate in units of (DAC Units)/s
+            wait (bool):  True if the function should wait until the ramp is done
+        """
+        current_voltage = self.volt_raw.get()
+
+        if current_voltage == target:
+            return
+
+        # Number of refreshes per second
+        t_rate = 1e6 / self.update_period.get()
+
+        # ramp duration in seconds
+        ramp_duration = abs((target - current_voltage) / rate)
+
+        # The formula to calculate the slope is:
+        # Number of DAC steps divided by the number of time steps in the ramp multiplied by 65536
+        slope = int((target - current_voltage) / (t_rate * ramp_duration) * 2**16)
+
+        # wait with command execution until all commands are sent
+        self.trig_mode.set(DacBase.TRIG_UPDATE_NEVER)
+
+        # Now let's set up our limits and ramp slope
+        self.slope.set(slope)
+
+        if slope > 0:
+            self.upper_ramp_limit_raw.set(target)
+        else:
+            self.lower_ramp_limit_raw.set(target)
+
+        # start execution
+        self.trig_mode.set(DacBase.TRIG_UPDATE_ALWAYS)
+
+        # Block until the ramp is complete is block is True
+        if wait:
+            while self.volt_raw.get() != target:
+                pass
     
-    
-    def _ramp_help(self, val, rate, wait):
+    def _ramp_help_volts(self, val: float, rate: float, wait: bool):
         """
         Ramp the DAC to a given voltage. And eventually wait until it's done.
 
@@ -393,34 +409,10 @@ class DacChannel(InstrumentChannel, DacBase):
             rate (float): The ramp rate in units of V/s
             wait (bool):  True if the function should wait until the ramp is done
         """
-        # We need to know the current dac value (in raw units), as well as the update rate
-        c_volt = self.volt.get() # Current Voltage
-        
-        if c_volt == val: # If we are already at the right voltage, we don't need to ramp
-            return
-        
-        c_val = self._dac_v_to_code(c_volt) # Current voltage in DAC units
-        e_val = self._dac_v_to_code(val) # Endpoint in DAC units
-        
-        t_rate = 1000000.0 / (self.update_period.get()) # Number of refreshes per second
-        secs = abs((c_volt - val) / rate) # Number of seconds to ramp
 
-        # The formula to calculate the slope is: Number of DAC steps divided by the number of time steps in the ramp multiplied by 65536
-        slope = int(((e_val - c_val) / (t_rate * secs)) * 65536)
-
-        # Now let's set up our limits and ramo slope
-        if slope > 0:
-            self.upper_ramp_limit.set(val)
-        else:
-            self.lower_ramp_limit.set(val)
-        
-        self.slope.set(slope)
-        
-        # Block until the ramp is complete is block is True
-        if wait:
-            while self.volt_raw.get() != e_val:
-                pass
-        
+        dac_val = self._dac_v_to_code(val) # Endpoint in DAC units
+        dac_rate = rate * (2**16 - 1) / float.__sub__(*self.voltage_range.get()) # Endpoint in (DAC Units)/s
+        self._ramp_help_dac_units(target=dac_val, rate=dac_rate, wait=wait)
     
     def _ramp(self, val, rate):
         """
@@ -430,9 +422,8 @@ class DacChannel(InstrumentChannel, DacBase):
             val (float):  The voltage to ramp to in V
             rate (float): The ramp rate in units of V/s
         """
-        self._ramp_help(val, rate, False)
-    
-    
+        self._ramp_help_volts(val, rate, False)
+
     def _ramp_wait(self, val, rate):
         """
         Ramp the DAC to a given voltage and wait until it's done
@@ -441,9 +432,8 @@ class DacChannel(InstrumentChannel, DacBase):
             val (float):  The voltage to ramp to in V
             rate (float): The ramp rate in units of V/s
         """
-        self._ramp_help(val, rate, True)
-        
-    
+        self._ramp_help_volts(val, rate, True)
+
     def _dac_v_to_code(self, volt):
         """
         Convert a voltage to the internal dac code (number between 0-65536)
@@ -456,9 +446,8 @@ class DacChannel(InstrumentChannel, DacBase):
         Returns:
             (int): dac-code
         """
-        return DacBase._dac_v_to_code(volt, self._min_volt, self._max_volt)
+        return DacBase._dac_v_to_code(volt, *self.voltage_range.get())
 
-    
     def _dac_code_to_v(self, code):
         """
         Convert the internal dac code (number between 0-65536) to the voltage value
@@ -470,7 +459,9 @@ class DacChannel(InstrumentChannel, DacBase):
         Returns:
             (float): voltage in V
         """
-        return DacBase._dac_code_to_v(code, self._min_volt, self._max_volt)
+        if code is None:
+            raise ValueError("Voltage code is None (this hints to an unset value that cannot be read from the device)")
+        return DacBase._dac_code_to_v(code, *self.voltage_range.get())
 
 
 class DacVoltValidator(vals.Validator):
@@ -499,11 +490,12 @@ class DacVoltValidator(vals.Validator):
         if not isinstance(value, vals.Numbers.validtypes):
             raise TypeError("{} is not an int or float.\n{}".format(repr(value), context))
         
-        if self._parent._min_volt is None or self._parent._max_volt is None:
+        if self._parent.switch_pos.get() is None:
             raise ValueError("No voltage interval is given for the Decadac instrument. Please set the switch_pos parameter.\n{}".format(context))
         
-        if not (self._parent._min_volt <= value <= self._parent._max_volt):
-            raise ValueError("DacVoltValidator is invalid: must be between {} and {} inclusive.\n{}".format(self._parent._min_volt, self._parent._max_volt, context))
+        min_volt, max_volt = self._parent.voltage_range.get()
+        if not (min_volt <= value <= max_volt):
+            raise ValueError("DacVoltValidator is invalid: must be between {} and {} inclusive.\n{}".format(min_volt, max_volt, context))
 
 
 class DacSlot(InstrumentChannel, DacBase):
