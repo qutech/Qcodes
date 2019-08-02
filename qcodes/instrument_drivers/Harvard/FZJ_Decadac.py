@@ -30,7 +30,7 @@ class DacBase(object):
     SWITCH_RIGHT = 1  # -10 <= U <= 10 [V]
 
     _SWITCH_POS_TO_RANGE = {SWITCH_LEFT:  (-10., 0.),
-                            SWITCH_MID:   (0,    10.),
+                            SWITCH_MID:   (0.,    10.),
                             SWITCH_RIGHT: (-10., 10.)}
 
     # Slot mode values
