@@ -1,1 +1,1 @@
-Dieses Repository enthält des QCoDeS Treiber für den Zurich Instruments Lock-In Amplifier.
+This repository contains the QCoDeS driver for the Zurich Instruments Lock-In Amplifier.

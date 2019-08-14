@@ -13,8 +13,9 @@ import time
 import re
 import json
 
-# List to collect all not readable parameters
-notreadlist = []
+notreadlist = [] # List to collect all not readable parameters
+nodoclist = [] # List to collect all not documented parameters (docstring)
+
 
 # helper function to go through all parameters of one module
 def helper( mod, params ):
@@ -24,8 +25,12 @@ def helper( mod, params ):
         try:
             val = str( par() ) + " " + par.unit
         except:
-            val = "** not readable **"
-            notreadlist.append( mod + "." + p )
+            if p == 'sweeptime':
+                # special marker for this parameter
+                val = "** No signals selected for Sweep **"
+            else:
+                val = "** not readable **"
+                notreadlist.append( mod + "." + p )
         if hasattr(par, 'label'):
             print( p, " | ", par.label, ": ", val )
         elif p == "Scope":
@@ -35,7 +40,11 @@ def helper( mod, params ):
         if par.__doc__ is not None:
             if par.__doc__[:9] != "Parameter" and par.__doc__[:9] != "MultiPara":
                 tmp = re.sub(' {2,}', ' ', par.__doc__)
-                print( tmp[:tmp.index('Parameter class:')].strip() )
+                print( "DOC: ", tmp[:tmp.index('Parameter class:')].strip(), "\n" )
+            else:
+                nodoclist.append( mod + "." + p )
+        else:
+            nodoclist.append( mod + "." + p )
 
 # all t_* variables are used to measure the time
 t_startall = time.time()
@@ -69,5 +78,7 @@ print( "       Connect = ", t_open - t_startall, " sec" )
 print( "       Version = ", t_version - t_open, " sec" )
 if len(notreadlist) > 0:
     print( "\nNot readable: ", notreadlist )
+if len(nodoclist) > 0:
+    print( "\nNot documented: ", nodoclist )
 
 zidev.close()

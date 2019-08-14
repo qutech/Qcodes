@@ -2,11 +2,17 @@
 """
 File: ZIMFLI.py
 Date: Feb / Mar 2019
-Author: Michael Wagener, ZEA-2, m.wagener@fz-juelich.de
-        Sarah Fleitmann, ZEA-2, s.fleitmann@fz-juelich.de
-        Rene Otten and other, RWTH
+Author: Michael Wagener, FZJ / ZEA-2, m.wagener@fz-juelich.de
+        Sarah Fleitmann, FZJ / ZEA-2, s.fleitmann@fz-juelich.de
+        Rene Otten and other, RWTH Aachen
 Purpose: Main instrument driver for the Zurich Instruments Lock-In Amplifier
 
+Information: the docstring argument in all set_parameter calls can be formatted as:
+                docstring="...."    all strings are concatenated to one long
+                          " ..."    string and the printout is one line.
+                docstring=" " "     (without spaces !)
+                          ...       Now all linebreaks are preserverd
+                          " " "
 """
 
 
@@ -17,8 +23,7 @@ import numpy as np
 from functools import partial
 from math import sqrt
 from enum import IntEnum
-
-from typing import Callable, List, Union
+from typing import Callable, List, Union, Dict, Tuple
 
 softSweep = True  # set to False to disable the software sweep function and
                   #  use only the hardware sweep if it is installed (MD-Option)
@@ -35,12 +40,14 @@ except ImportError:
     #                     download and installation instructions.
     #                  ''')
 
-from qcodes.instrument.parameter import MultiParameter
+from qcodes.instrument.parameter import MultiParameter, BufferedSweepableParameter, BufferedReadableArrayParameter
 from qcodes.instrument.base import Instrument
 from qcodes.instrument.channel import InstrumentChannel, ChannelList
 from qcodes.utils import validators as vals
 
 log = logging.getLogger(__name__)
+
+bufferedConfig = {}
 
 
 class Mode(IntEnum):
@@ -52,23 +59,18 @@ class Mode(IntEnum):
     SAMPLE = 2
     
 
-class AUXInputChannel(InstrumentChannel):
+class AUXInputChannel(InstrumentChannel): # doc done **************************
     """
-    Combines all parameters of the instrument concerning AUXInput
+    The device has two auxiliary inputs. Because of the demodulator functionality
+    the input values are only available as fields in the dict of the demodulator
+    sample reading.
     Parameters:
-            averaging: Defines the number of samples on the input to average as 
-                a power of two. Possible values are in the range [0, 16]. A value 
-                of 0 corresponds to the sampling rate of the auxiliary input's ADC.
-            sample: Voltage measured at the Auxiliary Input after averaging. 
-                The data rate depends on the averaging value. Note, if the instrument
-                has demodulator functionality, the auxiliary input values are
-                available as fields in a demodulator sample and are aligned by 
-                timestamp with the demodulator output.
-            value{1, 2}: Voltage measured at the Auxiliary Input after averaging. 
-                The value of this node is updated at a low rate (50 Hz); the 
-                streaming node auxins/n/sample is updated at a high rate defined 
-                by the averaging.
-                --> Not available if demodulator is implemented
+        averaging: Defines the number of samples on the input to average as a
+            power of two. Possible values are in the range [0, 16]. A value of
+            0 corresponds to the sampling rate of the auxiliary input's ADC.
+        sample: This returns the same dict as the demodulator parameter sample.
+            The auxiliary input values are available as fields in a demodulator
+            sample and are aligned by timestamp with the demodulator output.
     """
     def __init__(self, parent:'ZIMFLI', name: str, channum: int) -> None:
         """
@@ -85,18 +87,24 @@ class AUXInputChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'averaging'),
                            set_cmd=partial(self._parent._setter, 'auxins',
                                            channum-1, Mode.INT, 'averaging'),
-                           vals=vals.Ints(0, 16))
+                           vals=vals.Ints(0, 16),
+                           docstring="Defines the number of samples on the input"
+                                     " to average as a power of two. Possible"
+                                     " values are in the range [0, 16]. A value"
+                                     " of 0 corresponds to the sampling rate of"
+                                     " the auxiliary input's ADC."
+                           )
         self.add_parameter('sample',
                            label='Demodulator sample',
                            get_cmd=partial(self._parent._getter, 'demods', # !!!
                                            channum-1, Mode.SAMPLE, 'sample'),
                            set_cmd=False,
-                           docstring="""
-                                     Note, if the instrument has demodulator functionality,
-                                     the auxiliary input values are available as fields in
-                                     a demodulator sample and are aligned by timestamp with
-                                     the demodulator output.
-                                     """)
+                           docstring="This returns the same dict as the demodulator"
+                                     " parameter sample. The auxiliary input values"
+                                     " are available as fields in a demodulator sample"
+                                     " and are aligned by timestamp with the"
+                                     " demodulator output."
+                           )
         #self.add_parameter('value1',
         #                   label='Auxiliary Input value',
         #                   unit='V',
@@ -112,21 +120,25 @@ class AUXInputChannel(InstrumentChannel):
         # --> Not available if demodulator is implemented
 
 
-class AUXOutputChannel(InstrumentChannel):
+class AUXOutputChannel(InstrumentChannel): # doc done *************************
     """"
-    Combines all parameters of the instrument concerning the AUXOutput
+    The device has four auxiliary outputs.
     Parameters:
-            scale: Multiplication factor to scale the signal. 
-            preoffset: Add a pre-offset to the signal before scaling is applied.
-            offset: Add the specified offset voltage to the signal after scaling.
-            limitlower: Lower limit for the signal at the Auxiliary Output. 
-                A smaller value will be clipped. Can have a value between -10 an 10 V.
-            limitupper: Upper limit for the signal at the Auxiliary Output. 
-                A larger value will be clipped. Can have a value between -10 an 10 V.
-            channel: channel according to the selected signal source
-            output: signal source of the signal to amplify 
-            value: Voltage present on the Auxiliary Output.
-                Auxiliary Output Value = (Signal+Preoffset)*Scale+Offset
+        scale: Multiplication factor to scale the signal.
+        preoffset: Add a pre-offset to the signal before scaling is applied.
+        offset: Add the specified offset voltage to the signal after scaling.
+        limitlower: Lower limit for the signal at the Auxiliary Output. 
+            A smaller value will be clipped. Can have a value between -10 an +10 V.
+        limitupper: Upper limit for the signal at the Auxiliary Output. 
+            A larger value will be clipped. Can have a value between -10 an +10 V.
+        channel: channel according to the selected signal source
+        output: signal source of the signal to amplify. Allowed values are
+            'Demod X', 'Demod Y', 'Demod R', 'Demod THETA',
+            'TU Filtered Value', 'TU Output Value'.
+            With the MD option installed, this list is extended by
+            'PID Out', 'PID Shift', 'PID Error'.
+        value: (ReadOnly) Voltage present on the Auxiliary Output.
+            Auxiliary Output Value = (Signal + Preoffset) * Scale + Offset
     """
 
     def __init__(self, parent: 'ZIMFLI', name: str, channum: int) -> None:
@@ -146,7 +158,8 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, Mode.DOUBLE, 'scale'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, Mode.DOUBLE, 'scale'),
-                           vals=vals.Numbers())
+                           vals=vals.Numbers(),
+                           docstring="Multiplication factor to scale the signal.")
         self.add_parameter('preoffset',
                            label='preoffset',
                            unit='signal units',
@@ -154,7 +167,8 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, Mode.DOUBLE, 'preoffset'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, Mode.DOUBLE, 'preoffset'),
-                           vals=vals.Numbers())
+                           vals=vals.Numbers(),
+                           docstring="Add a pre-offset to the signal before scaling is applied.")
         self.add_parameter('offset',
                            label='offset',
                            unit='V',
@@ -162,7 +176,8 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, Mode.DOUBLE, 'offset'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, Mode.DOUBLE, 'offset'),
-                           vals=vals.Numbers())
+                           vals=vals.Numbers(),
+                           docstring="Add the specified offset voltage to the signal after scaling.")
         self.add_parameter('limitlower',
                            label='Lower limit',
                            unit='V',
@@ -170,7 +185,10 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, Mode.DOUBLE, 'limitlower'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, Mode.DOUBLE, 'limitlower'),
-                           vals=vals.Numbers(-10, 10))
+                           vals=vals.Numbers(-10, 10),
+                           docstring="Lower limit for the signal at the Auxiliary Output."
+                                     " A smaller value will be clipped. Can have a value"
+                                     " between -10 an +10 V.")
         self.add_parameter('limitupper',
                            label='Upper limit',
                            unit='V',
@@ -178,7 +196,10 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, Mode.DOUBLE, 'limitupper'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, Mode.DOUBLE, 'limitupper'),
-                           vals=vals.Numbers(-10, 10))
+                           vals=vals.Numbers(-10, 10),
+                           docstring="Upper limit for the signal at the Auxiliary Output."
+                                     " A larger value will be clipped. Can have a value"
+                                     " between -10 an +10 V.")
         self.add_parameter('channel',
                            label='Channel',
                            unit='',
@@ -188,17 +209,18 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, Mode.INT, 'demodselect'),
                            get_parser=lambda x: x+1,  # internal: 0, 1, ...
                            set_parser=lambda x: x-1,  # for the user: 1, 2, ...
-                           vals=vals.Ints( 1, self._parent.demodulator_no )
-                           )
+                           vals=vals.Ints( 1, self._parent.demodulator_no ),
+                           docstring="Channel according to the selected signal source.")
         outputvalmapping = {'Demod X': 0,
                             'Demod Y': 1,
                             'Demod R': 2,
                             'Demod THETA': 3,
-                            'PID Out': 5,
-                            'PID Shift': 9,
-                            'PID Error': 10,
                             'TU Filtered Value': 11,
                             'TU Output Value': 13}
+        if 'MD' in self._parent.options:
+            outputvalmapping.update({'PID Out': 5,
+                                     'PID Shift': 9,
+                                     'PID Error': 10})
         self.add_parameter('output',
                            label='Output',
                            unit='',
@@ -206,76 +228,134 @@ class AUXOutputChannel(InstrumentChannel):
                                            channum - 1, Mode.INT, 'outputselect'),
                            set_cmd=partial(self._parent._setter, 'auxouts',
                                            channum - 1, Mode.INT, 'outputselect'),
-                           val_mapping=outputvalmapping)
+                           val_mapping=outputvalmapping,
+                           docstring="Signal source of the signal to amplify."
+                                     " Allowed values are: 'Demod X', 'Demod Y',"
+                                     " 'Demod R', 'Demod THETA', 'TU Filtered Value',"
+                                     " 'TU Output Value'. With the MD option"
+                                     " installed, this list is extended by"
+                                     " 'PID Out', 'PID Shift', 'PID Error'.")
         self.add_parameter('value',
                            label='Value',
                            unit='V',
                            get_cmd=partial(self._parent._getter, 'auxouts',
                                            channum - 1, Mode.DOUBLE, 'value'),
-                           set_cmd=False)
+                           set_cmd=False,
+                           docstring="""
+                                     (ReadOnly) Voltage present on the Auxiliary Output.
+                                     Value = (Signal + Preoffset) * Scale + Offset
+                                     """
+                           )
                            
 
-class DemodulatorChannel(InstrumentChannel):
+class DemodulatorChannel(InstrumentChannel): # doc done ***********************
     """
-    Combines all parameters of the parent concerning the demodulators
-    Parameters:
-            bypass: Allows to bypass the demodulator low-pass filter, thus increasing
-                the bandwidth.
-            frequency: Indicates the frequency used for demodulation and for output 
-                generation. The demodulation frequency is calculated with oscillator
-                frequency times the harmonic factor. When the MOD option is used
-                linear combinations of oscillator frequencies including the harmonic
-                factors define the demodulation frequencies.
-            order: Selects the filter roll off between 6 dB/oct and 48 dB/oct.
-                Allowed Values:
-                    1 1st order filter 6 dB/oct
-                    2 2nd order filter 12 dB/oct
-                    3 3rd order filter 18 dB/oct
-                    4 4th order filter 24 dB/oct
-                    5 5th order filter 30 dB/oct
-                    6 6th order filter 36 dB/oct
-                    7 7th order filter 42 dB/oct
-                    8 8th order filter 48 dB/oct
-            harmonic: Multiplies the demodulator's reference frequency by an integer
-                factor. If the demodulator is used as a phase detector in external 
-                reference mode (PLL), the effect is that the internal oscillator 
-                locks to the external frequency divided by the integer factor.
-            oscselect: Connects the demodulator with the supplied oscillator. 
-                Number of available oscillators depends on the installed options.
-                Is a number between 0 and the number of oscillators -1
-            phaseadjust: Adjust the demodulator phase automatically in order to 
-                read 0 degrees.
-            phaseshift: Phase shift applied to the reference input of the demodulator.
-            timeconstant: Sets the integration time constant or in other words, 
-                the cutoff frequency of the demodulator low pass filter.
-            samplerate(*): Defines the demodulator sampling rate, the number of samples
-                that are sent to the host computer per second. A rate of about 7-10 
-                higher as compared to the filter bandwidth usually provides sufficient 
-                aliasing suppression. This is also the rate of data received by 
-                LabOne Data Server and saved to the computer hard disk. This setting
-                has no impact on the sample rate on the auxiliary outputs connectors.
-            sample(*): Contains streamed demodulator samples with sample interval defined 
-                by the demodulator data rate.
-            sinc: Enables the sinc filter. When the filter bandwidth is comparable to 
-                or larger than the demodulation frequency, the demodulator output 
-                may contain frequency components at the frequency of demodulation 
-                and its higher harmonics. The sinc is an additional filter that 
-                attenuates these unwanted components in the demodulator output.
-            signalinput: Selects the input signal for the demodulator.
-                Possible values: 'Sig In 1', 'Curr In 1', 'Trigger 1', 'Trigger 2',
-                    'Aux Out 1', 'Aux Out 2', 'Aux Out 3', 'Aux Out 4', 'Aux In 1',
-                    'Aux In 2', 'Constant input'
-            streaming(*): Enables the data acquisition for the corresponding demodulator.
-            trigger(*): Selects the acquisition mode (i.e. triggering) or the demodulator.
-            x: get sample of x coordinate
-            y: get sample of y coordinate
-            R: get sample of absolute value of x+y*i
-            phi: get sample of angle of x+y*i
-            cfgTimeout: stores the  used timeout in seconds for the readings of sample data
-                        (default 0.07)
-            
-            (*) all parameters marked with this are only accessible for channel 1
-            or if the MD option is installed
+    The Lock-In-Amplifier has two demodulator channels. Not all parameters are
+    accessible for the second channel. If the MD option is installed, there
+    are four channels available.
+    Parameters accessible by all channels:
+        bypass: Allows to bypass the demodulator low-pass filter, thus increasing
+            the bandwidth.
+        frequency: (ReadOnly) Indicates the frequency used for demodulation and
+            for output generation. The demodulation frequency is calculated with
+            oscillator frequency times the harmonic factor. When the MOD option
+            is used, linear combinations of oscillator frequencies including the
+            harmonic factors define the demodulation frequencies.
+        order: Selects the filter roll off. Allowed Values:
+            1 = 1st order filter 6 dB/oct
+            2 = 2nd order filter 12 dB/oct
+            3 = 3rd order filter 18 dB/oct
+            4 = 4th order filter 24 dB/oct
+            5 = 5th order filter 30 dB/oct
+            6 = 6th order filter 36 dB/oct
+            7 = 7th order filter 42 dB/oct
+            8 = 8th order filter 48 dB/oct
+        harmonic: Multiplies the demodulator's reference frequency by an integer
+            factor. If the demodulator is used as a phase detector in external
+            reference mode (PLL), the effect is that the internal oscillator
+            locks to the external frequency divided by the integer factor.
+        oscselect: Connects the demodulator with the supplied oscillator.
+            Number of available oscillators depends on the installed options.
+            Is a number between 0 and the number of oscillators -1.
+        phaseadjust: Adjust the demodulator phase automatically in order to read 0 degrees.
+        phaseshift: Phase shift applied to the reference input of the demodulator.
+            The value is clipped by the device to -180 .. +180 degrees.
+        timeconstant: Sets the integration time constant or in other words, the
+            cutoff frequency of the demodulator low pass filter.
+        sinc: Enables the sinc filter. When the filter bandwidth is comparable
+            to or larger than the demodulation frequency, the demodulator output
+            may contain frequency components at the frequency of demodulation
+            and its higher harmonics. The sinc is an additional filter that
+            attenuates these unwanted components in the demodulator output.
+            Possible values are: 'ON', 'OFF'.
+        signalinput: Selects the input signal for the demodulator. Possible
+            values: 'Sig In 1', 'Curr In 1', 'Trigger 1', 'Trigger 2', 'Aux Out 1',
+            'Aux Out 2', 'Aux Out 3', 'Aux Out 4', 'Aux In 1', 'Aux In 2',
+            'Constant input'.
+        x: (ReadOnly) get sample of x coordinate. See note below.
+        y: (ReadOnly) get sample of y coordinate. See note below.
+        R: (ReadOnly) get sample of absolute value of x+y*i. See note below.
+        phi: (ReadOnly) get sample of angle of x+y*i. See note below.
+        cfgTimeout: stores the used timeout in seconds for the readings of
+            sample data (default 0.07). The valid range is from 0 to 1 second.
+    Parameters accessible only by the first channel or with MD option on all channels:
+        samplerate: Defines the demodulator sampling rate, the number of samples
+            that are sent to the host computer per second. A rate of about 7-10
+            higher as compared to the filter bandwidth usually provides sufficient
+            aliasing suppression. This is also the rate of data received by LabOne
+            Data Server and saved to the computer hard disk. This setting has no
+            impact on the sample rate on the auxiliary outputs connectors.
+            Note: the value inserted by the user may be approximated to the
+            nearest value supported by the instrument.
+        sample: (ReadOnly) Returns a dict with streamed demodulator samples with
+            sample interval defined by the demodulator data rate. See note below.
+            The dict contains the following entries:
+                'timestamp' = array of uint64 with the internal timestamp of the
+                        measurement. Divide this by zidev.clockbase to get the
+                        real time in seconds.
+                'x' = array of double with the x part of the demodulated cartesian coordinates
+                'y' = array of double with the y part of the demodulated cartesian coordinates
+                'frequency' = array of double with the current frequency of the oscillator
+                'phase' = array of double with the angle of the demodulator polar coordinates
+                'dio' = array of uint32 with the values of the digital inputs
+                'trigger' = array of uint32 (TODO)
+                'auxin0' = array of double with the voltage of the first auxiliary input
+                'auxin1' = array of double with the voltage of the second auxiliary input
+                'R' = array of double with the calculated radius of the demodulated
+                        polar coordinates, see note below.
+                'phi' = array of double with the calculated angle of the demodulated
+                        polar coordinates, see note below.
+                Note: The values of x and y are inside the sample dict, the values
+                of R and phi are calculated. To have all values at the same measurement
+                timestamp, the driver asks the device only if the last sample request
+                is more than the cfgTimeout seconds ago.
+        streaming: Enables the data acquisition for the corresponding demodulator.
+            Possible values are: `ON', `OFF'.
+        trigger: Selects the acquisition mode (i.e. triggering) or the demodulator.
+            The possible values are:
+                'Continuous' = demodulator data is continuously streamed to the host computer
+                'Trigger in 1 Rise' = rising edge triggered
+                'Trigger in 1 Fall' = falling edge triggered
+                'Trigger in 1 Both' = triggering on both rising and falling edge
+                'Trigger in 2 Rise' = rising edge triggered
+                'Trigger in 2 Fall' = falling edge triggered
+                'Trigger in 2 Both' = triggering on both rising and falling edge
+                'Trigger in 1$\mid$2 Rise' = rising edge triggered on either input
+                'Trigger in 1$\mid$2 Fall' = falling edge triggered on either input
+                'Trigger in 1$\mid$2 Both' = triggering on both rising and falling
+                        edge or either trigger input
+                'Trigger in 1 Low' = demodulator data is streamed to the host
+                        computer when the level is low (TTL)
+                'Trigger in 1 High' = demodulator data is streamed to the host
+                        computer when the level is high (TTL)
+                'Trigger in 2 Low' = demodulator data is streamed to the host
+                        computer when the level is low (TTL)
+                'Trigger in 2 High' = demodulator data is streamed to the host
+                        computer when the level is high (TTL)
+                'Trigger in 1$\mid$2 Low' = demodulator data is streamed to the
+                        host computer when either level is low (TTL)
+                'Trigger in 1$\mid$2 High' = demodulator data is streamed to the
+                        host computer when either level is high (TTL)
     """
     
     def __init__(self, parent: 'ZIMFLI', name: str, channum: int) -> None:
@@ -296,28 +376,46 @@ class DemodulatorChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'bypass'),
                            set_cmd=partial(self._parent._setter, 'demods', 
                                            channum-1, Mode.INT, 'bypass'),
-                           vals=vals.Ints() )
+                           vals=vals.Ints(),
+                           docstring="Allows to bypass the demodulator low-pass"
+                                     " filter, thus increasing the bandwidth.")
         self.add_parameter('frequency',
                            label='frequency for demodulation',
                            unit='Hz',
                            get_cmd=partial(self._parent._getter, 'demods',
                                            channum-1, Mode.DOUBLE, 'freq'),
-                           set_cmd=False)
+                           set_cmd=False,
+                           docstring="(ReadOnly) Indicates the frequency used for"
+                                     " demodulation and for output generation."
+                                     " The demodulation frequency is calculated with"
+                                     " oscillator frequency times the harmonic factor."
+                                     " When the MOD option is used, linear combinations"
+                                     " of oscillator frequencies including the harmonic"
+                                     " factors define the demodulation frequencies."
+                           )
         self.add_parameter('order',
                            label='Filter order',
                            get_cmd=partial(self._parent._getter, 'demods',
                                            channum-1, Mode.INT, 'order'),
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, Mode.INT, 'order'),
-                           vals=vals.Ints(1, 8) )
+                           vals=vals.Ints(1, 8),
+                           docstring="Selects the filter roll off: <val>*6 dB/oct")
         self.add_parameter('harmonic',
                            label=('Reference frequency multiplication factor'),
                            get_cmd=partial(self._parent._getter, 'demods',
                                            channum-1, Mode.DOUBLE, 'harmonic'),
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, Mode.DOUBLE, 'harmonic'),
-                           vals=vals.Ints(1, 999) # same range as input field in web
-                           )
+                           vals=vals.Ints(1, 999), # same range as input field in web
+                           docstring="Multiplies the demodulator's reference frequency"
+                                     " by an integer factor. If the demodulator is"
+                                     " used as a phase detector in external reference"
+                                     " mode (PLL), the effect is that the internal"
+                                     " oscillator locks to the external frequency"
+                                     " divided by the integer factor.")
+        oscsel_doc = "Connects the demodulator with the supplied oscillator. Number" \
+                     " of available oscillators depends on the installed options."
         if self._parent.no_oscs == 1:
             # The validator checks the range min <= val <= max and cannot be
             # initialized with min==max. So, if there is only one oscillator,
@@ -328,6 +426,7 @@ class DemodulatorChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'oscselect'),
                            set_cmd=partial(self._setter, 'demods',
                                            channum-1, Mode.INT, 'oscselect'),
+                           docstring=oscsel_doc
                            )
         else:
             self.add_parameter('oscselect',
@@ -336,7 +435,9 @@ class DemodulatorChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'oscselect'),
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, Mode.INT, 'oscselect'),
-                           vals=vals.Ints(0, self._parent.no_oscs-1) )
+                           vals=vals.Ints(0, self._parent.no_oscs-1),
+                           docstring=oscsel_doc
+                           )
                            
         self.add_parameter('phaseadjust',
                            label='Phase adjustment',
@@ -344,7 +445,10 @@ class DemodulatorChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'phaseadjust'),
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, Mode.INT, 'phaseadjust'),
-                           vals=vals.Ints() )
+                           vals=vals.Ints(),
+                           docstring="Adjust the demodulator phase automatically"
+                                     " in order to read 0 degrees."
+                           )
         self.add_parameter('phaseshift',
                            label='Phase shift',
                            unit='degrees',
@@ -353,7 +457,10 @@ class DemodulatorChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, Mode.DOUBLE, 'phaseshift'),
                            vals=vals.Numbers(),
-                           docstring="Value is clipped to -180 .. +180°" )
+                           docstring="Phase shift applied to the reference input"
+                                     " of the demodulator. The value is clipped by"
+                                     " the device to -180 .. +180 degrees."
+                           )
         self.add_parameter('timeconstant',
                            label='Filter time constant',
                            get_cmd=partial(self._parent._getter, 'demods',
@@ -361,27 +468,58 @@ class DemodulatorChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, Mode.DOUBLE, 'timeconstant'),
                            unit='s',
-                           vals=vals.Numbers() )
-        self.add_parameter('samplerate',
-                           label='Sampling rate',
-                           get_cmd=partial(self._parent._getter, 'demods',
-                                           channum-1, Mode.DOUBLE, 'rate'),
-                           set_cmd=partial(self._parent._setter, 'demods',
-                                           channum-1, Mode.DOUBLE, 'rate'),
-                           unit='1/s',
                            vals=vals.Numbers(),
-                           docstring="""
-                                     Note: the value inserted by the user may
-                                     be approximated to the nearest value
-                                     supported by the instrument.
-                                     """)
-        if channum == 1:
+                           docstring="Sets the integration time constant or in other"
+                                     " words, the cutoff frequency of the demodulator"
+                                     " low pass filter."
+                           )
+        if channum == 1 or 'MD' in self._parent.options:
+            self.add_parameter('samplerate',
+                               label='Sampling rate',
+                               get_cmd=partial(self._parent._getter, 'demods',
+                                               channum-1, Mode.DOUBLE, 'rate'),
+                               set_cmd=partial(self._parent._setter, 'demods',
+                                               channum-1, Mode.DOUBLE, 'rate'),
+                               unit='1/s',
+                               vals=vals.Numbers(),
+                               docstring="""
+                               Defines the demodulator sampling rate, the number of samples
+                               that are sent to the host computer per second. A rate of about 7-10
+                               higher as compared to the filter bandwidth usually provides sufficient
+                               aliasing suppression. This is also the rate of data received by LabOne
+                               Data Server and saved to the computer hard disk. This setting has no
+                               impact on the sample rate on the auxiliary outputs connectors.
+                               Note: the value inserted by the user may be approximated to the
+                               nearest value supported by the instrument.
+                                         """
+                               )
             self.add_parameter('sample',
                                label='Sample',
                                get_cmd=partial(self._parent._getter, 'demods',
                                                channum-1, Mode.SAMPLE, 'sample'),
                                set_cmd=False,
-                               snapshot_value=False )
+                               snapshot_value=False,
+                               docstring="""
+                               (ReadOnly) Returns a dict with streamed demodulator samples with
+                               sample interval defined by the demodulator data rate. See note below.
+                               The dict contains the following entries:
+                                'timestamp' = array of uint64 with the internal timestamp of the measurement. Divide this by zidev.clockbase to get the real time in seconds.
+                                'x' = array of double with the x part of the demodulated cartesian coordinates
+                                'y' = array of double with the y part of the demodulated cartesian coordinates
+                                'frequency' = array of double with the current frequency of the oscillator
+                                'phase' = array of double with the angle of the demodulator polar coordinates
+                                'dio' = array of uint32 with the values of the digital inputs
+                                'trigger' = array of uint32 (TODO)
+                                'auxin0' = array of double with the voltage of the first auxiliary input
+                                'auxin1' = array of double with the voltage of the second auxiliary input
+                                'R' = array of double with the calculated radius of the demodulated polar coordinates, see note below.
+                                'phi' = array of double with the calculated angle of the demodulated polar coordinates, see note below.
+                               Note: The values of x and y are inside the sample dict, the values
+                               of R and phi are calculated. To have all values at the same measurement
+                               timestamp, the driver asks the device only if the last sample request
+                               is more than the cfgTimeout seconds ago.
+                               """ )
+
         self.add_parameter('sinc',
                            label='Sinc filter',
                            get_cmd=partial(self._parent._getter, 'demods',
@@ -389,7 +527,15 @@ class DemodulatorChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, Mode.INT, 'sinc'),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF') )
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="""
+                           Enables the sinc filter. When the filter bandwidth is comparable
+                           to or larger than the demodulation frequency, the demodulator output
+                           may contain frequency components at the frequency of demodulation
+                           and its higher harmonics. The sinc is an additional filter that
+                           attenuates these unwanted components in the demodulator output.
+                           Possible values are: 'ON', 'OFF'.
+                           """ )
         # val_mapping for the demodX_signalin parameter
         dmsigins = {'Sig In 1': 0,
                     'Curr In 1': 1,
@@ -408,7 +554,8 @@ class DemodulatorChannel(InstrumentChannel):
                                            channum-1, Mode.INT,'adcselect'),
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, Mode.INT, 'adcselect'),
-                           val_mapping=dmsigins)
+                           val_mapping=dmsigins,
+                           docstring="Selects the input signal for the demodulator.")
         self.add_parameter('streaming',
                            label='Data streaming',
                            get_cmd=partial(self._parent._getter, 'demods',
@@ -416,7 +563,9 @@ class DemodulatorChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, Mode.INT, 'enable'),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF') )
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Enables the data acquisition for the corresponding"
+                                     " demodulator. Possible values are: `ON', `OFF'." )
         dmtrigs = {'Continuous': 0,            #demodulator data is continuously streamed 
                                                #to the host computer.
                    'Trigger in 1 Rise': 1,     #rising edge triggered.
@@ -448,7 +597,28 @@ class DemodulatorChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'trigger'),
                            set_cmd=partial(self._parent._setter, 'demods',
                                            channum-1, Mode.INT, 'trigger'),
-                           val_mapping=dmtrigs)
+                           val_mapping=dmtrigs,
+                           docstring="""
+                           trigger: Selects the acquisition mode (i.e. triggering) or the demodulator.
+                           The possible values are:
+                             'Continuous' = demodulator data is continuously streamed to the host computer
+                             'Trigger in 1 Rise' = rising edge triggered
+                             'Trigger in 1 Fall' = falling edge triggered
+                             'Trigger in 1 Both' = triggering on both rising and falling edge
+                             'Trigger in 2 Rise' = rising edge triggered
+                             'Trigger in 2 Fall' = falling edge triggered
+                             'Trigger in 2 Both' = triggering on both rising and falling edge
+                             'Trigger in 1|2 Rise' = rising edge triggered on either input
+                             'Trigger in 1|2 Fall' = falling edge triggered on either input
+                             'Trigger in 1|2 Both' = triggering on both rising and falling edge or either trigger input
+                             'Trigger in 1 Low' = demodulator data is streamed to the host computer when the level is low (TTL)
+                             'Trigger in 1 High' = demodulator data is streamed to the host computer when the level is high (TTL)
+                             'Trigger in 2 Low' = demodulator data is streamed to the host computer when the level is low (TTL)
+                             'Trigger in 2 High' = demodulator data is streamed to the host computer when the level is high (TTL)
+                             'Trigger in 1|2 Low' = demodulator data is streamed to the host computer when either level is low (TTL)
+                             'Trigger in 1|2 High' = demodulator data is streamed to the host computer when either level is high (TTL)
+                             """
+                             )
         if channum == 1:
             for demod_param in ['x', 'y', 'R', 'phi']:
                 if demod_param in ('x', 'y', 'R'):
@@ -461,25 +631,38 @@ class DemodulatorChannel(InstrumentChannel):
                                                    channum - 1, demod_param),
                                    set_cmd=False, 
                                    snapshot_value=False,
-                                   unit=unit)
+                                   unit=unit,
+                                   docstring="For description see 'sample'" )
         self.add_parameter('cfgTimeout',
                            label='Timeout for sample request',
                            get_cmd=partial(self._getTimeout),
                            set_cmd=partial(self._setTimeout),
-                           vals=vals.Numbers(0.0, 1.0) )
+                           vals=vals.Numbers(0.0, 1.0),
+                           docstring="stores the used timeout in seconds for the"
+                                     " readings of sample data (default 0.07)."
+                                     " The valid range is from 0 to 1 second." )
 
+    @property
+    def _instrument(self):
+        return self._parent
+    
     def _get_sample(self, number: int, demod_param: str) -> float:
-        log.debug("getting demod %s param %s", number, demod_param)
+        """
+        Getter function for all sample parameters (x, y, R, phi). It calls
+        the getter method of the parent.
+        """
+        #log.debug("getting demod %s param %s", number, demod_param)
         mode = Mode.SAMPLE
         module = 'demods'
         setting = 'sample'
-        #not really needed, because we don't add an invalid parameter
+        # not really needed, because we don't add an invalid parameter
         if demod_param not in ['x', 'y', 'R', 'phi']:   
             raise RuntimeError("Invalid demodulator parameter")
         if (self.datadict is None) or (time.time() - self._parent.lastSampleSecs >= self.configTimeout):
             self.datadict = self._parent._getter(module, number, mode, setting)
-        self.datadict['R'] = np.abs(self.datadict['x'] + 1j * self.datadict['y'])
-        self.datadict['phi'] = np.angle(self.datadict['x'] + 1j * self.datadict['y'], deg=True)
+        # The following calculations are done in the parent getter.
+        #self.datadict['R'] = np.abs(self.datadict['x'] + 1j * self.datadict['y'])
+        #self.datadict['phi'] = np.angle(self.datadict['x'] + 1j * self.datadict['y'], deg=True)
         return self.datadict[demod_param]
 
     def _getTimeout(self) -> float:
@@ -513,33 +696,35 @@ class DemodulatorChannel(InstrumentChannel):
             self._parent.daq.setDouble(setstr, value)
 
 
-class SignalInputChannel(InstrumentChannel):
+class SignalInputChannel(InstrumentChannel): # doc done ***********************
     """
-    Combines all the Parameters from the parent concerning the signal input
-    Parameters: 
-            autorange: Automatic adjustment of the Range to about two times the maximum 
-                signal input amplitude measured over about 100 ms.
-            range: Defines the gain of the analog input amplifier. The range should 
-                exceed the incoming signal by roughly a factor two including a 
-                potential DC offset. The instrument selects the next higher available
-                range relative to a value inserted by the user. A suitable choice of
-                this setting optimizes the accuracy and signal-to-noise ratio by 
-                ensuring that the full dynamic range of the input ADC is used.
-            float: Switches the input between floating (ON) and connected to ground (OFF). 
-                This setting applies both to the voltage and the current input. It
-                is recommended to discharge the test device before connecting or to
-                enable this setting only after the signal source has been connected
-                to the Signal Input in grounded mode.
-            scaling: Applies the given scaling factor to the input signal.
-            ac: Defines the input coupling for the Signal Inputs. 
-                AC coupling inserts a high-pass filter. OFF means DC ccoupling
-            impedance: Switches between 50 Ohm (ON) and 10 M Ohm (OFF).
-            diff: Switches between single ended (OFF) and differential (ON) measurements.
-            max: Indicates the maximum measured value at the input.
-            min: Indicates the minimum measured value at the input.
-            on: Enables the signal input.
-            trigger: Switches to the next appropriate input range such that the range 
-                fits best with the measured input signal amplitude.
+    The Lock-In-Amplifier has one voltage sensitive input channel.
+    Parameters:
+        autorange: Automatic adjustment of the Range to about two times the
+            maximum signal input amplitude measured over about 100 ms.
+        range: Defines the gain of the analog input amplifier. The range should
+            exceed the incoming signal by roughly a factor two including a
+            potential DC offset. The instrument selects the next higher available
+            range relative to a value inserted by the user. A suitable choice of
+            this setting optimizes the accuracy and signal-to-noise ratio by
+            ensuring that the full dynamic range of the input ADC is used.
+        float: Switches the input between floating ('ON') and connected to
+            ground ('OFF'). This setting applies both to the voltage and the
+            current input. It is recommended to discharge the test device
+            before connecting or to enable this setting only after the signal
+            source has been connected to the Signal Input in grounded mode.
+        scaling: Applies the given scaling factor to the input signal.
+        ac: Defines the input coupling for the Signal Inputs. AC coupling
+            ('ON') inserts a high-pass filter. 'OFF' means DC ccoupling.
+        impedance: Switches the input impedance between 50 Ohm ('ON') and
+            10 M Ohm ('OFF').
+        diff: Switches between single ended ('OFF', use only +V input) and
+            differential ('ON', use both +V and -V inputs) measurements.
+        max: Indicates the maximum measured value at the input.
+        min: Indicates the minimum measured value at the input.
+        on: Enables the signal input.
+        trigger: Switches to the next appropriate input range such that the
+            range fits best with the measured input signal amplitude.
     """
     
     def __init__(self, parent: 'ZIMFLI', name: str, channum) -> None:
@@ -558,7 +743,10 @@ class SignalInputChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'autorange'),
                            set_cmd=partial(self._parent._setter, 'sigins',
                                            channum-1, Mode.INT, 'autorange'),
-                           vals=vals.Ints() )
+                           vals=vals.Ints(),
+                           docstring="Automatic adjustment of the Range to about"
+                                     " two times the maximum signal input amplitude"
+                                     " measured over about 100 ms." )
         self.add_parameter('range',
                            label='Input range',
                            set_cmd=partial(self._parent._setter, 'sigins',
@@ -566,7 +754,16 @@ class SignalInputChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'sigins',
                                            channum-1, Mode.DOUBLE, 'range'),
                            unit='V',
-                           vals=vals.Numbers() )
+                           vals=vals.Numbers(),
+                           docstring="Defines the gain of the analog input amplifier."
+                                     " The range should exceed the incoming signal by"
+                                     " roughly a factor two including a potential DC"
+                                     " offset. The instrument selects the next higher"
+                                     " available range relative to a value inserted by"
+                                     " the user. A suitable choice of this setting"
+                                     " optimizes the accuracy and signal-to-noise ratio"
+                                     " by ensuring that the full dynamic range of the"
+                                     " input ADC is used." )
         self.add_parameter('float',
                            label='floating',
                            get_cmd=partial(self._parent._getter, 'sigins', 
@@ -574,14 +771,22 @@ class SignalInputChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'sigins', 
                                            channum-1, Mode.INT, 'float'),
                            val_mapping={'OFF': 0, 'ON': 1},
-                           vals=vals.Enum('OFF', 'ON') )
+                           vals=vals.Enum('OFF', 'ON'),
+                           docstring="Switches the input between floating ('ON')"
+                                     " and connected to ground ('OFF'). This setting"
+                                     " applies both to the voltage and the current"
+                                     " input. It is recommended to discharge the test"
+                                     " device before connecting or to enable this"
+                                     " setting only after the signal source has been"
+                                     " connected to the Signal Input in grounded mode.")
         self.add_parameter('scaling',
                            label='Input scaling',
                            set_cmd=partial(self._parent._setter, 'sigins',
                                            channum-1, Mode.DOUBLE, 'scaling'),
                            get_cmd=partial(self._parent._getter, 'sigins',
                                            channum-1, Mode.DOUBLE, 'scaling'),
-                           vals=vals.Numbers() )
+                           vals=vals.Numbers(),
+                           docstring="Applies the given scaling factor to the input signal.")
         self.add_parameter('ac',
                            label='AC coupling',
                            set_cmd=partial(self._parent._setter,'sigins',
@@ -589,7 +794,10 @@ class SignalInputChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'sigins',
                                            channum-1, Mode.INT, 'ac'),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF') )
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Defines the input coupling for the Signal Inputs."
+                                     " AC coupling ('ON') inserts a high-pass filter."
+                                     " 'OFF' means DC ccoupling.")
         self.add_parameter('impedance',
                            label='Input impedance',
                            set_cmd=partial(self._parent._setter, 'sigins',
@@ -597,7 +805,9 @@ class SignalInputChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'sigins',
                                            channum-1, Mode.INT, 'imp50'),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF') )
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Switches the input impedance between 50 Ohm"
+                                     " ('ON') and 10 M Ohm ('OFF').")
         self.add_parameter('diff',
                            label='Differential measurements',
                            set_cmd=partial(self._parent._setter, 'sigins',
@@ -605,7 +815,10 @@ class SignalInputChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'sigins',
                                            channum-1, Mode.INT, 'diff'),
                            val_mapping={'OFF': 0, 'ON': 1},
-                           vals=vals.Enum('OFF', 'ON') )
+                           vals=vals.Enum('OFF', 'ON'),
+                           docstring="Switches between single ended ('OFF', use only"
+                                     " +V input) and differential ('ON', use both +V"
+                                     " and -V inputs) measurements.")
         self.add_parameter('max',
                            label='maximum measured value',
                            get_cmd=partial(self._parent._getter, 'sigins',
@@ -613,7 +826,8 @@ class SignalInputChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'sigins',
                                            channum-1, Mode.DOUBLE, 'max'),
                            unit='V',
-                           vals=vals.Numbers() )
+                           vals=vals.Numbers(),
+                           docstring="Indicates the maximum measured value at the input.")
         self.add_parameter('min',
                            label='minimum measured value',
                            get_cmd=partial(self._parent._getter, 'sigins',
@@ -621,47 +835,52 @@ class SignalInputChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'sigins',
                                            channum-1, Mode.DOUBLE, 'min'),
                            unit='V',
-                           vals=vals.Numbers() )
+                           vals=vals.Numbers(),
+                           docstring="Indicates the minimum measured value at the input.")
         self.add_parameter('on',
                            label='Enable signal input',
                            get_cmd=partial(self._parent._getter, 'sigins',
                                            channum-1, Mode.INT, 'on'),
                            set_cmd=partial(self._parent._setter, 'sigins',
                                            channum-1, Mode.INT, 'on'),
-                           vals=vals.Ints() )
+                           vals=vals.Ints(),
+                           docstring="Enables the signal input.")
         self.add_parameter('trigger',
                            label='Trigger',
                            get_cmd=partial(self._parent._getter, 'sigins',
                                            channum-1, Mode.INT, 'rangestep/trigger'),
                            set_cmd=partial(self._parent._setter, 'sigins',
                                            channum-1, Mode.INT, 'rangestep/trigger'),
-                           vals=vals.Ints() )
+                           vals=vals.Ints(),
+                           docstring="Switches to the next appropriate input range"
+                                     " such that the range fits best with the"
+                                     " measured input signal amplitude.")
 
 
 
-class CurrentInputChannel(InstrumentChannel):
+class CurrentInputChannel(InstrumentChannel): # doc done **********************
     """
-    Combines all the Parameters from the parent concerning the current input
-    Parameters: 
-            autorange: Automatic adjustment of the Range to about two times the maximum 
-                signal input amplitude measured over about 100 ms.
-            range: Defines the gain of the analog input amplifier. The range should 
-                exceed the incoming signal by roughly a factor two including a 
-                potential DC offset. The instrument selects the next higher available
-                range relative to a value inserted by the user. A suitable choice of
-                this setting optimizes the accuracy and signal-to-noise ratio by 
-                ensuring that the full dynamic range of the input ADC is used.
-            float: Switches the input between floating (ON) and connected to ground (OFF). 
-                This setting applies both to the voltage and the current input. It
-                is recommended to discharge the test device before connecting or to
-                enable this setting only after the signal source has been connected
-                to the Signal Input in grounded mode.
-            scaling: Applies the given scaling factor to the input signal.
-            max: Indicates the maximum measured value at the input.
-            min: Indicates the minimum measured value at the input.
-            on: Enables the signal input.
-            trigger: Switches to the next appropriate input range such that the range 
-                fits best with the measured input signal amplitude.
+    The device has one current sensitive input channel.
+    Parameters:
+        autorange: Automatic adjustment of the Range to about two times the maximum
+            signal input amplitude measured over about 100 ms.
+        range: Defines the gain of the analog input amplifier. The range should
+            exceed the incoming signal by roughly a factor two including a potential
+            DC offset. The instrument selects the next higher available range relative
+            to a value inserted by the user. A suitable choice of this setting optimizes
+            the accuracy and signal-to-noise ratio by ensuring that the full dynamic
+            range of the input ADC is used.
+        float: Switches the input between floating ('ON') and connected to ground
+            ('OFF'). This setting applies both to the voltage and the current
+            input. It is recommended to discharge the test device before connecting
+            or to enable this setting only after the signal source has been connected
+            to the Signal Input in grounded mode.
+        scaling: Applies the given scaling factor to the input signal.
+        max: Indicates the maximum measured value at the input.
+        min: Indicates the minimum measured value at the input.
+        on: Enables the signal input.
+        trigger: Switches to the next appropriate input range such that the range
+            fits best with the measured input signal amplitude.
     """
     
     def __init__(self, parent: 'ZIMFLI', name: str, channum) -> None:
@@ -680,7 +899,10 @@ class CurrentInputChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'autorange'),
                            set_cmd=partial(self._parent._setter, 'currins',
                                            channum-1, Mode.INT, 'autorange'),
-                           vals=vals.Ints() )
+                           vals=vals.Ints(),
+                           docstring="Automatic adjustment of the Range to about"
+                                     " two times the maximum signal input amplitude"
+                                     " measured over about 100 ms.")
         self.add_parameter('range',
                            label='Input range',
                            set_cmd=partial(self._parent._setter, 'currins',
@@ -688,7 +910,16 @@ class CurrentInputChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'currins',
                                            channum-1, Mode.DOUBLE, 'range'),
                            unit='V',
-                           vals=vals.Numbers() )
+                           vals=vals.Numbers(),
+                           docstring="Defines the gain of the analog input amplifier."
+                                     " The range should exceed the incoming signal by"
+                                     " roughly a factor two including a potential DC"
+                                     " offset. The instrument selects the next higher"
+                                     " available range relative to a value inserted by"
+                                     " the user. A suitable choice of this setting"
+                                     " optimizes the accuracy and signal-to-noise"
+                                     " ratio by ensuring that the full dynamic range"
+                                     " of the input ADC is used.")
         self.add_parameter('float',
                            label='floating',
                            get_cmd=partial(self._parent._getter, 'currins', 
@@ -696,14 +927,22 @@ class CurrentInputChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'currins', 
                                            channum-1, Mode.INT, 'float'),
                            val_mapping={'OFF': 0, 'ON': 1},
-                           vals=vals.Enum('OFF', 'ON') )
+                           vals=vals.Enum('OFF', 'ON'),
+                           docstring="Switches the input between floating ('ON') and"
+                                     " connected to ground ('OFF'). This setting applies"
+                                     " both to the voltage and the current input. It is"
+                                     " recommended to discharge the test device before"
+                                     " connecting or to enable this setting only after"
+                                     " the signal source has been connected to the Signal"
+                                     " Input in grounded mode.")
         self.add_parameter('scaling',
                            label='Input scaling',
                            set_cmd=partial(self._parent._setter, 'currins',
                                            channum-1, Mode.DOUBLE, 'scaling'),
                            get_cmd=partial(self._parent._getter, 'currins',
                                            channum-1, Mode.DOUBLE, 'scaling'),
-                           vals=vals.Numbers() )
+                           vals=vals.Numbers(),
+                           docstring="Applies the given scaling factor to the input signal.")
         self.add_parameter('max',
                            label='maximum measured value',
                            get_cmd=partial(self._parent._getter, 'currins',
@@ -711,7 +950,8 @@ class CurrentInputChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'currins',
                                            channum-1, Mode.DOUBLE, 'max'),
                            unit='V',
-                           vals=vals.Numbers() )
+                           vals=vals.Numbers(),
+                           docstring="Indicates the maximum measured value at the input.")
         self.add_parameter('min',
                            label='minimum measured value',
                            get_cmd=partial(self._parent._getter, 'currins',
@@ -719,175 +959,190 @@ class CurrentInputChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'currins',
                                            channum-1, Mode.DOUBLE, 'min'),
                            unit='V',
-                           vals=vals.Numbers() )
+                           vals=vals.Numbers(),
+                           docstring="Indicates the minimum measured value at the input.")
         self.add_parameter('on',
                            label='Enable signal input',
                            get_cmd=partial(self._parent._getter, 'currins',
                                            channum-1, Mode.INT, 'on'),
                            set_cmd=partial(self._parent._setter, 'currins',
                                            channum-1, Mode.INT, 'on'),
-                           vals=vals.Ints() )
+                           vals=vals.Ints(),
+                           docstring="Enables the signal input.")
         self.add_parameter('trigger',
                            label='Trigger',
                            get_cmd=partial(self._parent._getter, 'currins',
                                            channum-1, Mode.INT, 'rangestep/trigger'),
                            set_cmd=partial(self._parent._setter, 'currins',
                                            channum-1, Mode.INT, 'rangestep/trigger'),
-                           vals=vals.Ints() )
-                           
-                           
-class SignalOutputChannel(InstrumentChannel):
+                           vals=vals.Ints(),
+                           docstring="Switches to the next appropriate input range"
+                                     " such that the range fits best with the measured"
+                                     " input signal amplitude.")
+
+
+class SignalOutputChannel(InstrumentChannel): # doc done **********************
     """
-    Combines all the parameters concerning the signal output
+    The device has one signal output channel.
     Parameters:
-            add: The signal supplied to the Aux Input 1 is added to the signal 
-                output. For differential output the added signal is a common mode 
-                offset.
-            autorange: If enabled, selects the most suited output range automatically.
-            differential: Switch between single-ended output (OFF) and differential 
-                output (ON). In differential mode the signal swing is defined between 
-                Signal Output +V / -V.
-            imp50: Select the load impedance between 50 Ohm(ON) and HiZ(OFF). 
-                The impedance of the output is always 50 Ohm. For a load impedance
-                of 50 Ohm the displayed voltage is half the output voltage to 
-                reflect the voltage seen at the load.
-            offset: Defines the DC voltage that is added to the dynamic part of 
-                the output signal.
-            on: Enabling/Disabling the Signal Output. Corresponds to the blue 
-                LED indicator on the instrument front panel.
-            overloaded: Indicates that the signal output is overloaded.
-            range: Sets the output voltage range. Available ranges are 0.075, 0.15,
-                0.75 and 1.5
-            amplitude: Sets the peak amplitude that the oscillator assigned to 
-                the given demodulation channel contributes to the signal output.
-                Should be given as Vpk value
-                TODO To the channum a certain amplitude number is given in 
-                outputamps, should it stay like that?
-            ampdef: the unit for the amplitude Vpk, Vrms or dBm, default is Vpk
-            enable: Enables individual output signal amplitude. When the MD 
-                option is used, it is possible to generate signals being the 
-                linear combination of the available demodulator frequencies.
-                TODO To the channum a certain amplitude number is given in 
-                outputampenable, should it stay like that?
+        add: The signal supplied to the Aux Input 1 is added to the signal output.
+            For differential output the added signal is a common mode offset.
+            The allowed values are 'ON' and 'OFF'.
+        autorange: If enabled, selects the most suited output range automatically.
+            Allowed values are `ON' and `OFF'.
+        differential: Switch between single-ended output ('OFF') and differential
+            output ('ON'). In differential mode the signal swing is defined between
+            Signal Output +V and -V.
+        imp50: Select the load impedance between 50 Ohm ('ON') and HiZ ('OFF').
+            The impedance of the output is always 50 Ohm. For a load impedance
+            of 50 Ohm the displayed voltage is half the output voltage to reflect
+            the voltage seen at the load.
+        offset: Defines the DC voltage that is added to the dynamic part of the
+            output signal. Currently this value is only valid for the driver in
+            the range from -1.5V to +1.5V.
+        on: Enabling/Disabling the Signal Output. Corresponds to the blue LED
+            indicator on the instrument front panel. The allowed values are
+            'ON' and 'OFF'.
+        overloaded: (ReadOnly) Indicates that the signal output is overloaded.
+        range: Sets the output voltage range. Currently this value is only valid
+            for the driver in the range from 0.001 to 3.0. The device will select
+            the next higher available range automatically.
+        amplitude: Sets the peak amplitude that the oscillator assigned to the
+            given demodulation channel contributes to the signal output. Should
+            be given as Vpk value.
+        ampdef: Internal storage for the used unit for the amplitude. Possible
+            values are `Vpk', `Vrms' or `dBm', default is `Vpk'.
+        enable: Enables individual output signal amplitude. The allowed values
+            are 'ON' and 'OFF'. When the MD option is installed, it is possible
+            to generate signals being the linear combination of the available
+            demodulator frequencies.
     """
     def __init__(self, parent: 'ZIMFLI', name: str, channum: int) -> None:
         super().__init__(parent, name)
-        
-        self.channum = channum-1
-        
-        outputamps = {1: 'amplitudes/1', 2: 'amplitudes/2'}
-        outputampenable = {1: 'enables/1', 2: 'enables/2'}
-        
-        self.add_parameter('add',
-                           label='add signal from aux input',
-                           set_cmd=partial(self._setter,
-                                           Mode.INT, 'add'),
-                           get_cmd=partial(self._getter,
-                                           channum-1, Mode.INT, 'add'),
-                           val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF') )
 
+        # store the channelnumber internally but zero-based
+        self.channum = channum-1
+
+        self.add_parameter('add',
+                           label='add signal from aux1 input',
+                           set_cmd=partial(self._setter, Mode.INT, 'add'),
+                           get_cmd=partial(self._getter, Mode.INT, 'add'),
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="The signal supplied to the Aux Input 1 is added"
+                                     " to the signal output. For differential output"
+                                     " the added signal is a common mode offset. The"
+                                     " allowed values are 'ON' and 'OFF'.")
         self.add_parameter('autorange',
                            label='Enable signal output range.',
-                           set_cmd=partial(self._setter,
-                                           Mode.INT, 'autorange'),
-                           get_cmd=partial(self._getter,
-                                           channum-1, Mode.INT, 'autorange'),
+                           set_cmd=partial(self._setter, Mode.INT, 'autorange'),
+                           get_cmd=partial(self._getter, Mode.INT, 'autorange'),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF') )
-                            
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="If enabled, selects the most suited output"
+                                     " range automatically. Allowed values are"
+                                     " `ON' and `OFF'.")
         self.add_parameter('differential',
                            label='single-ended(OFF) or differential(ON) output',
-                           set_cmd=partial(self._setter,
-                                           Mode.INT, 'diff'),
-                           get_cmd=partial(self._getter,
-                                           channum-1, Mode.INT, 'diff'),
+                           set_cmd=partial(self._setter, Mode.INT, 'diff'),
+                           get_cmd=partial(self._getter, Mode.INT, 'diff'),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF') )
-
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Switch between single-ended output ('OFF')"
+                                     " and differential output ('ON'). In differential"
+                                     " mode the signal swing is defined between"
+                                     " Signal Output +V and -V.")
         self.add_parameter('imp50',
                            label='Switch to turn on 50 Ohm impedance',
-                           set_cmd=partial(self._setter,
-                                           Mode.INT, 'imp50'),
-                           get_cmd=partial(self._getter,
-                                           channum-1, Mode.INT, 'imp50'),
+                           set_cmd=partial(self._setter, Mode.INT, 'imp50'),
+                           get_cmd=partial(self._getter, Mode.INT, 'imp50'),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF') )
-
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Select the load impedance between 50 Ohm ('ON')"
+                                     " and HiZ ('OFF'). The impedance of the output"
+                                     " is always 50 Ohm. For a load impedance of 50"
+                                     " Ohm the displayed voltage is half the output"
+                                     " voltage to reflect the voltage seen at the load.")
         self.add_parameter('offset',
                            label='Signal output offset',
-                           set_cmd=partial(self._setter,
-                                           Mode.DOUBLE, 'offset'),
-                           get_cmd=partial(self._getter,
-                                           channum-1, Mode.DOUBLE, 'offset'),
-                           vals=vals.Numbers(-1.5, 1.5), #why is this only between -1.5 and 1.5?
-                           unit='V')
-        
+                           set_cmd=partial(self._setter, Mode.DOUBLE, 'offset'),
+                           get_cmd=partial(self._getter, Mode.DOUBLE, 'offset'),
+                           vals=vals.Numbers(-1.5, 1.5), #TODO why is this only between -1.5 and 1.5?
+                           unit='V',
+                           docstring="Defines the DC voltage that is added to the"
+                                     " dynamic part of the output signal. Currently"
+                                     " this value is only valid for the driver in"
+                                     " the range from -1.5V to +1.5V.")
         self.add_parameter('on',
                            label='Turn signal output on and off.',
-                           set_cmd=partial(self._setter,
-                                           Mode.INT, 'on'),
-                           get_cmd=partial(self._getter,
-                                           channum-1, Mode.INT, 'on'),
+                           set_cmd=partial(self._setter, Mode.INT, 'on'),
+                           get_cmd=partial(self._getter, Mode.INT, 'on'),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF') )
-                           
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Enabling/Disabling the Signal Output. Corresponds"
+                                     " to the blue LED indicator on the instrument front"
+                                     " panel. The allowed values are 'ON' and 'OFF'.")
         self.add_parameter('overloaded',
                            label='Overloaded',
                            set_cmd=False,
-                           get_cmd=partial(self._getter,
-                                           channum-1, Mode.INT, 'over'))
+                           get_cmd=partial(self._getter, Mode.INT, 'over'),
+                           docstring="(ReadOnly) Indicates that the signal output is overloaded.")
         self.add_parameter('range',
                            label='Signal output range',
-                           set_cmd=partial(self._setter,
-                                           Mode.DOUBLE, 'range'),
-                           get_cmd=partial(self._getter,
-                                           channum-1, Mode.DOUBLE, 'range'),
-                           #vals=vals.Enum(0.010, 0.100, 1.0, 10.0) )
-                           #vals=vals.Enum(0.075, 0.15, 0.75, 1.5) )
+                           set_cmd=partial(self._setter, Mode.DOUBLE, 'range'),
+                           get_cmd=partial(self._getter, Mode.DOUBLE, 'range'),
                            vals=vals.Numbers( 0.001, 3.0 ),
-                           docstring="""
-                           The instrument selects the next higher available range
-                           """
-                           )
-
+                           docstring="Sets the output voltage range. Currently this"
+                                     " value is only valid for the driver in the range"
+                                     " from 0.001 to 3.0. The device will select the"
+                                     " next higher available range automatically.")
         self.add_parameter('amplitude',
                            label='Signal output amplitude',
-                           set_cmd=partial(self._setter,
-                                           Mode.DOUBLE, outputamps[channum]),
-                           get_cmd=partial(self._getter,
-                                          channum-1, Mode.DOUBLE, outputamps[channum]),
+                           set_cmd=partial(self._setter, Mode.DOUBLE,
+                                           'amplitudes/{}'.format(channum)),
+                           get_cmd=partial(self._getter, Mode.DOUBLE,
+                                           'amplitudes/{}'.format(channum)),
                            unit='V',
-                           vals=vals.Numbers() )
+                           vals=vals.Numbers(),
+                           docstring="Sets the peak amplitude that the oscillator"
+                                     " assigned to the given demodulation channel"
+                                     " contributes to the signal output. Should be"
+                                     " given as Vpk value.")
         self.add_parameter('ampdef',
                            label="Signal output amplitude's definition",
                            get_cmd=None, 
                            set_cmd=None,    #is only set indirectly
                            initial_value='Vpk',
-                           vals=vals.Enum('Vpk','Vrms', 'dBm'))
+                           vals=vals.Enum('Vpk','Vrms', 'dBm'),
+                           docstring="Internal storage for the used unit for the"
+                                     " amplitude. Possible values are `Vpk', `Vrms'"
+                                     " or `dBm', default is `Vpk'.")
         self.add_parameter('enable',
                            label="Enable signal output's amplitude.",
                            set_cmd=partial(self._setter, Mode.INT,
-                                           outputampenable[channum]),
-                           get_cmd=partial(self._getter,
-                                           channum-1, Mode.INT,
-                                           outputampenable[channum]),
+                                           'enables/{}'.format(channum)),
+                           get_cmd=partial(self._getter, Mode.INT,
+                                           'enables/{}'.format(channum)),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF') )
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Enables individual output signal amplitude."
+                                     " The allowed values are 'ON' and 'OFF'. When"
+                                     " the MD option is installed, it is possible"
+                                     " to generate signals being the linear combination"
+                                     " of the available demodulator frequencies.")
 
-    def _getter(self, number, mode, setting):
+    def _getter(self, mode, setting):
         """
         Function to query the settings of signal outputs. Specific setter
         function is needed as parameters depend on each other and need to be
         checked and updated accordingly.
 
         Args:
-            number (int):
             mode (bool): Indicating whether we are asking for an int or double
             setting (str): The module's setting to set.
         """
 
-        querystr = '/{}/sigouts/{}/{}'.format(self.parent.device, number, setting)
+        querystr = '/{}/sigouts/{}/{}'.format(self.parent.device, self.channum, setting)
         if mode == 0:
             value = self.parent.daq.getInt(querystr)
         if mode == 1:
@@ -1040,15 +1295,17 @@ class SignalOutputChannel(InstrumentChannel):
                 f()
                 
                 
-class TriggerInputChannel(InstrumentChannel):
+class TriggerInputChannel(InstrumentChannel): # doc done **********************
     """
-    Combines all the Parameters concerning the TriggerInput
+    The Lock-In-Amplifier has two TTL compatible trigger input lines. The
+    connectors are on the back side of the device.
     Parameters:
-            autothreshold: Automatically adjust the trigger threshold. The level
-                is adjusted to fall in the center of the applied transitions.
-            level: Trigger voltage level at which the trigger input toggles between
-                low and high. Use 50% amplitude for digital input and consider the
-                trigger hysteresis.
+        autothreshold: Automatically adjust the trigger threshold. The level is
+            adjusted to fall in the center of the applied transitions. Allowed
+            values are 'ON' and 'OFF'.
+        level: Trigger voltage level at which the trigger input toggles between
+            low and high. Use 50% amplitude for digital input and consider the
+            trigger hysteresis.
     """
     def __init__(self, parent: 'ZIMFLI', name: str, channum: int):
         """
@@ -1066,8 +1323,11 @@ class TriggerInputChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'triggers/in', 
                                            channum-1, Mode.INT, 'autothreshold'),
                            val_mapping={'ON': 1, 'OFF':0},
-                           vals=vals.Enum('ON', 'OFF'))
-                           
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Automatically adjust the trigger threshold."
+                                     " The level is adjusted to fall in the center"
+                                     " of the applied transitions. Allowed values"
+                                     " are 'ON' and 'OFF'.")
         self.add_parameter('level', 
                            label='trigger voltage level',
                            set_cmd=partial(self._parent._setter, 'triggers/in',
@@ -1075,22 +1335,34 @@ class TriggerInputChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'triggers/in',
                                            channum-1, Mode.DOUBLE, 'level'),
                            unit='V',
-                           vals=vals.Numbers())
+                           vals=vals.Numbers(),
+                           docstring="Trigger voltage level at which the trigger"
+                                     " input toggles between low and high. Use 50%"
+                                     " amplitude for digital input and consider the"
+                                     " trigger hysteresis.")
                            
                            
-class TriggerOutputChannel(InstrumentChannel):
+class TriggerOutputChannel(InstrumentChannel): # doc done *********************
     """
-    Combines the parameters concerning the TriggerOutput
-    Parameters: 
-            pulsewidth: Defines the minimal pulse width for the case of Scope events
-                written to the trigger outputs of the device.
-            source: Select the signal assigned to the trigger output.
-                Possible values: 'disabled', 'osc phase of demod 2'(trigger output channel 1)
-                    'osc phase of demod 4'(trigger output channel 2), 
-                    'Threshold Logic Unit 1', 'Threshold Logic Unit 2',
-                    'Threshold Logic Unit 3', 'Threshold Logic Unit 4',
-                    'MDS Sync Out'
-                        
+    The Lock-In-Amplifier has two TTL compatible trigger output lines. The
+    connectors are on the back side of the device.
+    Parameters:
+        pulsewidth: Defines the minimal pulse width for the case of Scope events
+            written to the trigger outputs of the device. Currently this value
+            is only valid for the driver in the range from 0 to 0.149 seconds.
+        source: Select the signal assigned to the trigger output. Possible
+            values are:
+                'disabled'
+                'osc phase of demod 2' (Channel 1, only without[!] MD option)
+                'osc phase of demod 4' (Channel 2, only with[!] MD option)
+                'Threshold Logic Unit 1'
+                'Threshold Logic Unit 2'
+                'Threshold Logic Unit 3'
+                'Threshold Logic Unit 4'
+                'MDS Sync Out'
+                If the DIG option is installed, some Scope functions can be
+                used as a Trigger too.
+
     """
     def __init__(self, parent: 'ZIMFLI', name: str, channum: int):
         """
@@ -1108,8 +1380,13 @@ class TriggerOutputChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'triggers/out',
                                            channum-1, Mode.DOUBLE, 'pulsewidth'),
                            unit='s',
-                           vals=vals.Numbers(0, 0.149))
-                           
+                           vals=vals.Numbers(0, 0.149),
+                           docstring="Defines the minimal pulse width for the case"
+                                     " of Scope events written to the trigger outputs"
+                                     " of the device. Currently this value is only"
+                                     " valid for the driver in the range from 0 to"
+                                     " 0.149 seconds.")
+
         sources = {'disabled': 0, 
                    'osc phase of demod 2' if channum == 1 else 'osc phase of demod 4': 1,
                    'Threshold Logic Unit 1': 36,
@@ -1131,48 +1408,39 @@ class TriggerOutputChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'triggers/out',
                                            channum-1, Mode.INT, 'source'), 
                            val_mapping=sources,
-                           vals=vals.Enum(*list(sources.keys())))
+                           vals=vals.Enum(*list(sources.keys())),
+                           docstring="Select the signal assigned to the trigger output.")
 
 
 
-class ExternalReferenceChannel(InstrumentChannel):
+class ExternalReferenceChannel(InstrumentChannel): # doc done *****************
     """
-    Combines all the Parameters from the parent concerning the external reference
+    The device has the capability to synchronize its internal oscillator used
+    for demodulation with an external reference clock signal.
     Parameters:
-            signalin: Indicates the input signal selection for the selected
-                demodulator.
-                Allowed Values:
-                    0 = Signal Input 1
-                    1 = Current Input 1
-                    2 = NOT USED
-                    3 = Trigger 2
-                    4 = Auxiliary Output 1
-                    5 = Auxiliary Output 2
-                    6 = Auxiliary Output 3
-                    7 = Auxiliary Output 4
-                    8 = Auxiliary Input 1
-                    9 = Auxiliary Input 2
-            automode: This defines the type of automatic adaptation of parameters
-                in the PID used for Ext Ref.
-                *** ONLY AVAILABLE IF MD OPTION IS INSTALLED. ***
-                Allowed Values:
-                    0 = No automatic adaption (default if no MD-option installed)
-                    1 = The coefficients of the PID controller are automatically set.
-                    2 = The PID coefficients, the filter bandwidth and the output
-                        limits are automatically set using a LOW bandwidth.
-                    3 = The PID coefficients, the filter bandwidth and the output
-                        limits are automatically set using a HIGH bandwidth.
-                    4 = All parameters of the PID including the center frequency
-                        are adapted.
-            channel: Indicates the demodulator connected to the extref channel.
-            enable: Enables the external reference.
-                Allowed Values:
-                    OFF, ON
-            locked: Indicates whether the external reference is locked.
-            oscselect: Indicates which oscillator is being locked to the external
-                reference.
+        signalin: (ReadOnly) Indicates the input signal selection for the selected
+            demodulator. Possible Values are 'Sig In 1', 'Curr In 1', `Trigger 1',
+            'Trigger 2', 'Aux Out 1', 'Aux Out 2', 'Aux Out 3', 'Aux Out 4',
+            'Aux In 1', 'Aux In 2', `Constant'. This value can be set with the
+            'signalinput' parameter in the 'demod1/2' module.
+        automode: (Only with MD option installed) This defines the type of automatic
+            adaptation of parameters in the PID used for external reference.
+            Allowed values are 'None', 'PID Auto', 'PID Low', 'PID High', 'PID All'.
+        bandwidth: (Only without MD option installed) This defines the bandwidth
+            used for external reference. Allowed values are `None', `Low', `High'.
+        channel: (ReadOnly) Indicates the demodulator connected to the extref channel.
+        enable: Enables the external reference. Allowed Values are 'ON' and 'OFF'.
+        locked: (ReadOnly) Indicates whether the external reference is locked.
+        oscselect: (ReadOnly) Indicates which oscillator is being locked to the
+            external reference.
+    In the following example the external reference is switched on, set to low
+    bandwidth and the input is set to the auxiliary input 1:
+        er = zidev.submodules['extref1']    # select submodule
+        er.enable('ON')                     # switch external reference on
+        er.bandwidth('Low')                 # select low bandwidth
+        dm2 = zidev.submodules['demod2']    # get another submodule
+        dm2.signalin('Aux In 1')            # select input for external reference
     """
-    
     def __init__(self, parent: 'ZIMFLI', name: str, channum) -> None:
         """
         Creates a new ExternalReferenceChannel
@@ -1200,7 +1468,11 @@ class ExternalReferenceChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'extrefs',
                                            channum-1, Mode.INT,'adcselect'),
                            set_cmd=False,
-                           val_mapping=ersigins)
+                           val_mapping=ersigins,
+                           docstring="(ReadOnly) Indicates the input signal selection"
+                                     " for the selected demodulator. This value can be"
+                                     " set with the 'signalinput' parameter in the"
+                                     " 'demod1/2' module.")
         if 'MD' in self._parent.options:
             # With this option the automode parameter select some PID settings
             ermode = {'None': 0,
@@ -1214,7 +1486,10 @@ class ExternalReferenceChannel(InstrumentChannel):
                                                channum-1, Mode.INT,'automode'),
                                set_cmd=partial(self._parent._setter, 'extrefs',
                                                channum-1, Mode.INT, 'automode'),
-                               val_mapping=ermode)
+                               val_mapping=ermode,
+                               docstring="This defines the type of automatic adaptation"
+                                         " of parameters in the PID used for external"
+                                         " reference.")
         else:
             # Without MD option the automode parameter can be used to select
             # the bandwidth of the external reference. This is not documented
@@ -1228,13 +1503,16 @@ class ExternalReferenceChannel(InstrumentChannel):
                                                channum-1, Mode.INT,'automode'),
                                set_cmd=partial(self._parent._setter, 'extrefs',
                                                channum-1, Mode.INT, 'automode'),
-                               val_mapping=ermode)
+                               val_mapping=ermode,
+                               docstring="This defines the bandwidth used for"
+                                         " external reference.")
         self.add_parameter('channel',
                            label='Demodulator channel',
                            get_cmd=partial(self._parent._getter, 'extrefs',
                                            channum - 1, Mode.INT, 'demodselect'),
-                           set_cmd=False
-                           )
+                           set_cmd=False,
+                           docstring="(ReadOnly) Indicates the demodulator connected"
+                                     " to the extref channel.")
         self.add_parameter('enable',
                            label='Enables the external reference',
                            get_cmd=partial(self._parent._getter, 'extrefs', 
@@ -1242,22 +1520,26 @@ class ExternalReferenceChannel(InstrumentChannel):
                            set_cmd=partial(self._parent._setter, 'extrefs', 
                                            channum-1, Mode.INT, 'enable'),
                            val_mapping={'OFF': 0, 'ON': 1},
-                           vals=vals.Enum('OFF', 'ON') )
+                           vals=vals.Enum('OFF', 'ON'),
+                           docstring="Enables the external reference. Allowed"
+                                     " Values are 'ON' and 'OFF'.")
         self.add_parameter('locked',
                            label='Is the reference locked',
                            get_cmd=partial(self._parent._getter, 'extrefs',
                                            channum-1, Mode.INT, 'locked'),
                            set_cmd=False,
-                           vals=vals.Ints() )
+                           vals=vals.Ints(),
+                           docstring="(ReadOnly) Indicates whether the external reference is locked.")
         self.add_parameter('oscselect',
                            label='Select oscillator',
                            get_cmd=partial(self._parent._getter, 'extrefs',
                                            channum-1, Mode.INT, 'oscselect'),
-                           set_cmd=False
-                           )
+                           set_cmd=False,
+                           docstring="(ReadOnly) Indicates which oscillator is being"
+                                     " locked to the external reference.")
 
 
-class DIOChannel(InstrumentChannel):
+class DIOChannel(InstrumentChannel): # doc done *******************************
     """
     Combines all the parameters concerning the digital input/output
     Parameters:
@@ -1272,7 +1554,9 @@ class DIOChannel(InstrumentChannel):
                          The available range is from 1 Hz up to the internal clock
                          frequency
             input: Gives the value of the DIO input for those bytes where drive 
-                is disabled.
+                is disabled. Attention: this value is not readable in the instrument
+                but the values are accessible via the sample data dict of the
+                demodulator (streaming node)
             mode: Manual: Manual setting of the DIO output value.
                   Threshold unit: Enables setting of DIO output values by the 
                       threshold unit.
@@ -1294,14 +1578,21 @@ class DIOChannel(InstrumentChannel):
                                            channum-1, Mode.INT, 'decimation'),
                            get_cmd=partial(self._parent._getter, 'dios',
                                            channum-1, Mode.INT, 'decimation'),
-                           vals=vals.Ints() )
+                           vals=vals.Ints(),
+                           docstring="Sets the decimation factor for DIO data"
+                                     " streamed to the host computer.")
         self.add_parameter('direction',
                            label='Input(0)-Output(1) Bitmask',
                            set_cmd=partial(self._parent._setter, 'dios',
                                            channum-1, Mode.INT, 'drive'),
                            get_cmd=partial(self._parent._getter, 'dios',
                                            channum-1, Mode.INT, 'drive'),
-                           vals=vals.Ints(0, 15))
+                           vals=vals.Ints(0, 15),
+                           docstring="Bitmask for the direction of the four bytes"
+                                     " of the digital interface. The first bit is"
+                                     " for the first byte, the 4th bit is for the"
+                                     " last byte. High denotes an output byte and"
+                                     " Low denotes an input byte.")
         self.add_parameter('extclk',
                            label='external clocking',
                            set_cmd=partial(self._parent._setter, 'dios',
@@ -1309,7 +1600,12 @@ class DIOChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'dios',
                                            channum-1, Mode.INT, 'extclk'),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF'))
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="'OFF': internally clocked with a fixed frequency"
+                                     " of 60 MHz. 'ON': externally clocked with a clock"
+                                     " signal connected to DIO Pin 68. The available"
+                                     " range is from 1 Hz up to the internal clock"
+                                     " frequency")
         #self.add_parameter('input',
         #                   label='DIO input',
         #                   set_cmd=False,
@@ -1324,28 +1620,36 @@ class DIOChannel(InstrumentChannel):
                            get_cmd=partial(self._parent._getter, 'dios',
                                            channum-1, Mode.INT, 'mode'),
                            val_mapping={'Manual': 0, 'Threshold unit': 3},
-                           vals=vals.Enum('Manual', 'Threshold unit'))
+                           vals=vals.Enum('Manual', 'Threshold unit'),
+                           docstring="'Manual': Manual setting of the DIO output value."
+                                     " 'Threshold unit': Enables setting of DIO output"
+                                     " values by the threshold unit.")
         self.add_parameter('output',
                            label='DIO output',
                            set_cmd=partial(self._parent._setter, 'dios',
                                            channum-1, Mode.INT, 'output'),
                            get_cmd=partial(self._parent._getter, 'dios',
                                            channum-1, Mode.INT, 'output'),
-                           vals=vals.Ints())
+                           vals=vals.Ints(),
+                           docstring="Sets the value of the DIO output for those"
+                                     " bytes where 'drive' is enabled.")
 
 
                        
-class MDSChannel(InstrumentChannel):
+class MDSChannel(InstrumentChannel): # doc done *******************************
     """
-    Combines all the Parameters concerning the multi device sync
-    Parameters:
-            armed: Indicates whether the mds module is armed and waiting
-                   for pulses, ReadOnly.
-            drive: Enables output of synch pulses on trigger output 1.
-            enable: Enables the mds module.
-            source: Select input source for mds synch signal.
-            syncvalid: Indicates if sync pulses are received, ReadOnly.
-            timestamp: Used to set the resulting adjusted timestamp.
+    The feature Multi device synchronization can be used to sync more than one
+    Lock-In Amplifier to use always the same clock phase. For more informations
+    please look into the manual. This feature is not tested!
+    Parameter:
+        armed: (ReadOnly) Indicates whether the mds module is armed and waiting
+            for pulses.
+        drive: Enables output of synch pulses on trigger output 1. Possible
+            values are 'ON' and 'OFF'.
+        enable: Enables the mds module. Possible values are 'ON' and 'OFF'.
+        source: Select input source for mds synch signal.
+        syncvalid: (ReadOnly) Indicates if sync pulses are received.
+        timestamp: Used to set the resulting adjusted timestamp.
 
     TODO: what are possible values -> validate
     """
@@ -1353,28 +1657,35 @@ class MDSChannel(InstrumentChannel):
         super().__init__(parent, name)
         self.add_parameter('armed',
                            set_cmd=False,
-                           get_cmd=partial(self._getter, 'armed'))
+                           get_cmd=partial(self._getter, 'armed'),
+                           docstring="(ReadOnly) Indicates whether the mds module"
+                                     " is armed and waiting for pulses.")
         self.add_parameter('drive',
                            set_cmd=partial(self._setter, 'drive'),
                            get_cmd=partial(self._getter, 'drive'),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF'))
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Enables output of synch pulses on trigger output 1")
         self.add_parameter('enable',
                            set_cmd=partial(self._setter, 'enable'),
                            get_cmd=partial(self._getter, 'enable'),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF'))
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Enables the mds module.")
         self.add_parameter('source',
                            set_cmd=partial(self._setter, 'source'),
                            get_cmd=partial(self._getter, 'source'),
-                           vals=vals.Ints()) # TODO
+                           vals=vals.Ints(),
+                           docstring="Select input source for mds synch signal.") # TODO
         self.add_parameter('syncvalid',
                            set_cmd=False,
-                           get_cmd=partial(self._getter, 'syncvalid'))
+                           get_cmd=partial(self._getter, 'syncvalid'),
+                           docstring="(ReadOnly) Indicates if sync pulses are received.")
         self.add_parameter('timestamp',
                            set_cmd=partial(self._setter, 'timestamp'),
                            get_cmd=partial(self._getter, 'timestamp'),
-                           vals=vals.Ints())
+                           vals=vals.Ints(),
+                           docstring="Used to set the resulting adjusted timestamp.")
 
 
     def _getter(self, label):
@@ -1407,73 +1718,74 @@ class PIDChannel(InstrumentChannel):
     """
     Combines all parameters concerning the PIDs
     These Parameters are only available if the MF-PID Quad PID/PLL Controller 
-    option is installed on the MFLI parent Instrument
+    option is installed on the MFLI parent Instrument.
+    ATTENTION: this function is not tested!
     Parameters:
-            center: Sets the center value for the PID output. After adding the
-                Center value, the signal is clamped to Center + Lower Limit and
-                Center + Upper Limit.
-            derivative_gain: PID derivative gain.
-            d_limit_time_constant: The cutoff of the low-pass filter for the D 
-                (derivative gain) limitation given as time constant. When set to
-                0, the lowpass filter is disabled.
-            enable: Enable the PID controller
-                Possible values: 'ON', 'OFF'
-            integral_gain: PID integral gain I
-            input: Select the input source of the PID controller and also 
-                select input channel of PID controller.
-                Possible values: 'Demod X <1, 2, ..., 8>' , 'Demod Y <1, 2, ..., 8>',
-                    'Demod R <1, 2, ..., 8>', 'Demod Theta <1, 2, ..., 8>',
-                    'Aux In <1, 2>', 'Aux Out <1, 2, 3, 4>'
-            limit_lower: Sets the lower limit for the PID output. After adding 
-                the Center value, the signal is clamped to Center + Lower Limit
-                and Center + Upper Limit.
-            limit_upper: Sets the upper limit for the PID output. After adding 
-                the Center value, the signal is clamped to Center + Lower Limit
-                and Center + Upper Limit.
-            mode: Sets the operation mode of the PID module.
-                Possible value: 'PID', 'PLL' (phase locked loop), 
-                    'ExtRef' (external reference)
-            output: Select the output of the PID controller
-                Possible values: 
-                    'Main signal Amps <1, 2>' (Feedback to the main signal 
-                                               output amplitudes),
-                    'Internal oscs <1, 2>' (Feedback to any of the internal
-                                            oscillator frequencies),
-                    'Demod phase <1, 2, ..., 8>' (Feedback to any of the 8 
-                                                  demodulator phase set points),
-                    'Aux Out <1, 2, 3, 4>' (Feedback to any of the 4 Auxiliary 
-                                            Output's Offset),
-                    'Main signal Offset <1, 2>' (Feedback to the main Signal 
-                                                 Output offset adjustment)
-            proportional_gain: PID Proportional gain
-            phaseunwrap: Enables the phase unwrapping to track phase errors past
-                the +/-180 degree boundary and increase PLL bandwidth.
-            rate: PID sampling rate and update rate of PID outputs. Needs to be
-                set substantially higher than the targeted loop filter bandwidth.
-            setpoint: PID controller setpoint
-            shift: Difference between the current output value Out and the Center.
-                Shift = P*Error + I*Int(Error, dt) + D*dError/dt
-            value: curretn PID output value
-            auto_adaptation: This defines the type of automatic adaptation of 
-                parameters in the PID.
-                Possible values: 'no adaptation' (No automatic adaption.),
-                      'coefficients' (The coefficients of the PID controller are
-                                      automatically set.),
-                      'low bw' (The PID coefficients, the filter bandwidth
-                                and the output limits are automatically
-                                set using a low bandwidth.),
-                      'high bw' (The PID coefficients, the filter bandwidth
-                                 and the output limits are automatically
-                                 set using a high bandwidth.),
-                      'all parameters' (All parameters of the PID including the
-                                        center frequency are adapted.)
-            enable_setpoint_toggle: Enables the setpoint toggle
-                Possible values: 'ON', 'OFF'
-            setpoint_toggle_rate: Defines the rate of setpoint toggling.
-                Note that possible values are logarithmically spaced with a
-                factor of 4 between values.
-            setpoint_toggle_setpoint: Defines the setpoint value used for setpoint
-                toggle.
+        center: Sets the center value for the PID output. After adding the
+            Center value, the signal is clamped to Center + Lower Limit and
+            Center + Upper Limit.
+        derivative_gain: PID derivative gain.
+        d_limit_time_constant: The cutoff of the low-pass filter for the D 
+            (derivative gain) limitation given as time constant. When set to
+            0, the lowpass filter is disabled.
+        enable: Enable the PID controller
+            Possible values: 'ON', 'OFF'
+        integral_gain: PID integral gain I
+        input: Select the input source of the PID controller and also 
+            select input channel of PID controller.
+            Possible values: 'Demod X <1, 2, ..., 8>' , 'Demod Y <1, 2, ..., 8>',
+                'Demod R <1, 2, ..., 8>', 'Demod Theta <1, 2, ..., 8>',
+                'Aux In <1, 2>', 'Aux Out <1, 2, 3, 4>'
+        limit_lower: Sets the lower limit for the PID output. After adding 
+            the Center value, the signal is clamped to Center + Lower Limit
+            and Center + Upper Limit.
+        limit_upper: Sets the upper limit for the PID output. After adding 
+            the Center value, the signal is clamped to Center + Lower Limit
+            and Center + Upper Limit.
+        mode: Sets the operation mode of the PID module.
+            Possible value: 'PID', 'PLL' (phase locked loop), 
+                'ExtRef' (external reference)
+        output: Select the output of the PID controller
+            Possible values: 
+                'Main signal Amps <1, 2>' (Feedback to the main signal 
+                                           output amplitudes),
+                'Internal oscs <1, 2>' (Feedback to any of the internal
+                                        oscillator frequencies),
+                'Demod phase <1, 2, ..., 8>' (Feedback to any of the 8 
+                                              demodulator phase set points),
+                'Aux Out <1, 2, 3, 4>' (Feedback to any of the 4 Auxiliary 
+                                        Output's Offset),
+                'Main signal Offset <1, 2>' (Feedback to the main Signal 
+                                             Output offset adjustment)
+        proportional_gain: PID Proportional gain
+        phaseunwrap: Enables the phase unwrapping to track phase errors past
+            the +/-180 degree boundary and increase PLL bandwidth.
+        rate: PID sampling rate and update rate of PID outputs. Needs to be
+            set substantially higher than the targeted loop filter bandwidth.
+        setpoint: PID controller setpoint
+        shift: Difference between the current output value Out and the Center.
+            Shift = P*Error + I*Int(Error, dt) + D*dError/dt
+        value: curretn PID output value
+        auto_adaptation: This defines the type of automatic adaptation of 
+            parameters in the PID.
+            Possible values: 'no adaptation' (No automatic adaption.),
+                  'coefficients' (The coefficients of the PID controller are
+                                  automatically set.),
+                  'low bw' (The PID coefficients, the filter bandwidth
+                            and the output limits are automatically
+                            set using a low bandwidth.),
+                  'high bw' (The PID coefficients, the filter bandwidth
+                             and the output limits are automatically
+                             set using a high bandwidth.),
+                  'all parameters' (All parameters of the PID including the
+                                    center frequency are adapted.)
+        enable_setpoint_toggle: Enables the setpoint toggle
+            Possible values: 'ON', 'OFF'
+        setpoint_toggle_rate: Defines the rate of setpoint toggling.
+            Note that possible values are logarithmically spaced with a
+            factor of 4 between values.
+        setpoint_toggle_setpoint: Defines the setpoint value used for setpoint
+            toggle.
     """
     def __init__(self, parent: 'ZIMFLI', name: str, channum: int):
         super().__init__(parent, name)
@@ -1708,115 +2020,123 @@ class PIDChannel(InstrumentChannel):
         return ret
     
     
-class SweeperChannel(InstrumentChannel):
+class SweeperChannel(InstrumentChannel): # doc done ***************************
     """
-    Combines all the parameters for the sweeper module.
-    Parameters:
-            param: the device parameter to be swept
-                Possible values: 'Aux Out 1 Offset', 'Aux Out 2 Offset',
-                    'Aux Out 3 Offset', 'Aux Out 4 Offset', 'Demod 1 Phase Shift'
-                    'Demod 2 Phase Shift', 'Osc 1 Frequency', 'Output 1 Amplitude 2',
-                    'Output 1 Offset'
-                for devices with the MF-MD option there are also the values:
-                    'Osc 2 Frequency', 'Demod 2 Phase Shift', 'Demod 3 Phase Shift',
-                    'Demod 4 Phase Shift', 'Output 1 Amplitude 4',
-                    'Output 2 Amplitude 8', 'Output 2 Offset'
-            start: start value of the sweep parameter
-            stop: stop value of the sweep parameter
-            samplecount: number of measurement points to set the sweep on
-            endless: Enable Endless mode; run the sweeper continuously.
-            remaining_time: Read only: Reports the remaining time of the current 
-                sweep. A valid number is only displayed once the sweeper has
-                been started. An undefined sweep time is indicated as NAN.
-            averaging_samples: Sets the number of data samples per sweeper parameter point
-                that is considered in the measurement. The maximum of this value
-                and averaging_time is taken as the effective calculation time.
-                The actual number of samples is the maximum of this value and the
-                averaging_time times the relevant sample rate.
-            averaging_time: Sets the effective measurement time per sweeper parameter
-                point that is considered in the measurement. The maximum between
-                of this value and averaging_samples is taken as the effective
-                calculation time.
-                The actual number of samples is the maximum of this value times the
-                relevant sample rate and the sweeper_averaging_samples.
-            bandwidth_mode: Specify how the sweeper should specify the bandwidth 
-                of each measurement point. Automatic is recommended in particular
-                for logarithmic sweeps and assures the whole spectrum is covered.
-                Possible values:
-                    current: the sweeper module leaves the demodulator bandwidth
-                        settings entirely untouched
-                    fixed: use the value from the parameter bandwidth
-                    automatic: bandwidth is set automatically
-            bandwidth_overlap: If enabled the bandwidth of a sweep point may overlap
-                with the frequency of neighboring sweep points. The effective
-                bandwidth is only limited by the maximal bandwidth setting and 
-                omega suppression. As a result, the bandwidth is independent of
-                the number of sweep points. For frequency response analysis bandwidth
-                overlap should be enabled to achieve maximal sweep speed.
-            bandwidth: This is the NEP bandwidth used by the sweeper if 
-                band_width_mode is set to 'fixed'. If band_width_mode is either
-                'auto' or 'current', this value is ignored.
-            order: Defines the filter roll off to use when bandwidth_mode is set
-                to fixed. Valid values are between 1 (6 dB/octave) and 8 (48 dB/
-                octave). 
-            max_bandwidth: Specifies the maximum bandwidth used when bandwidth_mode
-                is set to auto. The default is 1.25 MHz.
-            omega_supression: Damping of omega and 2omega components when 
-                bandwidth_mode is set to auto. Default is 40dB in favor of sweep
-                speed. Use a higher value for strong offset values or 
-                3omega measurement methods.
-            loopcount: The number of sweeps to perform.
-            phaseunwrap: Enable unwrapping of slowly changing phase evolutions 
-                around the +/-180 degree boundary.
-                Possible values: 'ON', 'OFF'
-            sinc_filter: Enables the sinc filter if the sweep frequency is below
-                50 Hz. This will improve the sweep speed at low frequencies as 
-                omega components do not need to be suppressed by the normal low
-                pass filter.
-            mode: Selects the scanning type
-                Possible values:
-                    sequential: incremental scanning from start to stop value 
-                    binary: Nonsequential sweep continues increase of resolution
-                        over entire range
-                    bidirectional: Sequential sweep from Start to Stop value and
-                        back to Start again
-                    reverse: reverse sequential scanning from stop to start value
-            settling_time: Minimum wait time in seconds between setting the new
-                sweep parameter value and the start of the measurement. The maximum
-                between this value and settling_tc is taken as effective settling 
-                time. Note that the filter settings may result in a longer actual
-                waiting/settling time.
-            settling_inaccuracy: Demodulator filter settling inaccuracy defining
-                the wait time between a sweep parameter change and recording of 
-                the next sweep point. The settling time is calculated as the time
-                required to attain the specified remaining proportion [1e-13, 0.1]
-                of an incoming step function. Typical inaccuracy values: 10m for
-                highest sweep speed for large signals, 100u for precise amplitude
-                measurements, 100n for precise noise measurements. Depending on 
-                the order of the demodulator filter the settling inaccuracy will
-                define the number of filter time constants the sweeper has to wait.
-                The maximum between this value and the settling time is taken as
-                wait time until the next sweep point is recorded.
-            settling_tc: Minimum wait time in factors of the time constant (TC)
-                between setting the new sweep parameter value and the start of
-                the measurement. This filter settling time is preferably configured
-                via settling_inaccuracy. The maximum between this value and 
-                settling_time is taken as effective settling time.
-            xmapping: Selects the spacing of the grid used by param
-                Possible values:
-                    linear: linear distribution of sweep parameter values
-                    logarithmic: logarithmic distribution of sweep parameter values
-            history_length: Maximum number of entries stored in the measurement
-                history.
-            clear_history: Remove all records from the history list
-                Possible values: 'ON', 'OFF'
-            directory: The directory to which sweeper measurements are saved to
-                via save().
-            fileformat: The format of the file for saving sweeper measurements.
-                Possible values: Matlab, CSV
+    This submodule is used to configure the sweep functionality. All parameter
+    values are stored in a local dict and send to the data server with the
+    build_sweep function of the Sweep class.
+    Parameter:
+        param: the device parameter to be swept
+            Possible values: 'Aux Out 1 Offset', 'Aux Out 2 Offset',
+                'Aux Out 3 Offset', 'Aux Out 4 Offset', 'Demod 1 Phase Shift'
+                'Demod 2 Phase Shift', 'Osc 1 Frequency', 'Output 1 Amplitude 2',
+                'Output 1 Offset'
+            for devices with the MF-MD option there are also the values:
+                'Osc 2 Frequency', 'Demod 2 Phase Shift', 'Demod 3 Phase Shift',
+                'Demod 4 Phase Shift', 'Output 1 Amplitude 4',
+                'Output 2 Amplitude 8', 'Output 2 Offset'
+        start: start value of the sweep parameter.
+        stop: stop value of the sweep parameter, both values are included in the sweep range.
+        samplecount: number of measurement points to set the sweep on.
+        endless: Enable Endless mode to run the sweeper continuously ('ON'). If
+            disabled ('OFF') the sweep runs only once.
+        remaining_time: (ReadOnly) Reports the remaining time of the current sweep.
+            A valid number is only returned once the sweeper has been started. An
+            undefined sweep time is indicated as NAN, that means, the sweeper is
+            not running.
+        averaging_samples: Sets the number of data samples per sweeper parameter
+            point that is considered in the measurement. The maximum of this value
+            and averaging_time is taken as the effective calculation time. The
+            actual number of samples is the maximum of this value and the averaging_time
+            times the relevant sample rate.
+        averaging_tc: Minimal averaging time constant.
+        averaging_time: Sets the effective measurement time per sweeper parameter
+            point that is considered in the measurement. The maximum between of
+            this value and averaging_samples is taken as the effective calculation
+            time. The actual number of samples is the maximum of this value times
+            the relevant sample rate and the averaging_samples.
+        bandwidth_mode: Specify how the sweeper should specify the bandwidth of
+            each measurement point. Automatic is recommended in particular for
+            logarithmic sweeps and assures the whole spectrum is covered. Possible
+            values are:
+                'current': the sweeper module leaves the demodulator bandwidth
+                    settings entirely untouched
+                'fixed': use the value from the parameter bandwidth
+                'auto': bandwidth is set automatically
+        bandwidth_overlap: If enabled the bandwidth of a sweep point may overlap
+            with the frequency of neighboring sweep points. The effective bandwidth
+            is only limited by the maximal bandwidth setting and omega suppression.
+            As a result, the bandwidth is independent of the number of sweep points.
+            For frequency response analysis bandwidth overlap should be enabled
+            to achieve maximal sweep speed. Possible values are 'ON' or 'OFF'.
+        bandwidth: This is the NEP {noise-equivalent bandwidth} bandwidth used by
+            the sweeper if 'bandwidth_mode' is set to 'fixed'. If 'bandwidth_mode'
+            is either 'auto' or 'current', this value is ignored.
+        order: Defines the filter roll off to use when 'bandwidth_mode' is set to
+            'fixed'. Valid values are between 1 (6 dB/octave) and 8 (48 dB/octave).
+        max_bandwidth: Specifies the maximum bandwidth used when 'bandwidth_mode'
+            is set to 'auto'. The default is 1.25 MHz.
+        omega_supression: Damping of omega and 2omega components when 'bandwidth_mode'
+            is set to 'auto'. Default is 40dB in favor of sweep speed. Use a higher
+            value for strong offset values or 3omega measurement methods.
+        loopcount: The number of sweeps to perform.
+        phaseunwrap: Enable unwrapping of slowly changing phase evolutions around
+            the +/-180 degree boundary. Possible values are: 'ON' or 'OFF'.
+        sinc_filter: Enables the sinc filter if the sweep frequency is below 50 Hz.
+            This will improve the sweep speed at low frequencies as omega components
+            do not need to be suppressed by the normal low pass filter.
+        mode: Selects the scanning type. Possible values are:
+            `sequential': incremental scanning from start to stop value.
+            `binary': Nonsequential sweep continues increase of resolution over
+                entire range. It starts in the middle between start and stop, then
+                it goes to the middle of the first range, then to the middle of the
+                second range. After this it goes to the middle of all 4 subranges
+                and so on.
+            `bidirectional': Sequential sweep from Start to Stop value and back
+                to Start again.
+            `reverse': reverse sequential scanning from stop to start value.
+        settling_time: Minimum wait time in seconds between setting the new sweep
+            parameter value and the start of the measurement. The maximum between
+            this value and 'settling_tc' is taken as effective settling time. Note
+            that the filter settings may result in a longer actual waiting/settling
+            time.
+        settling_inaccuracy: Demodulator filter settling inaccuracy defining the wait
+            time between a sweep parameter change and recording of the next sweep point.
+            The settling time is calculated as the time required to attain the specified
+            remaining proportion [1e-13, 0.1] of an incoming step function. Typical
+            inaccuracy values: 10m for highest sweep speed for large signals, 100u for
+            precise amplitude measurements, 100n for precise noise measurements.
+            Depending on the order of the demodulator filter the settling inaccuracy
+            will define the number of filter time constants the sweeper has to wait.
+            The maximum between this value and the settling time is taken as wait time
+            until the next sweep point is recorded.
+        settling_tc: Minimum wait time in factors of the time constant (TC) between
+            setting the new sweep parameter value and the start of the measurement.
+            This filter settling time is preferably configured via 'settling_inaccuracy'.
+            The maximum between this value and 'settling_time' is taken as effective
+            settling time.
+        xmapping: Selects the spacing of the grid used by param. Possible values are:
+            `linear': linear distribution of sweep parameter values
+            `logarithmic': logarithmic distribution of sweep parameter values
+        history_length: Maximum number of entries stored in the measurement history.
+        clear_history: Remove all records from the history list. Possible values
+            are: 'ON' or 'OFF'.
+        directory: The directory to which sweeper measurements are saved to via
+            Sweep.save().
+        fileformat: The format of the file for saving sweeper measurements.
+            Possible values are: `Matlab' or `CSV'.
+       sweeptime: (ReadOnly) calculate the estimation of the sweep duration.
+            This is not precise to more than a few percent. The return is None if
+            the 'bandwidth_mode' setting is 'auto' (then all bets are off), otherwise
+            a time in seconds.
+        units: (ReadOnly) get the unit of the current sweep parameter ('param').
+        sweeper_timeout: holds the maximum number of seconds for the sweep to finsh.
+            If the sweep duration exeeds this time, it will be stopped. The initial
+            value is set to 600s.
     """
     def __init__(self, parent: 'ZIMFLI', name: str):
         super().__init__(parent, name)
+        self._sweepTimeout = 600
         # val_mapping for sweeper_param parameter
         sweepparams = {'Aux Out 1 Offset':     'auxouts/0/offset',
                        'Aux Out 2 Offset':     'auxouts/1/offset',
@@ -1840,99 +2160,168 @@ class SweeperChannel(InstrumentChannel):
                            label='Parameter to sweep (sweep x-axis)',
                            set_cmd=partial(self._setter, 'sweep/gridnode'),
                            get_cmd=partial(self._getter, 'sweep/gridnode'),
-                           val_mapping=sweepparams)
+                           val_mapping=sweepparams,
+                           docstring="The device parameter to be swept."
+                                     +self._parent.possibleValues(sweepparams))
         self.add_parameter('start',
                             label='Start value of the sweep',
                             set_cmd=partial(self._setter, 'sweep/start'),
                             get_cmd=partial(self._getter, 'sweep/start'),
-                            vals=vals.Numbers())
+                            vals=vals.Numbers(),
+                            docstring="start value of the sweep parameter.")
         self.add_parameter('stop',
                             label='Stop value of the sweep',
                             set_cmd=partial(self._setter, 'sweep/stop'),
                             get_cmd=partial(self._getter, 'sweep/stop'),
-                            vals=vals.Numbers())
+                            vals=vals.Numbers(),
+                            docstring="stop value of the sweep parameter, included in sweep")
         self.add_parameter('samplecount',
                             label='Length of the sweep (pts)',
                             set_cmd=partial(self._setter, 'sweep/samplecount'),
                             get_cmd=partial(self._getter, 'sweep/samplecount'),
-                            vals=vals.Ints(0, 2**64-1))
+                            vals=vals.Ints(0, 2**64-1),
+                            docstring="number of measurement points to set the sweep on.")
         self.add_parameter('endless',
                            label='enable endless sweep',
                            set_cmd=partial(self._setter, 'sweep/endless'),
                            get_cmd=partial(self._getter, 'sweep/endless'),
-                           val_mapping={'ON': 1, 'OFF': 0})
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           docstring="Enable Endless mode to run the sweeper continuously"
+                                     " ('ON'). If disabled ('OFF') the sweep runs only once.")
         self.add_parameter('remaining_time',
                            label='remaining time of current sweep',
                            set_cmd=False,
                            get_cmd=partial(self._getter, 'sweep/remainingtime'),
-                           unit='s')
+                           unit='s',
+                           docstring="(ReadOnly) Reports the remaining time of the"
+                                     " current sweep. A valid number is only returned"
+                                     " once the sweeper has been started. An undefined"
+                                     " sweep time is indicated as NAN, that means, the"
+                                     " sweeper is not running.")
         self.add_parameter('averaging_samples',
                            label=('Minimal no. of samples to average at ' +
                                   'each sweep point'),
                            set_cmd=partial(self._setter, 'sweep/averaging/sample'),
                            get_cmd=partial(self._getter,'sweep/averaging/sample'),
-                           vals=vals.Ints(1, 2**64-1))
+                           vals=vals.Ints(1, 2**64-1),
+                           docstring="Sets the number of data samples per sweeper"
+                                     " parameter point that is considered in the"
+                                     " measurement. The maximum of this value and"
+                                     " averaging_time is taken as the effective"
+                                     " calculation time. The actual number of samples"
+                                     " is the maximum of this value and the averaging_time"
+                                     " times the relevant sample rate.")
         self.add_parameter('averaging_tc',
                            label=('Minimal averaging time constant'),
                            set_cmd=partial(self._setter, 'sweep/averaging/tc'),
                            get_cmd=partial(self._getter, 'sweep/averaging/tc'),
                            unit='s',
-                           vals=vals.Numbers())
+                           vals=vals.Numbers(),
+                           docstring="Minimal averaging time constant.")
         self.add_parameter('averaging_time',
                            label=('Minimal averaging time'),
                            set_cmd=partial(self._setter, 'sweep/averaging/time'),
                            get_cmd=partial(self._getter, 'sweep/averaging/time'),
                            unit='s',
-                           vals=vals.Numbers())
-        self.add_parameter('bandwidth_mode', #before BWmode
+                           vals=vals.Numbers(),
+                           docstring="Sets the effective measurement time per sweeper"
+                                     " parameter point that is considered in the"
+                                     " measurement. The maximum between of this value"
+                                     " and averaging_samples is taken as the effective"
+                                     " calculation time. The actual number of samples"
+                                     " is the maximum of this value times the relevant"
+                                     " sample rate and the averaging_samples.")
+        self.add_parameter('bandwidth_mode',
                            label='bandwidth control mode',
                            set_cmd=partial(self._setter, 'sweep/bandwidthcontrol'),
                            get_cmd=partial(self._getter, 'sweep/bandwidthcontrol'),
-                           val_mapping={'auto': 2, 'fixed': 1, 'current': 0})
+                           val_mapping={'auto': 2, 'fixed': 1, 'current': 0},
+                           docstring="""
+                           Specify how the sweeper should specify the bandwidth of
+                           each measurement point. Automatic is recommended in particular for
+                           logarithmic sweeps and assures the whole spectrum is covered. Possible
+                           values are:
+                               'current': the sweeper module leaves the demodulator bandwidth settings entirely untouched
+                               'fixed': use the value from the parameter bandwidth
+                               'auto': bandwidth is set automatically
+                           """)
         self.add_parameter('bandwidth_overlap',
                            label='overlapping bandwidth between neighbouring'
                                    +'sweep point',
                            set_cmd=partial(self._setter, 'sweep/bandwidthoverlap'),
                            get_cmd=partial(self._getter, 'sweep/bandwidthoverlap'),
-                           val_mapping={'ON': 1, 'OFF': 0})
-        self.add_parameter('bandwidth', #before BW
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           docstring="If enabled the bandwidth of a sweep point may overlap"
+                                     " with the frequency of neighboring sweep points. The"
+                                     " effective bandwidth is only limited by the maximal"
+                                     " bandwidth setting and omega suppression. As a result,"
+                                     " the bandwidth is independent of the number of sweep"
+                                     " points. For frequency response analysis bandwidth"
+                                     " overlap should be enabled to achieve maximal sweep"
+                                     " speed. Possible values are 'ON' or 'OFF'.")
+        self.add_parameter('bandwidth',
                            label='Fixed bandwidth sweeper bandwidth (NEP)',
                            set_cmd=partial(self._setter, 'sweep/bandwidth'),
                            get_cmd=partial(self._getter, 'sweep/bandwidth'),
                            unit='Hz',
-                           vals=vals.Numbers())
+                           vals=vals.Numbers(),
+                           docstring="This is the NEP {noise-equivalent bandwidth}"
+                                     " bandwidth used by the sweeper if 'bandwidth_mode'"
+                                     " is set to 'fixed'. If 'bandwidth_mode' is either"
+                                     " 'auto' or 'current', this value is ignored.")
         self.add_parameter('order',
                            label='Sweeper filter order',
                            set_cmd=partial(self._setter, 'sweep/order'),
                            get_cmd=partial(self._getter, 'sweep/order'),
-                           vals=vals.Ints(1, 8))
+                           vals=vals.Ints(1, 8),
+                           docstring="Defines the filter roll off to use when"
+                                     " 'bandwidth_mode' is set to 'fixed'. Valid"
+                                     " values are between 1 (6 dB/octave) and 8"
+                                     " (48 dB/octave).")
         self.add_parameter('max_bandwidth',
                            label='maximum bandwidth',
                            set_cmd=partial(self._setter, 'sweep/maxbandwidth'),
                            get_cmd=partial(self._getter, 'sweep/maxbandwidth'),
                            unit = 'Hz',
-                           vals=vals.Numbers())
+                           vals=vals.Numbers(),
+                           docstring="Specifies the maximum bandwidth used when"
+                                     " 'bandwidth_mode' is set to 'auto'. The"
+                                     " default is 1.25 MHz.")
         self.add_parameter('omega_suppression',
                            label='damping of omega',
                            set_cmd=partial(self._setter, 'sweep/omegasuppression'),
                            get_cmd=partial(self._getter, 'sweep/omegasuppression'),
                            unit='dB',
-                           vals=vals.Numbers())
+                           vals=vals.Numbers(),
+                           docstring="Damping of omega and 2omega components when"
+                                     " 'bandwidth_mode' is set to 'auto'. Default"
+                                     " is 40dB in favor of sweep speed. Use a higher"
+                                     " value for strong offset values or 3omega"
+                                     " measurement methods.")
         self.add_parameter('loopcount',
                            label='no. of sweeps',
                            set_cmd=partial(self._setter, 'sweep/loopcount'),
                            get_cmd=partial(self._getter, 'sweep/loopcount'),
-                           vals=vals.Ints(0, 2**64-1))
+                           vals=vals.Ints(0, 2**64-1),
+                           docstring="The number of sweeps to perform.")
         self.add_parameter('phaseunwrap',
                            label='unwrapping of slowly changing phase evolution',
                            set_cmd=partial(self._setter, 'sweep/phaseunwrap'),
                            get_cmd=partial(self._getter, 'sweep/phaseunwrap'),
-                           val_mapping={'ON': 1, 'OFF': 0})
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           docstring="Enable unwrapping of slowly changing phase"
+                                     " evolutions around the +/-180 degree boundary."
+                                     " Possible values are: 'ON' or 'OFF'.")
         self.add_parameter('sinc_filter',
                            label='enable sinc filter',
                            set_cmd=partial(self._setter, 'sweep/sincfilter'),
                            get_cmd=partial(self._getter, 'sweep/sincfilter'),
-                           val_mapping={'ON': 1, 'OFF': 0})
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           docstring="Enables the sinc filter if the sweep frequency"
+                                     " is below 50 Hz. This will improve the sweep"
+                                     " speed at low frequencies as omega components"
+                                     " do not need to be suppressed by the normal"
+                                     " low pass filter.")
         # val_mapping for mode parameter
         sweepmodes = {'sequential': 0,
                       'binary': 1,
@@ -1942,45 +2331,93 @@ class SweeperChannel(InstrumentChannel):
                             label='Sweep mode',
                             set_cmd=partial(self._setter, 'sweep/scan'),
                             get_cmd=partial(self._getter, 'sweep/scan'),
-                            val_mapping=sweepmodes)
+                            val_mapping=sweepmodes,
+                            docstring="""
+                            Selects the scanning type. Possible values are:
+                                `sequential': incremental scanning from start to stop value.
+                                `binary': Nonsequential sweep continues increase of resolution over
+                                    entire range. It starts in the middle between start and stop, then
+                                    it goes to the middle of the first range, then to the middle of the
+                                    second range. After this it goes to the middle of all 4 subranges
+                                    and so on.
+                                `bidirectional': Sequential sweep from Start to Stop value and back
+                                    to Start again.
+                                `reverse': reverse sequential scanning from stop to start value.
+                            """)
         self.add_parameter('settling_time',
                            label=('Minimal settling time for the sweeper'),
                            set_cmd=partial(self._setter, 'sweep/settling/time'),
                            get_cmd=partial(self._getter, 'sweep/settling/time'),
                            vals=vals.Numbers(0),
-                           unit='s')
+                           unit='s',
+                           docstring="Minimum wait time in seconds between setting the"
+                                     " new sweep parameter value and the start of the"
+                                     " measurement. The maximum between this value and"
+                                     " 'settling_tc' is taken as effective settling time."
+                                     " Note that the filter settings may result in a longer"
+                                     " actual waiting/settling time.")
         self.add_parameter('settling_inaccuracy',
                            label='Demodulator filter settling inaccuracy',
                            set_cmd=partial(self._setter, 'sweep/settling/inaccuracy'),
                            get_cmd=partial(self._getter, 'sweep/settling/inaccuracy'),
-                           vals=vals.Numbers())
+                           vals=vals.Numbers(),
+                           docstring="Demodulator filter settling inaccuracy defining the wait"
+                                     " time between a sweep parameter change and recording of"
+                                     " the next sweep point. The settling time is calculated"
+                                     " as the time required to attain the specified remaining"
+                                     " proportion [1e-13, 0.1] of an incoming step function."
+                                     " Typical inaccuracy values: 10m for highest sweep speed"
+                                     " for large signals, 100u for precise amplitude measurements,"
+                                     " 100n for precise noise measurements. Depending on the order"
+                                     " of the demodulator filter the settling inaccuracy will"
+                                     " define the number of filter time constants the sweeper has"
+                                     " to wait. The maximum between this value and the settling"
+                                     " time is taken as wait time until the next sweep point is"
+                                     " recorded.")
         self.add_parameter('settling_tc',
                            label='Sweep filter settling time',
-                           get_cmd=partial(self._getter, 'sweep/settling/tc'))
+                           get_cmd=partial(self._getter, 'sweep/settling/tc'),
+                           docstring="Minimum wait time in factors of the time constant (TC)"
+                                     " between setting the new sweep parameter value and the"
+                                     " start of the measurement. This filter settling time is"
+                                     " preferably configured via 'settling_inaccuracy'. The"
+                                     " maximum between this value and 'settling_time' is taken"
+                                     " as effective settling time.")
         self.add_parameter('xmapping',
                            label='Sweeper x mapping',
                            set_cmd=partial(self._setter, 'sweep/xmapping'),
                            get_cmd=partial(self._getter, 'sweep/xmapping'),
-                           val_mapping={'linear': 0, 'logarithmic': 1})
+                           val_mapping={'linear': 0, 'logarithmic': 1},
+                           docstring="Selects the spacing of the grid used by param."
+                                     " Possible values are 'linear' or 'logarithmic'")
         self.add_parameter('history_length',
                            label='number of entries stored in measurement history',
                            set_cmd=partial(self._setter, 'sweep/historylength'),
                            get_cmd=partial(self._getter, 'sweep/historylength'),
-                           vals=vals.Ints(0, 2**64-1))
+                           vals=vals.Ints(0, 2**64-1),
+                           docstring="Maximum number of entries stored in the"
+                                     " measurement history.")
         self.add_parameter('clear_history',
                            label='Remove all records from the history list',
                            set_cmd=partial(self._setter, 'sweep/clearhistory'),
                            get_cmd=partial(self._getter, 'sweep/clearhistory'),
-                           val_mapping={'ON': 1, 'OFF': 0})
+                           val_mapping={'ON': 1, 'OFF': 0},
+                           docstring="Remove all records from the history list."
+                                     " Possible values are: 'ON' or 'OFF'.")
         self.add_parameter('directory',
                            label='directory to which measurements are saved',
                            set_cmd=partial(self._setter, 'sweep/directory'),
-                           get_cmd=partial(self._getter, 'sweep/directory'))
+                           get_cmd=partial(self._getter, 'sweep/directory'),
+                           docstring="The directory to which sweeper measurements"
+                                     " are saved to via Sweep.save().")
         self.add_parameter('fileformat',
                            label='format of the saving files',
-                           set_cmd=partial(self._setter, 'sweep/filefomat'),
-                           get_cmd=partial(self._getter, 'sweep(fileformat'),
-                           val_mapping={'Matlab': 0, 'CSV': 1})
+                           set_cmd=partial(self._setter, 'sweep/fileformat'),
+                           get_cmd=partial(self._getter, 'sweep/fileformat'),
+                           val_mapping={'Matlab': 0, 'CSV': 1},
+                           docstring="The format of the file for saving sweeper"
+                                     " measurements. Possible values are: `Matlab'"
+                                     " or `CSV'.")
         # val_mapping for sweeper_units parameter
         sweepunits = {'Aux Out 1 Offset': 'V',
                       'Aux Out 2 Offset': 'V',
@@ -2001,16 +2438,32 @@ class SweeperChannel(InstrumentChannel):
         self.add_parameter('units',
                            label='Units of sweep x-axis',
                            get_cmd=self.parameters['param'],
-                           get_parser=lambda x:sweepunits[x])
+                           get_parser=lambda x:sweepunits[x],
+                           docstring="(ReadOnly) get the unit of the current"
+                                     " sweep parameter ('param').")
         self.add_parameter('sweeptime',
                            label='Expected sweep time',
                            unit='s',
-                           get_cmd=self._get_sweep_time)
+                           get_cmd=self._get_sweep_time,
+                           docstring="(ReadOnly) calculate the estimation of the sweep"
+                                     " duration. This is not precise to more than a few"
+                                     " percent. The return is None if the 'bandwidth_mode'"
+                                     " setting is 'auto' (then all bets are off), otherwise"
+                                     " a time in seconds.")
         self.add_parameter('sweeper_timeout',
                            label='Sweep timeout',
                            unit='s',
-                           initial_value=600,
-                           get_cmd=None, set_cmd=None)
+                           get_cmd=self._getSwTimeout,
+                           set_cmd=self._setSwTimeout,
+                           docstring="holds the maximum number of seconds for the sweep"
+                                     " to finsh. If the sweep duration exeeds this time,"
+                                     " it will be stopped. The initial value is set to 600s.")
+        
+    def _setSwTimeout(self, t):
+        self._sweepTimeout = t
+    
+    def _getSwTimeout(self):
+        return self._sweepTimeout
 
     def _setter(self, setting, value):
         """
@@ -2060,6 +2513,7 @@ class SweeperChannel(InstrumentChannel):
         if self._parent._sweeper_signals == []:
             raise ValueError('No signals selected! Can not find sweep time.')
         mode = self.bandwidth_mode()
+        print("DBG: get sweep time()", mode)
         # The effective time constant of the demodulator depends on the
         # sweeper/bandwidthcontrol setting.
         # If this setting is 'current', the largest current
@@ -2148,6 +2602,9 @@ class Sweep(MultiParameter):
         additionally sets names, units, and setpoints for the Sweep
         parameter.
         """
+        if hasattr(self._instrument, 'sweep_correctly_built'):
+            if self._instrument.sweep_correctly_built is True:
+                return
 
         signals = self._instrument._sweeper_signals
         sweepdict = self._instrument._sweepdict
@@ -2214,6 +2671,14 @@ class Sweep(MultiParameter):
             self._instrument.sweeper.set(setting, value)
 
         self._instrument.sweep_correctly_built = True
+
+
+    def save(self):
+        """
+        Helper function to use the data servers save function.
+        """
+        self._instrument.sweeper.save()
+
 
     def get(self):
         """
@@ -3390,6 +3855,257 @@ class Scope(MultiParameter):
             ch2data = None
 
         return (ch1data, ch2data)
+
+
+
+class lockinBufferedArrayParameter(BufferedReadableArrayParameter):
+    """
+    This parameter is used in the qc BufferedLoop to get the result. See
+    the example below at lockinBufferedParameter.
+    """
+    global bufferedConfig  # store the config data globally
+    dbgprt = False
+
+    def __init__(self, name: str,
+                 instrument: 'Instrument',
+                 **kwargs) -> None:
+        """
+        Creates a new lockinBufferedArrayParameter.
+        Args:
+            name: the internal QCoDeS name of the parameter ('buffered_result')
+            instrument: the internal parent instrument
+            **kwargs: more arguments passed to the base class
+        """
+        # Calculate the shape of the return array from the number of used
+        #  channels in the sweeper output. This shape is not changable
+        #  after the base class is initialized.
+        shape = 1
+        if hasattr(instrument, '_sweeper_signals'):
+            shape = len(instrument._sweeper_signals)
+            if shape < 1:
+                shape = 1
+        if self.dbgprt:
+            print("DBG: arr-init", name, shape)
+        # Initialize base class
+        super().__init__(name,
+                         get_buffered_cmd=self._getter,
+                         #config_meas_cmd: Optional[Callable]=None,
+                         #arm_meas_cmd: Optional[Callable]=None,
+                         shape=(shape,),
+                         **kwargs)
+        self._instr = instrument
+    
+    def _getter(self, name:str):
+        """
+        The getter function is called for each data value if the QCoDeS
+        BufferedLoop will read the data.
+        Parameter:
+            name: the internal QCoDeS name of the parameter ('buffered_result')
+        Return:
+            Array of data values. The shape of the array is defined in the
+            Constructor of this class.
+        """
+        i = bufferedConfig['index']
+        if self.dbgprt:
+            print("DBG: arr-getter", name, i)
+        bufferedConfig['index'] = i + 1
+        if i >= len(bufferedConfig['data'][0]):
+            print(bufferedConfig)
+            raise RuntimeError("BufferedArrayParameter: internal index too large")
+        # generate an array with the data values returned from the sweep
+        retval = []
+        for r in range(len(bufferedConfig['data'])):
+            retval.append( bufferedConfig['data'][r][i] )
+        return retval
+    
+    def reset(self):
+        """
+        Perform a reset of the output parameter. This is called just before the
+        data will be read.
+        """
+        if self.dbgprt:
+            print("DBG: arr-reset")
+        bufferedConfig['index'] = 0 # -> set the read index to zero
+        
+
+
+class lockinBufferedParameter(BufferedSweepableParameter):
+    """
+    This is the sweepable parameter for the QCoDeS BufferedLoop.
+    Example:
+        bf = zidev.buffered_freq1.sweep( freq_start, freq_stop, step=freq_step )
+        l  = qc.Repetition(2).buffered_loop(bf).each(zidev.buffered_result)
+        data = l.run()
+    For a complete documentation see the User-Doc.
+    """
+    global bufferedConfig  # store the config data globally
+    dbgprt = False
+
+    def __init__(self, name: str,
+                 instrument: 'Instrument',
+                 parameter: str,
+                 *args, **kwargs) -> None:
+        """
+        Creates a new lockinBufferedArrayParameter.
+        Args:
+            name: the internal QCoDeS name of the parameter
+            instrument: the internal parent instrument
+            parameter: the device parameter to be swept (for the sweeper channel)
+            **kwargs: more arguments passed to the base class
+        """
+        if self.dbgprt:
+            print("DBG: lockinBufferedParameter - init", name, parameter, args, kwargs)
+        super().__init__(name, instrument,
+                         sweep_parameter_cmd=self._sweep,
+                         repeat_parameter_cmd=None, # not supported by BufferedLoop
+                         send_buffer_cmd=self._send,
+                         run_program_cmd=self._run,
+                         get_meas_windows=self._getMeas,
+                         set_cmd=self._setter, # not used but required function
+                         get_cmd=self._getter, # not used but required function
+                         docstring="Special parameter for BufferedLoop function"
+                         )
+
+        self._par = parameter
+    
+    def debug(self):
+        """
+        Helper function to print all relevant informations for this BufferedParameter
+        """
+        print("--- Buffered config ---")
+        print("  Last data index:", bufferedConfig['index'])
+        print("  Sweep channel:", bufferedConfig['param'])
+        print("  Sweep values:", bufferedConfig['sweep'])
+        print("  Measurement time per point:", bufferedConfig['tmeas'])
+        print("  Settling time per point:", bufferedConfig['t_set'])
+        print("--- Measured data ---")
+        i = 0
+        for d in bufferedConfig['data']:
+            print("   ",self._instrument._sweeper_signals[i].split('/')[-1],d)
+            i += 1
+        print("--- Sweeper config ---")
+        self._instrument.print_sweeper_settings()
+        
+    
+    def _sweep(self, param:str, sweep_values:list, layer:int) -> None:
+        """
+        Function to define the sweep for the following BufferedLoop.
+        Parameter:
+            param: Name of the BufferedParameter object
+            sweep_values: List of sweep values
+            layer: index of nested sweeps (>0 not allowed here)
+        """
+        if self.dbgprt:
+            print("DBG: sweep", layer, param, sweep_values)
+        if layer != 0:
+            raise RuntimeError("BufferedParameter("+str(param)+"): no nested sweeps allowed.")
+        # setting fixed parameters for the sweeper channel
+        sc = self._instrument.submodules['sweeper_channel']
+        sc.param( self._par )
+        sc.endless('OFF')
+        sc.start( sweep_values[0] )
+        sc.stop( sweep_values[-1] )
+        sc.samplecount( len(sweep_values) )
+        sc.loopcount( 1 )
+        sc.mode( 'sequential' )
+        sc.xmapping( 'linear' )
+        sc.bandwidth_mode( 'fixed' )
+        # Read values for the timing from the other parameters, check them and
+        # store the values as meta informations in the global config data
+        #avg_sam = sc.averaging_samples()   # number of measurements for one data point
+        #avg_tc  = sc.averaging_tc()        # minimal averaging time constant
+        #avg_tim = sc.averaging_time()      # effective measurement time per sweeper point
+        set_tim = sc.settling_time()       # minimum time [sec] from setting and measure
+        #set_acc = sc.settling_inaccuracy() # wait time from setting to recording sweep point
+        #if avg_tim <= 0:
+        #    avg_tim = 1.0 / self._instrument.submodules['demod1'].samplerate() # -> sec/sample
+        #if set_tim < set_acc:
+        #    set_tim = set_acc
+        #if set_tim * avg_sam > avg_tim:
+        #    print("***ERROR: settling", set_tim*avg_sam, "greater than averaging time", avg_tim)
+        self._instrument.Sweep.build_sweep() # to calculate the sweeptime correctly
+        bufferedConfig.update({'param': param,
+                               'sweep': sweep_values,
+                               'layer': layer,
+                               'tmeas': sc.sweeptime() / len(sweep_values),
+                               't_set': set_tim})
+
+    def _send(self, layer):
+        """
+        Build the internal sweep settings and send them to the device.
+        Parameter:
+            layer: numerical index of the current layer of loops. If this is
+                not zero, the behaviour is not tested, but it will be blocked
+                because of error message in sweep() function
+        """
+        if self.dbgprt:
+            print("DBG: send", layer)
+        self._instrument.Sweep.build_sweep()
+        
+    def _run(self, layer):
+        """
+        Run the sweep and retrieve the data.
+        ATTENTION: this call blocks until the sweep is finished!
+        Parameter:
+            layer: numerical index of the current layer of loops. If this is
+                not zero, the behaviour is not tested, but it will be blocked
+                because of error message in sweep() function
+        """
+        if self.dbgprt:
+            print("DBG: run", layer)
+        data = self._instrument.Sweep.get()
+        bufferedConfig.update({'data' : data, # only once
+                               'index': 0})
+        #print(len(data), len(data[0]), data)
+
+    def _getMeas(self) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+        """
+        Calculate the measurement windows.
+        Return:
+            { <channelname>: ([<starttime>,...], [<duration>,...]) }
+            (all times in nanoseconds!)
+        """
+        if self.dbgprt:
+            print("DBG: getMeas")
+            #print("DBG: glob cfg", bufferedConfig)
+        tanf   = []
+        tlen   = []
+        t = 0
+        t_set = bufferedConfig['t_set'] * 1e9  # in Nanoseconds!
+        tmeas = bufferedConfig['tmeas'] * 1e9  # in Nanoseconds!
+        for s in bufferedConfig['sweep']:
+            tanf.append( t + t_set )
+            tlen.append( tmeas )
+            t += t_set + tmeas
+        retval = {'demod': (tanf, tlen)}
+        #print("DBG: measwin", retval)
+        return retval
+
+    def _setter(self, val):
+        """
+        Setter function. Not used but needed by the parent interface.
+        """
+        #print("DBG: setter", val)
+        pass
+    
+    def _getter(self, *args, **kwargs):
+        """
+        Getter function. Not used but needed by the parent interface.
+        Return:
+            Fixed 0.
+        """
+        #print("DBG: getter", args, kwargs)
+        return 0
+
+    def reset_programs(self):
+        """
+        Reset of the sweep configuration.
+        """
+        global bufferedConfig
+        if self.dbgprt:
+            print("DBG: reset_programs")
+        bufferedConfig = {}
+
     
 
 class ZIMFLI(Instrument):
@@ -3477,7 +4193,11 @@ class ZIMFLI(Instrument):
                                                 oscs-1, 1, 'freq'),
                                get_cmd=partial(self._getter, 'oscs',
                                                 oscs-1, 1, 'freq'),
-                               vals=vals.Numbers(0, freq_max)
+                               vals=vals.Numbers(0, freq_max),
+                               docstring="The frequency of the oscillator. Before"
+                                         " writing, the driver checks the valid range"
+                                         " from 0 Hz to 500 kHz (or 5 MHz if the F5M"
+                                         " option is installed)."
                                )
 
         ########################################
@@ -3616,6 +4336,7 @@ class ZIMFLI(Instrument):
             # THE SWEEP ITSELF
             self.add_parameter('Sweep',
                                parameter_class=Sweep,
+                               docstring="Sweeper class"
                                )
 
             # A "manual" parameter: a list of the signals for the sweeper
@@ -3640,6 +4361,55 @@ class ZIMFLI(Instrument):
                                }
             # Set up the sweeper with the above settings
             self.Sweep.build_sweep()
+            
+            # Define all sweepable parameter as BufferedParameter. They have all
+            # the same class and the parameter string denotes the sweepable param.
+            self.add_parameter('buffered_freq1',
+                               parameter_class=lockinBufferedParameter,
+                               parameter='Osc 1 Frequency')
+            self.add_parameter('buffered_auxout1',
+                               parameter_class=lockinBufferedParameter,
+                               parameter='Aux Out 1 Offset')
+            self.add_parameter('buffered_auxout2',
+                               parameter_class=lockinBufferedParameter,
+                               parameter='Aux Out 2 Offset')
+            self.add_parameter('buffered_auxout3',
+                               parameter_class=lockinBufferedParameter,
+                               parameter='Aux Out 3 Offset')
+            self.add_parameter('buffered_auxout4',
+                               parameter_class=lockinBufferedParameter,
+                               parameter='Aux Out 4 Offset')
+            self.add_parameter('buffered_phase1',
+                               parameter_class=lockinBufferedParameter,
+                               parameter='Demod 1 Phase Shift')
+            self.add_parameter('buffered_phase2',
+                               parameter_class=lockinBufferedParameter,
+                               parameter='Demod 2 Phase Shift')
+            self.add_parameter('buffered_out1ampl2',
+                               parameter_class=lockinBufferedParameter,
+                               parameter='Output 1 Amplitude 2')
+            self.add_parameter('buffered_out1off',
+                               parameter_class=lockinBufferedParameter,
+                               parameter='Output 1 Offset')
+            if 'MD' in self.options:
+                self.add_parameter('buffered_phase3',
+                                   parameter_class=lockinBufferedParameter,
+                                   parameter='Demod 3 Phase Shift')
+                self.add_parameter('buffered_phase4',
+                                   parameter_class=lockinBufferedParameter,
+                                   parameter='Demod 4 Phase Shift')
+                self.add_parameter('buffered_freq2',
+                                   parameter_class=lockinBufferedParameter,
+                                   parameter='Osc 2 Frequency')
+                self.add_parameter('buffered_out1ampl4',
+                                   parameter_class=lockinBufferedParameter,
+                                   parameter='Output 1 Amplitude 4')
+                self.add_parameter('buffered_out2ampl8',
+                                   parameter_class=lockinBufferedParameter,
+                                   parameter='Output 2 Amplitude 8')
+                self.add_parameter('buffered_out2off',
+                                   parameter_class=lockinBufferedParameter,
+                                   parameter='Output 2 Offset')
 
         
         ########################################
@@ -3788,6 +4558,9 @@ class ZIMFLI(Instrument):
                                                       attribute))
         if signalstring not in self._sweeper_signals:
             self._sweeper_signals.append(signalstring)
+        
+        self.parameters['buffered_result'] = \
+            lockinBufferedArrayParameter('buffered_result',self)
 
     def remove_signal_from_sweeper(self, demodulator, attribute):
         """
@@ -3812,6 +4585,8 @@ class ZIMFLI(Instrument):
                         ' not previously added.')
         else:
             self._sweeper_signals.remove(signalstring)
+            self.parameters['buffered_result'] = \
+                lockinBufferedArrayParameter('buffered_result',self)
 
     def print_sweeper_settings(self):
         """
@@ -4041,3 +4816,9 @@ class ZIMFLI(Instrument):
                  self.lastsampletime,                   # in device timestamp
                  self.lastsampletime/self.clockbase ]   # dev timestamp in seconds
 
+    def possibleValues(self, d:dict) -> str:
+        """
+        Helper function to print a list of all possible values from a command dict.
+        This is used in the docstring argument to print the current values.
+        """
+        return " Possible values are: '"+"', '".join(list(d.keys()))+"'"
