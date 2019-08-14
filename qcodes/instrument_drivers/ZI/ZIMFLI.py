@@ -2513,7 +2513,6 @@ class SweeperChannel(InstrumentChannel): # doc done ***************************
         if self._parent._sweeper_signals == []:
             raise ValueError('No signals selected! Can not find sweep time.')
         mode = self.bandwidth_mode()
-        print("DBG: get sweep time()", mode)
         # The effective time constant of the demodulator depends on the
         # sweeper/bandwidthcontrol setting.
         # If this setting is 'current', the largest current
@@ -3889,11 +3888,30 @@ class lockinBufferedArrayParameter(BufferedReadableArrayParameter):
         # Initialize base class
         super().__init__(name,
                          get_buffered_cmd=self._getter,
-                         #config_meas_cmd: Optional[Callable]=None,
-                         #arm_meas_cmd: Optional[Callable]=None,
+                         config_meas_cmd=self._configMeas,
+                         arm_meas_cmd=self._armMeas,
                          shape=(shape,),
                          **kwargs)
         self._instr = instrument
+
+    def _configMeas(self, measdict={}):
+        """
+        Routine called with a filles measdict (return from routine _getMeas())
+        to do some configurations before the measurement is started. Then this
+        routine is called without an argument at the start of each buffered loop.
+        
+        For the Lock-In there is nothing to do here.
+        """
+        if self.dbgprt:
+            print("DBG: configMeas", measdict)
+
+    def _armMeas(self):
+        """
+        This routine is called after the configMeas each time the buffered loop
+        goes to the next step (including the first one).
+        """
+        if self.dbgprt:
+            print("DBG: armMeas")
     
     def _getter(self, name:str):
         """
