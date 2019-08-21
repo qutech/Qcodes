@@ -4,15 +4,19 @@ File: SMW200A.py
 Date: Mai / Jun 2019
 Author: Michael Wagener, ZEA-2, m.wagener@fz-juelich.de
         Sarah Fleitmann, ZEA-2, s.fleitmann@fz-juelich.de
-Purpose: QCoDeS-Driver for Vector Signal Generator RS_SMW200A
-
+Purpose: QCoDeS-Driver for Rohde&Schwarz Vector Signal Generator RS_SMW200A
 """
 
 
-import logging
 
-from functools import partial
+# real mode:
 from qcodes import VisaInstrument
+# simulation mode:
+from qcodes.instrument_drivers.rohde_schwarz.SMW200Asim import MockVisa
+
+# both modes:
+import logging
+from functools import partial
 from qcodes.instrument.channel import InstrumentChannel, ChannelList
 from qcodes import validators as vals
 
@@ -20,9 +24,9 @@ log = logging.getLogger(__name__)
 
 
 
-class IQChannel(InstrumentChannel):
+class IQChannel(InstrumentChannel): # doc done ********************************
     """
-    Combines all the parameters concerning the analog I/Q output.
+    The I/Q channels are the analog output channels of the device.
     Parameters:
         state: Actives/deactives the I/Q output. Values are 'ON' and 'OFF'.
         type: Sets the type of the analog signal. Values are 'SING' (single) and 
@@ -70,7 +74,8 @@ class IQChannel(InstrumentChannel):
                            set_cmd='SOUR{}:'.format(self.hwchan)+'IQ:OUTP:ANAL:STAT {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:OUTP:ANAL:STAT?',
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF'))
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Actives/deactives the I/Q output. Values are 'ON' and 'OFF'.")
         
         if 'SMW-K16' in self._parent.options:
             type_validator = vals.Enum('SING', 'DIFF')
@@ -82,13 +87,21 @@ class IQChannel(InstrumentChannel):
                            label='Type',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'IQ:OUTP:ANAL:TYPE {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:OUTP:ANAL:TYPE?',
-                           vals=type_validator)
+                           vals=type_validator,
+                           docstring="Sets the type of the analog signal. Values are"
+                                     " 'SING' (single) and 'DIFF' (differential, only"
+                                     " available with option SMW-K16)")
         
         self.add_parameter('mode',
                            label='Mode',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'IQ:OUTP:ANAL:MODE {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:OUTP:ANAL:MODE?',
-                           vals=mode_validator)
+                           vals=mode_validator,
+                           docstring="""
+                           Determines the mode for setting the output parameters. Values are:
+                               'FIX': Locks the I/Q output settings
+                               'VAR': Unlocks the settings (only available with option SMW-K16)
+                           """)
         
         if 'SMW-B10' in self._parent.options:
             level_validator = vals.Numbers(0.04, 4)
@@ -101,14 +114,22 @@ class IQChannel(InstrumentChannel):
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:OUTP:LEV?',
                            get_parser=float,
                            vals=level_validator,
-                           unit='V')
+                           unit='V',
+                           docstring="Sets the off-load voltage Vp of the analog I/Q signal"
+                                     " output. Values are in range 0.04V to 4V for option"
+                                     " SMW-B10 and in range 0.04V to 2V for option SMW-B9."
+                                     " The value range is adjusted so that the maximum"
+                                     " overall output voltage does not exceed 4V. Only"
+                                     " settable when mode has the value 'VAR'.")
         
         self.add_parameter('coupling', 
                            label='Coupling',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'IQ:OUTP:ANAL:BIAS:COUP:STAT {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:OUTP:ANAL:BIAS:COUP:STAT?',
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF'))
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Couples the bias setting of the I and Q signal"
+                                     " components. Values are 'ON and 'OFF'.")
         
         if 'SMW-B10' in self._parent.options:
             lower = -4+self.level()/2+self.i_offset()/2
@@ -123,7 +144,11 @@ class IQChannel(InstrumentChannel):
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:OUTP:ANAL:BIAS:I?',
                            get_parser=float,
                            vals=bias_validator,
-                           unit='V')
+                           unit='V',
+                           docstring="Specifies the amplifier bias of the I component."
+                                     " The value range is adjusted so that the maximum"
+                                     " overall output voltage does not exceed 4V. Is only"
+                                     " settable, if the mode parameter has the value 'VAR'.")
         
         if 'SMW-B10' in self._parent.options:
             lower = -4+self.level()/2+self.q_offset()/2
@@ -138,7 +163,11 @@ class IQChannel(InstrumentChannel):
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:OUTP:ANAL:BIAS:Q?',
                            get_parser=float,
                            vals=bias_validator,
-                           unit='V')
+                           unit='V',
+                           docstring="Specifies the amplifier bias of the Q component."
+                                     " The value range is adjusted so that the maximum"
+                                     " overall output voltage does not exceed 4V. Is only"
+                                     " settable, if the mode parameter has the value 'VAR'.")
         
         if 'SMW-B10' in self._parent.options:
             lower = -4+self.level()/2+self.i_bias()/2
@@ -155,7 +184,13 @@ class IQChannel(InstrumentChannel):
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:OUTP:ANAL:OFFS:I?',
                            get_parser=float,
                            vals=offset_validator,
-                           unit='V')
+                           unit='V',
+                           docstring="Sets an offset between the inverting and non-inverting"
+                                     " input of the differential analog I/Q output signal"
+                                     " for the I component."
+                                     " The value range is adjusted so that the maximum"
+                                     " overall output voltage does not exceed 4V. Is only"
+                                     " settable, if the mode parameter has the value 'VAR'.")
         
         if 'SMW-B10' in self._parent.options:
             lower = -4+self.level()/2+self.q_bias()/2
@@ -172,18 +207,24 @@ class IQChannel(InstrumentChannel):
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:OUTP:ANAL:OFFS:Q?',
                            get_parser=float,
                            vals=offset_validator,
-                           unit='V')
+                           unit='V',
+                           docstring="Sets an offset between the inverting and non-inverting"
+                                     " input of the differential analog I/Q output signal"
+                                     " for the Q component."
+                                     " The value range is adjusted so that the maximum"
+                                     " overall output voltage does not exceed 4V. Is only"
+                                     " settable, if the mode parameter has the value 'VAR'.")
         
         # TODO: setter methods for the last 4 parameters
         # --> they have dynamic validators
 
 
-class IQModulation(InstrumentChannel):
+class IQModulation(InstrumentChannel): # doc done *****************************
     """
     Combines all the parameters concerning the IQ modulation.
     Parameters:
-        state: Activates/deactivates the I/Q modulation. Values are 'ON', and 'OFF'
-        source: Selects/reads te input signal source for the I/Q modulator. 
+        state: Activates/deactivates the I/Q modulation. Values are 'ON', and 'OFF'.
+        source: Selects/reads the input signal source for the I/Q modulator. 
             Values are:
             'BAS': internal baseband signal
             'ANAL': external analog signal 
@@ -201,7 +242,14 @@ class IQModulation(InstrumentChannel):
                 I/Q modulator is configured automatically.
         swap: Activates/Deactives the swapping of the I and Q channel. Values are
             'ON' and 'OFF'.
-        wideband: Actives/Deactivates the wideband mode. Values are 'ON' and 'OFF'.
+        crest_factor: If source set to `ANAL' (Analog Wideband I/Q Input), sets
+            the crest factor of the externally supplied analog signal. The crest
+            factor gives the difference in level between the peak envelope power
+            (PEP) and the average power value (RMS) in dB. The R&S SMW uses this
+            value for the calculation of the RF output power. The allowed range
+            is from 0 dB to 35 dB.
+        wideband: Activates/deactivates optimization for wideband modulation signals
+            (higher I/Q modulation bandwidth). Values are 'ON' and 'OFF'.
     """
     def __init__(self, parent: 'RohdeSchwarz_SMW200A', name: str, hwchan: int):
         """
@@ -222,21 +270,39 @@ class IQModulation(InstrumentChannel):
                            label='Source',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'IQ:SOUR {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:SOUR?',
-                           vals=source_validator)
+                           vals=source_validator,
+                           docstring="""
+                           Selects/reads the input signal source for the I/Q modulator.
+                           Values are:
+                               'BAS': internal baseband signal
+                               'ANAL': external analog signal 
+                               'DIFF': differential analog signal (only with option SMW-K739)
+                           """)
         
         self.add_parameter('state',
                            label='State',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'IQ:STAT {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:STAT?',
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF'))
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Activates/deactivates the I/Q modulation. Values"
+                                     " are 'ON', and 'OFF'")
         
         self.add_parameter('gain',
                            label='Gain',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'IQ:GAIN {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:GAIN?',
                            vals=vals.Enum('DBM4', 'DBM2', 'DB0', 'DB2', 'DB4', \
-                                          'DB8', 'DB6', 'DBM3', 'DB3', 'AUTO'))
+                                          'DB8', 'DB6', 'DBM3', 'DB3', 'AUTO'),
+                           docstring="""
+                           Optimizes the modulation of the I/Q modulator for a subset
+                           of measurement requirements. Possible values are:
+                               'DB0'=0dB, 'DB2'=+2dB, 'DB4'=+4dB, 'DB6'=+6dB, 'DB8'=+8dB
+                               'DBM2'=-2dB, 'DBM4'=-4dB
+                               'DB3' and 'DBM3' provided for backward compatibility (+/-2dB)
+                               'AUTO': The gain value is retrieved form the connected R&S SZU.
+                               The I/Q modulator is configured automatically.
+                           """)
         
         self.add_parameter('crest_factor',
                            label='Crest factor',
@@ -244,25 +310,37 @@ class IQModulation(InstrumentChannel):
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:CRES?',
                            get_parser=float,
                            vals=vals.Numbers(0, 35),
-                           unit='dB')
+                           unit='dB',
+                           docstring="If source set to `ANAL' (Analog Wideband I/Q Input),"
+                                     " sets the crest factor of the externally supplied"
+                                     " analog signal. The crest factor gives the difference"
+                                     " in level between the peak envelope power (PEP) and"
+                                     " the average power value (RMS) in dB. The R&S SMW uses"
+                                     " this value for the calculation of the RF output power."
+                                     " The allowed range is from 0 dB to 35 dB.")
         
         self.add_parameter('swap',
                            label='Swap',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'IQ:SWAP:STAT {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:SWAP:STAT?',
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF'))
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Activates/Deactives the swapping of the I"
+                                     " and Q channel. Values are 'ON' and 'OFF'.")
         
         self.add_parameter('wideband',
                            label='Wideband',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'IQ:WBST {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'IQ:WBST?',
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF'))
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Activates/deactivates optimization for wideband"
+                                     " modulation signals (higher I/Q modulation"
+                                     " bandwidth). Values are 'ON' and 'OFF'.")
 
 
 
-class FrequencyModulation(InstrumentChannel):
+class FrequencyModulation(InstrumentChannel): # doc done **********************
     """
     Combines all the parameters concerning the frequency modulation.
     Parameters:
@@ -290,9 +368,8 @@ class FrequencyModulation(InstrumentChannel):
         mode: Selects the mode for the frequency modulation. Values are:
             'NOR': normal mode
             'LNO': low noise mode
-        sensitivity: Queries the sensitivity of the externally supplied signal for 
+        sensitivity: (ReadOnly) Queries the sensitivity of the externally supplied signal for 
             frequency modulation. The sensitivity depends on the set modulation deviation.
-            Only getable, not setable.
         
     """
     def __init__(self, parent: 'RohdeSchwarz_SMW200A', name: str, hwchan: int, chnum: int):
@@ -313,7 +390,9 @@ class FrequencyModulation(InstrumentChannel):
                            set_cmd='SOUR{}:FM{}:'.format(self.hwchan, self.chnum)+'STAT {}',
                            get_cmd='SOUR{}:FM{}:STAT?'.format(self.hwchan, self.chnum),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF'))
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="actives/deactivates the frequency modulation."
+                                     " Values are 'ON' and 'OFF'.")
         
         self.add_parameter('deviation',
                            label='Deviation',
@@ -321,23 +400,44 @@ class FrequencyModulation(InstrumentChannel):
                            get_cmd='SOUR{}:FM{}:DEV?'.format(self.hwchan, self.chnum),
                            get_parser=float,
                            vals=vals.Numbers(0, 1.6e8),
-                           unit='Hz')
+                           unit='Hz',
+                           docstring="Sets the modulation deviation of the frequency modulation in Hz.")
         
+        # Select the set of available values from the installed options
         if 'SMW-B9' in self._parent.options and not 'SMW-K24' in self._parent.options:
-            source_validator = vals.Enum('INT', 'LF1', 'EXT', 'EXT1', 'EXT2', 'INTB') \
-            if self.chnum == 1 else vals.Enum('LF1', 'EXT1', 'EXT2', 'INTB')
+            sv = ['INT', 'LF1', 'EXT', 'EXT1', 'EXT2', 'INTB'] \
+            if self.chnum == 1 else ['LF1', 'EXT1', 'EXT2', 'INTB']
         elif not 'SMW-B9' in self._parent.options and 'SMW-K24' in self._parent.options:
-            source_validator = vals.Enum('INT', 'LF1', 'LF2', 'NOIS', 'EXT', 'EXT1', 'EXT2')
+            sv = ['INT', 'LF1', 'LF2', 'NOIS', 'EXT', 'EXT1', 'EXT2']
         elif 'SMW-B9' in self._parent.options and 'SMW-K24' in self._aprent.options:
-            source_validator = vals.Enum('INT', 'LF1', 'LF2', 'NOIS', 'EXT', 'EXT1', 'EXT2', 'INTB')
+            sv = ['INT', 'LF1', 'LF2', 'NOIS', 'EXT', 'EXT1', 'EXT2', 'INTB']
         else:
-            source_validator = vals.Enum('INT', 'LF1', 'EXT', 'EXT1', 'EXT2') \
-            if self.chnum == 1 else vals.Enum('LF1', 'EXT1', 'EXT2')
+            sv = ['INT', 'LF1', 'EXT', 'EXT1', 'EXT2'] \
+            if self.chnum == 1 else ['LF1', 'EXT1', 'EXT2']
+        # Generate part of the docstring value according to the validator strings
+        ds = ""
+        if 'INT' in sv:
+            ds += "\n'INT': internally generated LF signal = 'LF1'"
+        if 'EXT' in sv:
+            ds += "\n'EXT': externally supplied LF signal  = 'EXT1'"
+        if 'LF1' in sv:
+            ds += "\n'LF1': first internally generated signal"
+        if 'LF2' in sv:
+            ds += "\n'LF2': second internally gererated signal"
+        if 'NOIS' in sv:
+            ds += "\n'NOIS': internally generated noise signal"
+        if 'EXT1' in sv:
+            ds += "\n'EXT1': first externally supplied signal"
+        if 'EXT2' in sv:
+            ds += "\n'EXT2': second externally supplied signal"
+        if 'INTB' in sv:
+            ds += "\n'INTB': internal baseband signal"
         self.add_parameter('source',
                            label='Source',
                            set_cmd='SOUR{}:FM{}:'.format(self.hwchan, self.chnum)+'SOUR {}',
                            get_cmd='SOUR{}:FM{}:SOUR?'.format(self.hwchan, self.chnum),
-                           vals=source_validator)
+                           vals=vals.Enum(*sv),
+                           docstring="Selects the modulation source. Values are:"+ds)
         
         if 'SMW-XXX' in self._parent.options: #TODO: welche Option wird hierfür benötigt?
             self.add_parameter('coupling_mode',
@@ -360,28 +460,36 @@ class FrequencyModulation(InstrumentChannel):
                            get_cmd='SOUR{}:'.format(self.hwchan)+'FM:RAT?',
                            get_parser=float,
                            vals=vals.Numbers(0, 100),
-                           unit='%')
+                           unit='%',
+                           docstring="Sets the deviation ratio (path2 to path1) in percent.")
         
         self.add_parameter('mode',
                            label='Mode',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'FM:MODE {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'FM:MODE?',
-                           vals=vals.Enum('NORM', 'LNO'))
+                           vals=vals.Enum('NORM', 'LNO'),
+                           docstring="Selects the mode for the frequency modulation."
+                                     " 'NOR'=normal mode, 'LNO'=low noise mode")
                            
         self.add_parameter('sensitivity',
                            label='Sensitivity',
                            set_cmd=False,
                            get_cmd='SOUR{}:'.format(self.hwchan)+'FM:SENS?',
                            get_parser=float,
-                           unit='Hz/V')
+                           unit='Hz/V',
+                           docstring="(ReadOnly) Queries the sensitivity of the externally"
+                                     " supplied signal for frequency modulation. The"
+                                     " sensitivity depends on the set modulation deviation.")
 
 
 
-class AmplitudeModulation(InstrumentChannel):
+class AmplitudeModulation(InstrumentChannel): # doc done **********************
     """
-    Combines all the parameters concerning the amplitude modulation.
+    Combines all the parameters concerning the amplitude modulation. Activation
+    of amplitude modulation deactivates ARB, I/Q modulation, digital modulation
+    and all digital standards.
     Parameters:
-        state: actives/deactivates the frequency modulation. Values are 'ON' and 'OFF'.
+        state: actives/deactivates the amplitude modulation. Values are 'ON' and 'OFF'.
         source: Selects the modulation source. Values are: 
             'INT': internally generated LF signal = 'LF1' (for channel 2 only 
                 available with option SMW-K24)
@@ -402,7 +510,7 @@ class AmplitudeModulation(InstrumentChannel):
             'TOT': Couples the deviation depth of both paths.
             'RAT': Couples the deviation depth ratio of both paths.
         deviation_ratio: Sets the deviation ratio (path2 to path1) in percent.
-        sensitivity: Queries the sensitivity of the externally applied signal. 
+        sensitivity: (ReadOnly) Queries the sensitivity of the externally applied signal.
             The sensitivity depends on the set modulation depth. The returned value
             reports the sensitivity in %/V. It is assigned to the voltage value for
             full modulation of the input.
@@ -425,18 +533,41 @@ class AmplitudeModulation(InstrumentChannel):
                            set_cmd='SOUR{}:AM{}:'.format(self.hwchan, self.chnum)+'STAT {}',
                            get_cmd='SOUR{}:AM{}:STAT?'.format(self.hwchan, self.chnum),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF'))
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="""
+                           Actives/deactivates the amplitude modulation. Values are 'ON' and 'OFF'.
+                           Activation of amplitude modulation deactivates ARB, I/Q modulation,
+                           digital modulation and all digital standards.
+                           """)
         
+        # Select the set of available values from the installed options
         if 'SMW-K24' in self._parent.options:
-            source_validator = vals.Enum('LF1', 'LF2', 'EXT1', 'EXT2', 'NOIS', 'INT', 'EXT')
+            sv = ['LF1', 'LF2', 'EXT1', 'EXT2', 'NOIS', 'INT', 'EXT']
         else:
-            source_validator = vals.Enum('LF1', 'EXT1', 'EXT2', 'INT', 'EXT') if chnum == 1 \
-            else vals.Enum('LF1', 'EXT1', 'EXT2')
+            sv = ['LF1', 'EXT1', 'EXT2', 'INT', 'EXT'] if chnum == 1 \
+            else ['LF1', 'EXT1', 'EXT2']
+        # Generate part of the docstring value according to the validator strings
+        ds = ""
+        if 'INT' in sv:
+            ds += "\n'INT': internally generated LF signal = 'LF1'"
+        if 'EXT' in sv:
+            ds += "\n'EXT': externally supplied LF signal  = 'EXT1'"
+        if 'LF1' in sv:
+            ds += "\n'LF1': first internally generated signal"
+        if 'LF2' in sv:
+            ds += "\n'LF2': second internally gererated signal"
+        if 'NOIS' in sv:
+            ds += "\n'NOIS': internally generated noise signal"
+        if 'EXT1' in sv:
+            ds += "\n'EXT1': first externally supplied signal"
+        if 'EXT2' in sv:
+            ds += "\n'EXT2': second externally supplied signal"
         self.add_parameter('source',
                            label='Source',
                            set_cmd='SOUR{}:AM{}:'.format(self.hwchan, self.chnum)+'SOUR {}',
                            get_cmd='SOUR{}:AM{}:SOUR?'.format(self.hwchan, self.chnum),
-                           vals=source_validator)
+                           vals=vals.Enum(*sv),
+                           docstring="Selects the modulation source. Values are:"+ds)
         
         self.add_parameter('depth',
                            label='Depth',
@@ -444,7 +575,8 @@ class AmplitudeModulation(InstrumentChannel):
                            get_cmd='SOUR{}:AM{}:DEPT?'.format(self.hwchan, self.chnum),
                            get_parser=float,
                            unit='%',
-                           vals=vals.Numbers(0, 100))
+                           vals=vals.Numbers(0, 100),
+                           docstring="Sets the depth of the amplitude modulation in percent.")
         
         if 'SMW-XXX' in self._parent.options: #TODO: welche Option wird hierfür benötigt?
             self.add_parameter('total_depth',
@@ -467,18 +599,24 @@ class AmplitudeModulation(InstrumentChannel):
                            get_cmd='SOUR{}:'.format(self.hwchan)+'AM:RAT?',
                            get_parser=float,
                            vals=vals.Numbers(0, 100),
-                           unit='%')
+                           unit='%',
+                           docstring="Sets the deviation ratio (path2 to path1) in percent.")
         
         self.add_parameter('sensitivity',
                            label='Sensitifity',
                            set_cmd=False,
                            get_cmd='SOUR{}:'.format(self.hwchan)+'AM:SENS?',
                            get_parser=float,
-                           unit='%/V')
+                           unit='%/V',
+                           docstring="(ReadOnly) Queries the sensitivity of the externally"
+                                     " applied signal. The sensitivity depends on the set"
+                                     " modulation depth. The returned value reports the"
+                                     " sensitivity in %/V. It is assigned to the voltage"
+                                     " value for full modulation of the input.")
 
 
 
-class PulseModulation(InstrumentChannel):
+class PulseModulation(InstrumentChannel): # doc done **************************
     """
     Combines all the parameters concerning the pulse modulation.
     Parameters:
@@ -506,17 +644,17 @@ class PulseModulation(InstrumentChannel):
             mode: Selects the mode for the pulse modulation. Values can be:
                 'SING': generates a single pulse
                 'DOUB': generates two pulses within one pulse period
-            double_delay: Sets the delay from the start of the first pulse to \
-                the start of the second pulse
-            double_width: Sets the width of the second pulse
+            double_delay: Sets the delay from the start of the first pulse to
+                the start of the second pulse.
+            double_width: Sets the width of the second pulse.
             trigger_mode: Selects a trigger mode for generating the modulation signal.
                 Values are 'AUTO' (AUTOmatic), 'EXT' (EXTernal), 'EGAT' (External GATed),
-                'ESIN' (External single)
+                'ESIN' (External single).
             period: Sets the period of the generated pulse, that means the 
                 repetition frequency of the internally generated modulation signal.
             width: Sets the width of the generated pulse, that means the pulse length.
                 It must be at least 20ns less than the set pulse period.
-            delay: Sets the pulse delay
+            delay: Sets the pulse delay.
     """
     def __init__(self, parent: 'RohdeSchwarz_SMW200A', name: str, hwchan: int):
         """
@@ -534,25 +672,37 @@ class PulseModulation(InstrumentChannel):
                                label='Mode',
                                set_cmd='SOUR{}:'.format(self.hwchan)+'PULM:MODE {}',
                                get_cmd='SOUR{}:'.format(self.hwchan)+'PULM:MODE?',
-                               vals=vals.Enum('SING', 'DOUB'))
+                               vals=vals.Enum('SING', 'DOUB'),
+                               docstring="""
+                               Selects the mode for the pulse modulation.
+                               'SING': generates a single pulse
+                               'DOUB': generates two pulses within one pulse period.
+                               """)
         
             self.add_parameter('double_delay',
                                label='Double delay',
                                set_cmd='SOUR{}:'.format(self.hwchan)+'PULM:DOUB:DEL {}',
                                get_cmd='SOUR{}:'.format(self.hwchan)+'PULM:DOUB:DEL?',
-                               get_parser=float)
+                               get_parser=float,
+                               docstring="Sets the delay from the start of the first"
+                                         " pulse to the start of the second pulse.")
             
             self.add_parameter('double_width',
                                label='Double width',
                                set_cmd='SOUR{}:'.format(self.hwchan)+'PULM:DOUB:WID {}',
                                get_cmd='SOUR{}:'.format(self.hwchan)+'PULM:DOUB:WID?',
-                               get_parser=float)
+                               get_parser=float,
+                               docstring="Sets the width of the second pulse.")
         
             self.add_parameter('trigger_mode',
                                label='Trigger mode',
                                set_cmd='SOUR{}:'.format(self.hwchan)+'PULM:TRIG:MODE {}',
                                get_cmd='SOUR{}:'.format(self.hwchan)+'PULM:TRIG:MODE?',
-                               vals=vals.Enum('AUTO', 'EXT', 'EGAT', 'ESIN'))
+                               vals=vals.Enum('AUTO', 'EXT', 'EGAT', 'ESIN'),
+                               docstring="Selects a trigger mode for generating the modulation"
+                                         " signal. Values are 'AUTO' (AUTOmatic), 'EXT'"
+                                         " (EXTernal), 'EGAT' (External GATed), 'ESIN'"
+                                         " (External single).")
         
             self.add_parameter('period',
                                label='Period',
@@ -560,15 +710,21 @@ class PulseModulation(InstrumentChannel):
                                get_cmd='SOUR{}:'.format(self.hwchan)+'PULM:PER?',
                                get_parser=float,
                                vals=vals.Numbers(20e-9, 100),
-                               unit='s') 
+                               unit='s',
+                               docstring="Sets the period of the generated pulse, that"
+                                         " means the repetition frequency of the internally"
+                                         " generated modulation signal.")
         
             self.add_parameter('width',
                                label='Width',
                                set_cmd='SOUR{}:'.format(self.hwchan)+'PULM:WIDT {}',
                                get_cmd='SOUR{}:'.format(self.hwchan)+'PULM:WIDT?',
                                get_parser=float,
-                               vals=vals.Numbers(20e-9, self.period()-20e-9),
-                               unit='s')
+                               vals=vals.Numbers(20e-9, self.period()-20e-9), # TODO: dynamisch?
+                               unit='s',
+                               docstring="Sets the width of the generated pulse, that"
+                                         " means the pulse length. It must be at least"
+                                         " 20ns less than the set pulse period.")
         
             self.add_parameter('delay',
                                label='Delay',
@@ -576,63 +732,93 @@ class PulseModulation(InstrumentChannel):
                                get_cmd='SOUR{}:'.format(self.hwchan)+'PULM:DEL?',
                                get_parser=float,
                                vals=vals.Numbers(),
-                               unit='s')
+                               unit='s',
+                               docstring="Sets the pulse delay.")
         
         self.add_parameter('state',
                            label='State',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'PULM:STAT {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'PULM:STAT?',
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF'))
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Activates/deactivates the pulse modulation."
+                                     " Values are 'ON' and 'OFF'.")
         
-        source_validator = vals.Enum('INT', 'EXT') if 'SMW-K23' in self._parent.options \
-                            else vals.Enum('EXT')
+        sv = ['INT', 'EXT'] if 'SMW-K23' in self._parent.options else ['EXT']
+        ds = ""
+        if 'INT' in sv:
+            ds += "\n'INT': internally generated signal"
+        if 'EXT' in sv:
+            ds += "\n'EXT': externally supplied signal"
         self.add_parameter('source',
                            label='Source',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'PULM:SOUR {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'PULM:SOUR?',
-                           vals=source_validator)
+                           vals=vals.Enum(*sv),
+                           docstring="Selects the modulation source. Values are:"+ds)
         
         self.add_parameter('transition_type',
                            label='Transition type',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'PULM:TTYP {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'PULM:TTYP?',
-                           vals=vals.Enum('SMO', 'FAST'))
+                           vals=vals.Enum('SMO', 'FAST'),
+                           docstring="""
+                           Sets the transition mode for the pulse signal.
+                           'SMO': flattens the slew, resulting in longer rise/fall times (SMOothed),
+                           'FAST': enables fast transition with shortest rise and fall times
+                           """)
         
         self.add_parameter('video_polarity',
                            label='Video polaraity',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'PULM:OUTP:VID:POL {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'PULM:OUTP:VID:POL?',
-                           vals=vals.Enum('NORM', 'INV'))
+                           vals=vals.Enum('NORM', 'INV'),
+                           docstring="""
+                           Sets the polarity of the pulse video (modulating) signal, related to
+                           the RF (modulated) signal.
+                           'NORM': the video signal follows the RF signal, that means it is high
+                            when RF signal is high and vice versa
+                           'INV': the video signal follows in inverted mode
+                           """)
         
         self.add_parameter('polarity',
                            label='Polarity',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'PULM:POL {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'PULM:POL?',
-                           vals=vals.Enum('NORM', 'INV'))
+                           vals=vals.Enum('NORM', 'INV'),
+                           docstring="""
+                           sets the polarity of the externally applied modulation signal
+                           'NORM': Suppresses the RF signal during the pulse pause
+                           'INV': Suppresses the RF signal during the pulse
+                           """)
         
         self.add_parameter('impedance',
                            label='Impedance',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'PULM:IMP {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'PULM:IMP?',
-                           vals=vals.Enum('G50', 'G1K'))
+                           vals=vals.Enum('G50', 'G1K'),
+                           docstring="Sets the impedance for the external pulse modulation"
+                                     " input. Values are 'G50' and 'G1K'")
         
         self.add_parameter('trigger_impedance',
                            label='Trigger impedance',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'PULM:TRIG:EXT:IMP {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'PULM:TRIG:EXT:IMP?',
-                           vals=vals.Enum('G50', 'G10K'))
+                           vals=vals.Enum('G50', 'G10K'),
+                           docstring="Sets the impedance for the external pulse trigger."
+                                     " Values are 'G50' and 'G10K'")
         
 
 
 
-class PhaseModulation(InstrumentChannel):
+class PhaseModulation(InstrumentChannel): # doc done **************************
     """
     Combines all the parameters concerning the phase modulation.
     Parameters:
         state: Activates or deactivates phase modulation. 
             Activation of phase modulation deactivates frequency modulation.
             Possible values are 'ON' and 'OFF'.
+        deviation: Sets the modulation deviation of the phase modulation in RAD.
         source: Selects the modulation source. Values are: 
             'INT': internally generated LF signal = 'LF1' (for channel 2 only 
                 available with option SMW-K24)
@@ -657,6 +843,9 @@ class PhaseModulation(InstrumentChannel):
         total_deviation: Sets the total deviation of the LF signal when using 
             combined signal sources. Possible values range from 0 to 20.
         ratio: Sets the deviation ratio (path2 to path1) in percent.
+        sensitivity: Queries the sensitivity of the externally applied signal for phase
+            modulation. The returned value reports the sensitivity in RAD/V. It is assigned
+            to the voltage value for full modulation of the input.
     """    
     def __init__(self, parent: 'RohdeSchwarz_SMW200A', name: str, hwchan: int, chnum: int):
         """
@@ -676,36 +865,67 @@ class PhaseModulation(InstrumentChannel):
                            set_cmd='SOUR{}:PM{}:'.format(self.hwchan, self.chnum)+'STAT {}',
                            get_cmd='SOUR{}:PM{}:STAT?'.format(self.hwchan, self.chnum),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF'))
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Activates or deactivates phase modulation. Values are"
+                                     " 'ON' and 'OFF'. Activation of phase modulation"
+                                     " deactivates frequency modulation.")
         
         self.add_parameter('deviation',
                            label='Deviation',
                            set_cmd='SOUR:PM{}:'.format(self.chnum)+'DEV {}',
                            get_cmd='SOUR:PM{}:DEV?'.format(self.chnum),
                            vals=vals.Numbers(0, 16),
-                           unit='RAD')
+                           unit='RAD',
+                           docstring="Sets the modulation deviation of the phase modulation in RAD.")
         
+        # Select the set of available values from the installed options
         if 'SMW-B9' in self._parent.options and not 'SMW-K24' in self._parent.options:
-            source_validator = vals.Enum('INT', 'LF1', 'EXT', 'EXT1', 'EXT2', 'INTB') \
-            if self.chnum == 1 else vals.Enum('LF1', 'EXT1', 'EXT2', 'INTB')
+            sv = ['INT', 'LF1', 'EXT', 'EXT1', 'EXT2', 'INTB'] \
+            if self.chnum == 1 else ['LF1', 'EXT1', 'EXT2', 'INTB']
         elif not 'SMW-B9' in self._parent.options and 'SMW-K24' in self._parent.options:
-            source_validator = vals.Enum('INT', 'LF1', 'LF2', 'NOIS', 'EXT', 'EXT1', 'EXT2')
+            sv = ['INT', 'LF1', 'LF2', 'NOIS', 'EXT', 'EXT1', 'EXT2']
         elif 'SMW-B9' in self._parent.options and 'SMW-K24' in self._aprent.options:
-            source_validator = vals.Enum('INT', 'LF1', 'LF2', 'NOIS', 'EXT', 'EXT1', 'EXT2', 'INTB')
+            sv = ['INT', 'LF1', 'LF2', 'NOIS', 'EXT', 'EXT1', 'EXT2', 'INTB']
         else:
-            source_validator = vals.Enum('INT', 'LF1', 'EXT', 'EXT1', 'EXT2') \
-            if self.chnum == 1 else vals.Enum('LF1', 'EXT1', 'EXT2')
+            sv = ['INT', 'LF1', 'EXT', 'EXT1', 'EXT2'] \
+            if self.chnum == 1 else ['LF1', 'EXT1', 'EXT2']
+        # Generate part of the docstring value according to the validator strings
+        ds = ""
+        if 'INT' in sv:
+            ds += "\n'INT': internally generated LF signal = 'LF1'"
+        if 'EXT' in sv:
+            ds += "\n'EXT': externally supplied LF signal  = 'EXT1'"
+        if 'LF1' in sv:
+            ds += "\n'LF1': first internally generated signal"
+        if 'LF2' in sv:
+            ds += "\n'LF2': second internally gererated signal"
+        if 'NOIS' in sv:
+            ds += "\n'NOIS': internally generated noise signal"
+        if 'EXT1' in sv:
+            ds += "\n'EXT1': first externally supplied signal"
+        if 'EXT2' in sv:
+            ds += "\n'EXT2': second externally supplied signal"
+        if 'INTB' in sv:
+            ds += "\n'INTB': internal baseband signal"
         self.add_parameter('source',
                            label='Source',
                            set_cmd='SOUR{}:PM{}:'.format(self.hwchan, self.chnum)+'SOUR {}',
                            get_cmd='SOUR{}:PM{}:SOUR?'.format(self.hwchan, self.chnum),
-                           vals=source_validator)
+                           vals=vals.Enum(*sv),
+                           docstring="Selects the modulations source. Values are:"+ds)
         
         self.add_parameter('mode',
                            label='Mode',
                            set_cmd='SOUR{}:'.format(self.hwchan)+'PM:MODE {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'PM:MODE?',
-                           vals=vals.Enum('HBAN', 'HDEV', 'LNO'))
+                           vals=vals.Enum('HBAN', 'HDEV', 'LNO'),
+                           docstring="""
+                           Selects the mode for the phase modulation. Possible values are:
+                           'HBAN': sets the maximum available bandwidth (High BANdwidth)
+                           'HDEV': sets the maximum range for deviation (High DEViation)
+                           'LNO': selects a phase modulation mode with phase noise and spurious
+                               characteristics close to CW mode. (Low NOise)
+                           """)
         
         if 'SMW-XXX' in self._parent.options: #TODO: welche Option wird hierfür benötigt?
             self.add_parameter('coupling_mode',
@@ -726,18 +946,23 @@ class PhaseModulation(InstrumentChannel):
                            set_cmd='SOUR{}:'.format(self.hwchan)+'PM:RAT {}',
                            get_cmd='SOUR{}:'.format(self.hwchan)+'PM:RAT?',
                            vals=vals.Numbers(0, 100),
-                           unti='%')
+                           unti='%',
+                           docstring="Sets the deviation ratio (path2 to path1) in percent.")
         
         self.add_parameter('sensitivity',
                            label='Sensitivity',
                            set_cmd=False,
                            get_cmd='SOUR{}:'.format(self.hwchan)+'PM:SENS?',
-                           unit='RAD/V')
+                           unit='RAD/V',
+                           docstring="(ReadOnly) Queries the sensitivity of the externally"
+                                     " applied signal for phase modulation. The returned"
+                                     " value reports the sensitivity in RAD/V. It is assigned"
+                                     " to the voltage value for full modulation of the input.")
 
 
 
 
-class LFOutputSweep(InstrumentChannel):
+class LFOutputSweep(InstrumentChannel): # doc done ****************************
     """
     Combines all the parameters concerning one LF output Sweeping.
     The LF output is used as modulation signal for the analog modulation.
@@ -751,14 +976,16 @@ class LFOutputSweep(InstrumentChannel):
         shape: Waveform shape for sweep. Allowed values are 'SAWTOOTH'
                 and 'TRIANGLE'
         execute: Executes one RF level sweep. Use this without any ( )
-        retrace: To start frequency while waiting for trigger. Values are 'ON'
-                and 'OFF'
-        running: Reports the current sweep state and is ReadOnly. Returnvalues
+        retrace: Activates that the signal changes to the start frequency value
+            while it is waiting for the next trigger event. Values are 'ON' and
+            'OFF'. You can enable this feature, when you are working with sawtooth
+            shapes in sweep mode 'MAN' or 'STEP'.
+        running: (ReadOnly) Reports the current sweep state. Returnvalues
                 are 'ON' or 'OFF'.
         spacing: calculationmode of frequency intervals. Values are 'LIN' or 'LOG'
-        log_step: logarithmically determined step size for the RF freq sweep.
-                The value can be from 0.01% upto 100%
-        lin_step: step size for linear RF freq sweep. The value can be from 0.01
+        log_step: Sets the step width factor for logarithmic sweeps to calculate
+            the frequencies of the steps. The value can be from 0.01% upto 100%.
+        lin_step: Set the step size for linear sweep. The value can be from 0.01
                 up to the value of <OutputChannel::sweep_span>
     """
     def __init__(self, parent: 'RohdeSchwarz_SMW200A', name: str, hwchan: int):
@@ -779,7 +1006,8 @@ class LFOutputSweep(InstrumentChannel):
                            get_cmd='SOUR{}:LFO:SWE:DWEL?'.format(self.hwchan),
                            get_parser=float,
                            vals=vals.Numbers(0.0005, 100),
-                           unit='s')
+                           unit='s',
+                           docstring="Dwell time in seconds from 0.5 ms to 100 s.")
 
         sweepmode = vals.Enum('AUTO', 'MAN', 'STEP')
         self.add_parameter('mode',
@@ -788,9 +1016,10 @@ class LFOutputSweep(InstrumentChannel):
                            get_cmd='SOUR{}:LFO:SWE:MODE?'.format(self.hwchan),
                            vals=sweepmode,
                            docstring="""
-                           AUTO = Each trigger triggers exactly one complete sweep.
-                           MAN  = You can trigger every step individually with a command.
-                           STEP = Each trigger triggers one sweep step only.
+                           Cycle mode for level sweep. Values are:
+                           'AUTO': Each trigger triggers exactly one complete sweep.
+                           'MAN': You can trigger every step individually with a command.
+                           'STEP': Each trigger triggers one sweep step only.
                            """)
 
         self.add_parameter('points',
@@ -798,35 +1027,48 @@ class LFOutputSweep(InstrumentChannel):
                            set_cmd='SOUR{}:LFO:SWE:'.format(self.hwchan)+'POIN {}',
                            get_cmd='SOUR{}:LFO:SWE:POIN?'.format(self.hwchan),
                            get_parser=int,
-                           vals=vals.Numbers(2))    # Upperlimit=MAXINT
+                           vals=vals.Numbers(2),    # Upperlimit=MAXINT
+                           docstring="Steps within level sweep range")
 
         self.add_parameter('shape',
                            label='Waveform shape for sweep',
                            set_cmd='SOUR{}:LFO:SWE:'.format(self.hwchan)+'SHAP {}',
                            get_cmd='SOUR{}:LFO:SWE:SHAP?'.format(self.hwchan),
-                           vals=vals.Enum('SAWTOOTH','TRIANGLE'))
+                           vals=vals.Enum('SAWTOOTH','TRIANGLE'),
+                           docstring="Waveform shape for sweep. Allowed values"
+                                     " are 'SAWTOOTH' and 'TRIANGLE'")
 
         self.add_parameter('execute',
                            label='Executes one RF level sweep',
-                           call_cmd='SOUR{}:LFO:SWE:EXEC'.format(self.hwchan))
+                           call_cmd='SOUR{}:LFO:SWE:EXEC'.format(self.hwchan),
+                           docstring="Executes one RF level sweep. Use this without any ( )")
 
         self.add_parameter('retrace',
-                           label='To start while waiting for trigger',
+                           label='Set to start frequency while waiting for trigger  ',
                            set_cmd='SOUR{}:LFO:SWE:'.format(self.hwchan)+'RETR {}',
                            get_cmd='SOUR{}:LFO:SWE:RETR?'.format(self.hwchan),
-                           vals=vals.Enum('ON','OFF'))
+                           vals=vals.Enum('ON','OFF'),
+                           docstring="Activates that the signal changes to the start frequency"
+                                     " value while it is waiting for the next trigger event."
+                                     " Values are 'ON' and 'OFF'. You can enable this feature,"
+                                     " when you are working with sawtooth shapes in sweep mode"
+                                     " 'MAN' or 'STEP'.")
 
         self.add_parameter('running',
                            label='Current sweep state',
                            set_cmd=False,
                            get_cmd='SOUR{}:LFO:SWE:RUNN?'.format(self.hwchan),
-                           vals=vals.Enum('ON','OFF'))
+                           vals=vals.Enum('ON','OFF'),
+                           docstring="(ReadOnly) Reports the current sweep state."
+                                     " Returnvalues are 'ON' or 'OFF'.")
 
         self.add_parameter('spacing',
                            label='calculationmode of frequency intervals',
                            set_cmd='SOUR{}:LFO:SWE:'.format(self.hwchan)+'SPAC {}',
                            get_cmd='SOUR{}:LFO:SWE:SPAC?'.format(self.hwchan),
-                           vals=vals.Enum('LIN', 'LOG'))
+                           vals=vals.Enum('LIN', 'LOG'),
+                           docstring="Calculationmode of frequency intervals."
+                                     " Values are 'LIN' or 'LOG'.")
 
         self.add_parameter('log_step',
                            label='logarithmically determined step size for the RF freq sweep',
@@ -834,7 +1076,10 @@ class LFOutputSweep(InstrumentChannel):
                            get_cmd='SOUR{}:LFO:SWE:STEP:LOG?'.format(self.hwchan),
                            get_parser=float,
                            vals=vals.Numbers(0.01, 100),
-                           unit='%')
+                           unit='%',
+                           docstring="Sets the step width factor for logarithmic sweeps"
+                                     " to calculate the frequencies of the steps. The"
+                                     " value can be from 0.01% upto 100%.")
 
         self.add_parameter('lin_step',
                            label='step size for linear RF freq sweep',
@@ -844,6 +1089,7 @@ class LFOutputSweep(InstrumentChannel):
                            vals=vals.Numbers(0.01),
                            unit='Hz',
                            docstring="""
+                           Set the step size for linear sweep.
                            The maximum is the sweep_span of the output channel
                            and will be read during the set lin_step command.
                            """)
@@ -861,14 +1107,14 @@ class LFOutputSweep(InstrumentChannel):
 
 
 
-class LFOutputChannel(InstrumentChannel):
+class LFOutputChannel(InstrumentChannel): # doc done **************************
     """
     Combines all the parameters concerning one LF output. 
     The LF output is used as modulation signal for the analog modulation.
     Parameters:
-        bandwidth: Requests the current bandwidth (ReadOnly).
+        bandwidth: (ReadOnly) Requests the current bandwidth.
     Parameters only for the first RF-Source available:
-        state: The state of the output. Values are 'ON' or 'OFF'
+        state: The state of the output. Values are 'ON' or 'OFF'.
         offset: DC offset voltage in the range from -3.6V to +3.6V.
         source: Determines the LF signal to be synchronized, when monitoring is
             enabled. Values are:
@@ -884,11 +1130,12 @@ class LFOutputChannel(InstrumentChannel):
                 Selects the signal also used by the frequency or phase modulations.
         source_path: Path of the LF output source, only with option SMW-???
             available. Values are 'A' or 'B'
-        voltage: Output voltage of the LF output. The valid rage will be dynamic
+        voltage: Output voltage of the LF output. The valid range will be dynamic
             as shown in the datasheet.
     Parameters only for the first LF-Channel available:
         period: ReadOnly. Queries the repetition frequency of the sine signal.
-        frequency: The Frequency. Valid range from 0.1Hz up to 1GHz.
+        frequency: The Frequency of the LF signal when the mode() is `FIX'. Valid
+            range is from 0.1Hz and ends depending on the installed options.
         freq_manual: Manual frequency set only valid in the range given by the
             parameters freq_min and freq_max.
         freq_min: Set minimum for manual frequency from 0.1Hz to 1MHz.
@@ -931,7 +1178,8 @@ class LFOutputChannel(InstrumentChannel):
         self.add_parameter('bandwidth',
                            label='Bandwidth',
                            set_cmd=False,
-                           get_cmd='SOUR:LFO{}:BAND?'.format(self.lfchan))
+                           get_cmd='SOUR:LFO{}:BAND?'.format(self.lfchan),
+                           docstring="(ReadOnly) Requests the current bandwidth.")
 
         if 'SMW-K24' in self._parent.options:
             shape_ids = vals.Enum('SINE', 'SQUARE', 'TRIANGLE', 'TRAPEZE' )
@@ -1014,7 +1262,8 @@ class LFOutputChannel(InstrumentChannel):
                                set_cmd='SOUR:LFO{}'.format(self.lfchan)+':STAT {}',
                                get_cmd='SOUR:LFO{}:STAT?'.format(self.lfchan),
                                val_mapping={'ON': 1, 'OFF': 0},
-                               vals=vals.Enum('ON', 'OFF') )
+                               vals=vals.Enum('ON', 'OFF'),
+                               docstring="The state of the output. Values are 'ON' or 'OFF'.")
 
             self.add_parameter('offset',
                                label='DC offset voltage',
@@ -1022,7 +1271,8 @@ class LFOutputChannel(InstrumentChannel):
                                get_cmd='SOUR:LFO{}:OFFS?'.format(self.lfchan),
                                get_parser=float,
                                vals=vals.Numbers(-3.6,+3.6),
-                               unit='V')
+                               unit='V',
+                               docstring="DC offset voltage in the range from -3.6V to +3.6V.")
             
             source_val = vals.Enum('LF1', 'LF2', 'NOISE', 'AM', 'FMPM', 'EXT1',
                                    'EXT2', 'LF1B', 'LF2B', 'AMB', 'NOISB', 'FMPMB',
@@ -1031,7 +1281,21 @@ class LFOutputChannel(InstrumentChannel):
                                label='Source',
                                set_cmd='SOUR:LFO{}'.format(self.lfchan)+':SOUR {}',
                                get_cmd='SOUR:LFO{}:SOUR?'.format(self.lfchan),
-                               vals=source_val)
+                               vals=source_val,
+                               docstring="""
+                               Determines the LF signal to be synchronized, when monitoring is
+                               enabled. Values are:
+                               'LF1', 'LF2', 'LF1A', 'LF2A', 'LF1B', 'LF2B'
+                               --> Selects an internally generated LF signal.
+                               'NOISE', 'NOISA', 'NOISB'
+                               --> Selects an internally generated noise signal.
+                               'EXT1', 'EXT2'
+                               --> Selects an externally supplied LF signal.
+                               'AM', 'AMA', 'AMB'
+                               --> Selects the AM signal.
+                               'FMPM', 'FMPMA', 'FMPMB'
+                               --> Selects the signal also used by the frequency or phase modulations.
+                               """)
             
             if 'SMW-XXX' in self._parent.options: #TODO: welche Option wird hierfür benötigt?
                 self.add_parameter('source_path',
@@ -1046,10 +1310,8 @@ class LFOutputChannel(InstrumentChannel):
                                get_cmd='SOUR:LFO{}:VOLT?'.format(self.lfchan),
                                get_parser=float,
                                unit='V',
-                               docstring="""
-                               The valid range will be dynamic as shown in the datasheet.
-                               """)
-
+                               docstring="Output voltage of the LF output. The valid"
+                                         " range will be dynamic as shown in the datasheet.")
 
         if self.lfchan == 1:
             # With other channel numbers the device said: no hardware
@@ -1059,7 +1321,8 @@ class LFOutputChannel(InstrumentChannel):
                                set_cmd=False,
                                get_cmd='SOUR:LFO{}:PER?'.format(self.lfchan),
                                get_parser=float,
-                               unit='s')
+                               unit='s',
+                               docstring="(ReadOnly) Queries the repetition frequency of the sine signal.")
     
             if 'SMW-K24' in self._parent.options:
                 maxfreq = 20e9 # TODO: dieser Wert wird nicht passen, finde aber nichts dazu
@@ -1071,7 +1334,10 @@ class LFOutputChannel(InstrumentChannel):
                                get_cmd='SOUR{}:LFO{}:FREQ?'.format(self.hwchan,self.lfchan),
                                get_parser=float,
                                vals=vals.Numbers(0.1, maxfreq),
-                               unit='Hz')
+                               unit='Hz',
+                               docstring="The Frequency of the LF signal when the mode() is `FIX'."
+                                         " Valid range is from 0.1Hz and ends depending on the"
+                                         " installed options.")
             # The frequency parameter is only readable for lfchan==1 even if the channel
             # number is given in the communication string.
 
@@ -1080,21 +1346,25 @@ class LFOutputChannel(InstrumentChannel):
                                set_cmd=partial(self._setfreqvalue),
                                get_cmd='SOUR{}:LFO:FREQ:MAN?'.format(self.hwchan),
                                get_parser=float,
-                               unit='Hz')
+                               unit='Hz',
+                               docstring="Manual frequency set only valid in the range given"
+                                         " by the parameters freq_min and freq_max.")
             self.add_parameter('freq_min',
                                label='Set minimum for manual frequency',
                                set_cmd=partial(self._setfreqmin),
                                get_cmd='SOUR{}:LFO:FREQ:STAR?'.format(self.hwchan),
                                get_parser=float,
                                vals=vals.Numbers(0.1,1e6),
-                               unit='Hz')
+                               unit='Hz',
+                               docstring="Set minimum for manual frequency from 0.1Hz to 1MHz.")
             self.add_parameter('freq_max',
                                label='Set maximum for manual frequency',
                                set_cmd=partial(self._setfreqmax),
                                get_cmd='SOUR{}:LFO:FREQ:STOP?'.format(self.hwchan),
                                get_parser=float,
                                vals=vals.Numbers(0.1,1e6),
-                               unit='Hz')
+                               unit='Hz',
+                               docstring="Set maximum for manual frequency from 0.1Hz to 1MHz.")
 
             lfmode = vals.Enum('CW', 'FIX', 'SWE')
             self.add_parameter('mode',
@@ -1103,8 +1373,9 @@ class LFOutputChannel(InstrumentChannel):
                                get_cmd='SOUR{}:LFO:FREQ:MODE?'.format(self.hwchan),
                                vals=lfmode,
                                docstring="""
-                               FIX = fixed frequency mode (CW is a synonym)
-                               SWE = set sweep mode (use LFOutputSweep class)
+                               Set the used mode:
+                               'FIX' = fixed frequency mode ('CW' is a synonym)
+                               'SWE' = set sweep mode (use LFOutputSweep class)
                                """)
         
     def _setfreqmin(self, val):
@@ -1134,7 +1405,7 @@ class LFOutputChannel(InstrumentChannel):
 
 
 
-class OutputLevelSweep(InstrumentChannel):
+class OutputLevelSweep(InstrumentChannel): # doc done *************************
     """
     Combines all the parameters concerning one RF output level (power) sweeping.
     Parameters:
@@ -1152,8 +1423,10 @@ class OutputLevelSweep(InstrumentChannel):
             valid range is 0.01dB to 139dB.
         shape: Waveform shape for sweep. Valid are 'SAWTOOTH' and 'TRIANGLE'.
         execute: Executes one RF level sweep. Use no braces () here!
-        retrace: Go to start frequency while waiting for trigger. Valid values
-            are 'ON' and 'OFF'.
+        retrace: Activates that the signal changes to the start frequency value
+            while it is waiting for the next trigger event. Values are 'ON' and
+            'OFF'. You can enable this feature, when you are working with sawtooth
+            shapes in sweep mode 'MAN' or 'STEP'.
         running: ReadOnly parameter to get the current sweep state. Return
             values are 'ON' or 'OFF'.
         reset: Resets all active sweeps to the starting point. Use no
@@ -1176,8 +1449,9 @@ class OutputLevelSweep(InstrumentChannel):
                            get_cmd='SOUR{}:SWE:POW:AMOD?'.format(self.hwchan),
                            vals=vals.Enum('NORM', 'HPOW'),
                            docstring="""
-                           NORM = Performs the level settings in the range of the built-in attenuator.
-                           HPOW = Performs the level settings in the high level range.
+                           Power attenuator mode for level sweep. Values are:
+                           'NORM' = Performs the level settings in the range of the built-in attenuator.
+                           'HPOW' = Performs the level settings in the high level range.
                            """)
 
         self.add_parameter('dwell',
@@ -1186,7 +1460,8 @@ class OutputLevelSweep(InstrumentChannel):
                            get_cmd='SOUR{}:SWE:POW:DWEL?'.format(self.hwchan),
                            get_parser=float,
                            vals=vals.Numbers(0.001, 100),
-                           unit='s')
+                           unit='s',
+                           docstring="Dwell time for level sweep, valid range is from 0.001s to 100s.")
 
         sweepmode = vals.Enum('AUTO', 'MAN', 'STEP')
         self.add_parameter('mode',
@@ -1195,9 +1470,10 @@ class OutputLevelSweep(InstrumentChannel):
                            get_cmd='SOUR{}:SWE:POW:MODE?'.format(self.hwchan),
                            vals=sweepmode,
                            docstring="""
-                           AUTO = Each trigger triggers exactly one complete sweep.
-                           MAN  = You can trigger every step individually with a command.
-                           STEP = Each trigger triggers one sweep step only.
+                           Cycle mode for level sweep. Values are:
+                           'AUTO' = Each trigger triggers exactly one complete sweep.
+                           'MAN'  = You can trigger every step individually with a command.
+                           'STEP' = Each trigger triggers one sweep step only.
                            """)
 
         self.add_parameter('points',
@@ -1205,7 +1481,8 @@ class OutputLevelSweep(InstrumentChannel):
                            set_cmd='SOUR{}:SWE:POW:'.format(self.hwchan)+'POIN {}',
                            get_cmd='SOUR{}:SWE:POW:POIN?'.format(self.hwchan),
                            get_parser=int,
-                           vals=vals.Numbers(2))    # Upperlimit=MAXINT
+                           vals=vals.Numbers(2),    # Upperlimit=MAXINT
+                           docstring="Steps within level sweep range, minimum is 2.")
 
         self.add_parameter('log_step',
                            label='logarithmically determined step size for the RF level sweep',
@@ -1213,41 +1490,50 @@ class OutputLevelSweep(InstrumentChannel):
                            get_cmd='SOUR{}:SWE:POW:STEP?'.format(self.hwchan),
                            get_parser=float,
                            vals=vals.Numbers(0.01, 139),
-                           unit='dB')
+                           unit='dB',
+                           docstring="Logarithmically determined step size for the RF level"
+                                     " sweep, valid range is 0.01dB to 139dB.")
 
         self.add_parameter('shape',
                            label='Waveform shape for sweep',
                            set_cmd='SOUR{}:SWE:POW:'.format(self.hwchan)+'SHAP {}',
                            get_cmd='SOUR{}:SWE:POW:SHAP?'.format(self.hwchan),
-                           vals=vals.Enum('SAWTOOTH','TRIANGLE'))
+                           vals=vals.Enum('SAWTOOTH','TRIANGLE'),
+                           docstring="Waveform shape for sweep. Valid are 'SAWTOOTH' and 'TRIANGLE'.")
 
         self.add_parameter('execute',
                            label='Executes one RF level sweep',
-                           call_cmd='SOUR{}:SWE:POW:EXEC'.format(self.hwchan))
+                           call_cmd='SOUR{}:SWE:POW:EXEC'.format(self.hwchan),
+                           docstring="Executes one RF level sweep. Use no braces () here!")
 
         self.add_parameter('retrace',
-                           label='To start while waiting for trigger',
+                           label='Set to start frequency while waiting for trigger  ',
                            set_cmd='SOUR{}:SWE:POW:'.format(self.hwchan)+'RETR {}',
                            get_cmd='SOUR{}:SWE:POW:RETR?'.format(self.hwchan),
-                           vals=vals.Enum('ON','OFF'))
+                           vals=vals.Enum('ON','OFF'),
+                           docstring="Activates that the signal changes to the start frequency"
+                                     " value while it is waiting for the next trigger event."
+                                     " Values are 'ON' and 'OFF'. You can enable this feature,"
+                                     " when you are working with sawtooth shapes in sweep mode"
+                                     " 'MAN' or 'STEP'.")
 
         self.add_parameter('running',
                            label='Current sweep state',
                            set_cmd=False,
                            get_cmd='SOUR{}:SWE:POW:RUNN?'.format(self.hwchan),
-                           vals=vals.Enum('ON','OFF'))
+                           vals=vals.Enum('ON','OFF'),
+                           docstring="(ReadOnly) Get the current sweep state. Return"
+                                     " values are 'ON' or 'OFF'.")
 
         self.add_parameter('reset',
                            label='Reset the sweep',
                            call_cmd='SOUR{}:SWE:RES'.format(self.hwchan),
-                           docstring="""
-                           Resets all active sweeps to the starting point.
-                           """)
+                           docstring="Resets all active sweeps to the starting point."
+                                     " Use no braces () here!")
 
 
 
-
-class OutputFrequencySweep(InstrumentChannel):
+class OutputFrequencySweep(InstrumentChannel): # doc done *********************
     """
     Combines all the parameters concerning one RF output frequency sweeping.
     Parameters:
@@ -1257,11 +1543,13 @@ class OutputFrequencySweep(InstrumentChannel):
             'MAN':  You can trigger every step individually with a command.
             'STEP': Each trigger triggers one sweep step only.
         points: Steps within frequency sweep range, minimum is 2.
-        spacing: Calculationmode of frequency intervals. Values are 'LIN' or 'LOG'
-        shape: Waveform shape for sweep. Valid values are 'SAWTOOTH' or 'TRIANGLE'
+        spacing: Calculationmode of frequency intervals. Values are 'LIN' or 'LOG'.
+        shape: Waveform shape for sweep. Valid values are 'SAWTOOTH' or 'TRIANGLE'.
         execute: Executes one RF frequency sweep. Use no braces () here!
-        retrace: Go to start frequency while waiting for trigger. Valid values
-            are 'ON' and 'OFF'.
+        retrace: Activates that the signal changes to the start frequency value
+            while it is waiting for the next trigger event. Values are 'ON' and
+            'OFF'. You can enable this feature, when you are working with sawtooth
+            shapes in sweep mode 'MAN' or 'STEP'.
         running: ReadOnly parameter to get the current sweep state. Return
             values are 'ON' or 'OFF'.
         log_step: Logarithmically determined step size for the RF frequency
@@ -1290,7 +1578,8 @@ class OutputFrequencySweep(InstrumentChannel):
                            get_cmd='SOUR{}:SWE:DWEL?'.format(self.hwchan),
                            get_parser=float,
                            vals=vals.Numbers(0.001, 100),
-                           unit='s')
+                           unit='s',
+                           docstring="Dwell time for frequency sweep. Valid range from 0.001s to 100s.")
         
         sweepmode = vals.Enum('AUTO', 'MAN', 'STEP')
         self.add_parameter('mode',
@@ -1299,9 +1588,10 @@ class OutputFrequencySweep(InstrumentChannel):
                            get_cmd='SOUR{}:SWE:MODE?'.format(self.hwchan),
                            vals=sweepmode,
                            docstring="""
-                           AUTO = Each trigger triggers exactly one complete sweep.
-                           MAN  = You can trigger every step individually with a command.
-                           STEP = Each trigger triggers one sweep step only.
+                           Cycle mode for frequency sweep. Values are:
+                           'AUTO' = Each trigger triggers exactly one complete sweep.
+                           'MAN'  = You can trigger every step individually with a command.
+                           'STEP' = Each trigger triggers one sweep step only.
                            """)
         
         self.add_parameter('points',
@@ -1309,35 +1599,45 @@ class OutputFrequencySweep(InstrumentChannel):
                            set_cmd='SOUR{}:SWE:'.format(self.hwchan)+'POIN {}',
                            get_cmd='SOUR{}:SWE:POIN?'.format(self.hwchan),
                            get_parser=int,
-                           vals=vals.Numbers(2))    # Upperlimit=MAXINT
+                           vals=vals.Numbers(2),    # Upperlimit=MAXINT
+                           docstring="Steps within frequency sweep range, minimum is 2.")
         
         self.add_parameter('spacing',
                            label='calculationmode of frequency intervals',
                            set_cmd='SOUR{}:SWE:'.format(self.hwchan)+'SPAC {}',
                            get_cmd='SOUR{}:SWE:SPAC?'.format(self.hwchan),
-                           vals=vals.Enum('LIN', 'LOG'))
+                           vals=vals.Enum('LIN', 'LOG'),
+                           docstring="Calculationmode of frequency intervals. Values are 'LIN' or 'LOG'.")
 
         self.add_parameter('shape',
                            label='Waveform shape for sweep',
                            set_cmd='SOUR{}:SWE:'.format(self.hwchan)+'SHAP {}',
                            get_cmd='SOUR{}:SWE:SHAP?'.format(self.hwchan),
-                           vals=vals.Enum('SAWTOOTH','TRIANGLE'))
+                           vals=vals.Enum('SAWTOOTH','TRIANGLE'),
+                           docstring="Waveform shape for sweep. Valid values are 'SAWTOOTH' or 'TRIANGLE'.")
 
         self.add_parameter('execute',
                            label='Executes one RF frequency sweep',
-                           call_cmd='SOUR{}:SWE:EXEC'.format(self.hwchan))
+                           call_cmd='SOUR{}:SWE:EXEC'.format(self.hwchan),
+                           docstring="Executes one RF frequency sweep. Use no braces () here!")
 
         self.add_parameter('retrace',
-                           label='To start while waiting for trigger',
+                           label='Set to start frequency while waiting for trigger  ',
                            set_cmd='SOUR{}:SWE:'.format(self.hwchan)+'RETR {}',
                            get_cmd='SOUR{}:SWE:RETR?'.format(self.hwchan),
-                           vals=vals.Enum('ON','OFF'))
+                           vals=vals.Enum('ON','OFF'),
+                           docstring="Activates that the signal changes to the start frequency value"
+                                     " while it is waiting for the next trigger event. Values are 'ON'"
+                                     " and 'OFF'. You can enable this feature, when you are working"
+                                     " with sawtooth shapes in sweep mode 'MAN' or 'STEP'.")
 
         self.add_parameter('running',
                            label='Current sweep state',
                            set_cmd=False,
                            get_cmd='SOUR{}:SWE:RUNN?'.format(self.hwchan),
-                           vals=vals.Enum('ON','OFF'))
+                           vals=vals.Enum('ON','OFF'),
+                           docstring="(ReadOnly) Get the current sweep state. Return"
+                                     " values are 'ON' or 'OFF'.")
 
         self.add_parameter('log_step',
                            label='logarithmically determined step size for the RF freq sweep',
@@ -1345,7 +1645,9 @@ class OutputFrequencySweep(InstrumentChannel):
                            get_cmd='SOUR{}:SWE:STEP:LOG?'.format(self.hwchan),
                            get_parser=float,
                            vals=vals.Numbers(0.01, 100),
-                           unit='%')
+                           unit='%',
+                           docstring="Logarithmically determined step size for the RF"
+                                     " frequency sweep. Valid range is 0.01 to 100.")
 
         self.add_parameter('lin_step',
                            label='step size for linear RF freq sweep',
@@ -1354,17 +1656,16 @@ class OutputFrequencySweep(InstrumentChannel):
                            get_parser=float,
                            vals=vals.Numbers(0.01),
                            unit='Hz',
-                           docstring="""
-                           The maximum is the sweep_span of the output channel
-                           and will be read during the set lin_step command.
-                           """)
+                           docstring="Step size for linear RF frequency sweep. The"
+                                     " minimum is 0.01 and the maximum is the sweep_span"
+                                     " of the output channel and will be read during the"
+                                     " set lin_step command.")
 
         self.add_parameter('reset',
                            label='Reset the sweep',
                            call_cmd='SOUR{}:SWE:RES'.format(self.hwchan),
-                           docstring="""
-                           Resets all active sweeps to the starting point.
-                           """)
+                           docstring="Resets all active sweeps to the starting point."
+                                     " Use no braces () here!")
 
     def _setlinstep(self, val):
         """
@@ -1380,7 +1681,7 @@ class OutputFrequencySweep(InstrumentChannel):
 
 
 
-class OutputChannel(InstrumentChannel):
+class OutputChannel(InstrumentChannel): # doc done ****************************
     """
     Combines all the parameters concerning one RF output.
     Parameters:
@@ -1463,7 +1764,10 @@ class OutputChannel(InstrumentChannel):
                            get_cmd='SOUR{}:FREQ?'.format(self.chnum),
                            get_parser=float,
                            vals=vals.Numbers(100e3, maxfreq),
-                           unit='Hz')
+                           unit='Hz',
+                           docstring="The main frequency of the oscillator."
+                                     " The minimum is 100kHz and the maximum"
+                                     " depends on the installed option.")
 
         # TODO: sind die folgenden Parameter notwendig/sinnvoll?
         # 'offset' This value represents the frequency shift of a downstream
@@ -1477,14 +1781,17 @@ class OutputChannel(InstrumentChannel):
                            get_cmd='SOUR{}:POW:POW?'.format(self.chnum),
                            get_parser=float,
                            vals=vals.Numbers(-145, 30),
-                           unit='dBm')
+                           unit='dBm',
+                           docstring="The output power level. Valid values are"
+                                     " from -145dBm up to 30dBm.")
 
         self.add_parameter('state',
                            label='State',
                            set_cmd='OUTP{}:'.format(self.chnum)+'STAT {}',
                            get_cmd='OUTP{}:STAT?'.format(self.chnum),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF') )
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="actives/deactivates the RF output. Values are 'ON' and 'OFF'.")
 
         rfmode = vals.Enum('CW', 'FIX', 'SWE', 'LIST')
         self.add_parameter('mode',
@@ -1493,9 +1800,10 @@ class OutputChannel(InstrumentChannel):
                            get_cmd='SOUR{}:FREQ:MODE?'.format(self.chnum),
                            vals=rfmode,
                            docstring="""
-                           FIX  = fixed frequency mode (CW is a synonym)
-                           SWE  = set sweep mode (use start/stop/center/span)
-                           LIST = use a special loadable list of frequencies (nyi here)
+                           Selects the mode of the oscillator. Valid values are:
+                           'FIX'  = fixed frequency mode (CW is a synonym)
+                           'SWE'  = set sweep mode (use start/stop/center/span)
+                           'LIST' = use a special loadable list of frequencies (nyi here)
                            """)
         
         # Parameter for the sweep mode
@@ -1507,6 +1815,7 @@ class OutputChannel(InstrumentChannel):
                            vals=vals.Numbers(300e3, maxfreq),
                            unit='Hz',
                            docstring="""
+                           The center frequency of the sweep.
                            Use sweep_center and sweep_span or
                            use sweep_start and sweep_stop
                            to define the sweep range.
@@ -1520,6 +1829,7 @@ class OutputChannel(InstrumentChannel):
                            vals=vals.Numbers(0, maxfreq),
                            unit='Hz',
                            docstring="""
+                           The span of frequency sweep range.
                            Use sweep_center and sweep_span or
                            use sweep_start and sweep_stop
                            to define the sweep range.
@@ -1533,6 +1843,7 @@ class OutputChannel(InstrumentChannel):
                            vals=vals.Numbers(300e3, maxfreq),
                            unit='Hz',
                            docstring="""
+                           The start frequency of the sweep.
                            Use sweep_start and sweep_stop or
                            use sweep_center and sweep_span
                            to define the sweep range.
@@ -1546,6 +1857,7 @@ class OutputChannel(InstrumentChannel):
                            vals=vals.Numbers(300e3, maxfreq),
                            unit='Hz',
                            docstring="""
+                           The stop frequency of the sweep.
                            Use sweep_start and sweep_stop or
                            use sweep_center and sweep_span
                            to define the sweep range.
@@ -1557,7 +1869,8 @@ class OutputChannel(InstrumentChannel):
                            set_cmd=False,
                            get_cmd='SOUR{}:FREQ:LOSC:INP:FREQ?'.format(self.chnum),
                            get_parser=float,
-                           unit='Hz' )
+                           unit='Hz',
+                           docstring="(ReadOnly) Read the LOscillator input frequency.")
         
         lomode = vals.Enum('INT', 'EXT', 'COUP', 'ECO', 'BOFF', 'EBOF', 'AOFF')
         self.add_parameter('losc_mode',
@@ -1566,13 +1879,14 @@ class OutputChannel(InstrumentChannel):
                            get_cmd='SOUR{}:FREQ:LOSC:MODE?'.format(self.chnum),
                            vals=lomode,
                            docstring="""
-                           INT  = A&B Internal / Internal (one path instrument) - Uses the internal oscillator signal in both paths.
-                           EXT  = A External & B Internal (one path instrument) - Uses an external signal in path A. B uses its internal signal.
-                           COUP = A Internal & A->B Coupled - Assigns the internal oscillator signal of path A also to path B.
-                           ECO  = A External & A->B Coupled - Assigns an externally supplied signal to both paths.
-                           BOFF = A Internal & B RF Off - Uses the internal local oscillator signal of path A, if the selected frequency exceeds the maximum frequency of path B.
-                           EBOF = A External & B RF Off - Uses the LO IN signal for path A, if the selected RF frequency exceeds the maximum frequency of path B.
-                           AOFF = A RF Off & B External - Uses the LO IN signal for path B, if the selected RF frequency exceeds the maximum frequency of path A.
+                           The LOscillator mode. Valid values are:
+                           'INT'  = A&B Internal / Internal (one path instrument) - Uses the internal oscillator signal in both paths.
+                           'EXT'  = A External & B Internal (one path instrument) - Uses an external signal in path A. B uses its internal signal.
+                           'COUP' = A Internal & A->B Coupled - Assigns the internal oscillator signal of path A also to path B.
+                           'ECO'  = A External & A->B Coupled - Assigns an externally supplied signal to both paths.
+                           'BOFF' = A Internal & B RF Off - Uses the internal local oscillator signal of path A, if the selected frequency exceeds the maximum frequency of path B.
+                           'EBOF' = A External & B RF Off - Uses the LO IN signal for path A, if the selected RF frequency exceeds the maximum frequency of path B.
+                           'AOFF' = A RF Off & B External - Uses the LO IN signal for path B, if the selected RF frequency exceeds the maximum frequency of path A.
                            """)
 
         self.add_parameter('losc_output',
@@ -1580,18 +1894,21 @@ class OutputChannel(InstrumentChannel):
                            set_cmd=False,
                            get_cmd='SOUR{}:FREQ:LOSC:OUTP:FREQ?'.format(self.chnum),
                            get_parser=float,
-                           unit='Hz' )
+                           unit='Hz',
+                           docstring="(ReadOnly) Read the LOscillator output frequency.")
 
         self.add_parameter('losc_state',
                            label='LOscillator state',
                            set_cmd='SOUR{}:FREQ:LOSC:OUTP:'.format(self.chnum)+'STAT {}',
                            get_cmd='SOUR{}:FREQ:LOSC:OUTP:STAT?'.format(self.chnum),
                            val_mapping={'ON': 1, 'OFF': 0},
-                           vals=vals.Enum('ON', 'OFF') )
+                           vals=vals.Enum('ON', 'OFF'),
+                           docstring="Set the LOscillator state. Valid values are 'ON' and 'OFF'.")
 
 
 
-class RohdeSchwarz_SMW200A(VisaInstrument):
+#class RohdeSchwarz_SMW200A(VisaInstrument):
+class RohdeSchwarz_SMW200A(MockVisa):
     """
     This is the qcodes driver for the Rohde & Schwarz SMW200A vector signal
     generator.
@@ -1603,11 +1920,12 @@ class RohdeSchwarz_SMW200A(VisaInstrument):
     """
 
     def __init__(self, name, address, **kwargs):
-        log.debug(__name__ + ' : Initializing instrument')
+        #log.debug(__name__ + ' : Initializing instrument')
         super().__init__(name, address, **kwargs)
 
         # for security check the ID from the device
         self.idn = self.ask("*IDN?").strip()
+        print("DBG:",self.idn)
         if not self.idn.startswith("Rohde&Schwarz,SMW200A,"):
             raise RuntimeError("Invalid device ID found: "+self.idn)
 
@@ -1666,7 +1984,6 @@ class RohdeSchwarz_SMW200A(VisaInstrument):
         self.add_submodule('lfoutput_channels', lfchannels)
 
         # LF output sweep submodules
-        """
         lfsweeps = ChannelList(self, "LFOutputSweep", LFOutputSweep,
                               snapshotable=False)
         for rfnum in range(1, self.rfoutput_no+1):
@@ -1676,7 +1993,6 @@ class RohdeSchwarz_SMW200A(VisaInstrument):
             self.add_submodule(name, lfsweep)
         lfsweeps.lock()
         self.add_submodule('lfsweep_channels', lfsweeps)
-        """
         
         #Amplitude Modulation submodules
         amchannels = ChannelList(self, "AMChannels", AmplitudeModulation,
@@ -1727,7 +2043,7 @@ class RohdeSchwarz_SMW200A(VisaInstrument):
             
         #IQ modulation submodule
         for rfnum in range(1, self.rfoutput_no+1):
-            name = 'IQmod{}'.format(rfnum)
+            name = 'iqmod{}'.format(rfnum)
             IQmodchannel = IQModulation(self, name, rfnum)
             self.add_submodule(name, IQmodchannel)
             

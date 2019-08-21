@@ -178,7 +178,7 @@ Combines all the parameters concerning the I/Q modulation.
 \item {\bf source()} Selects/reads the input signal source for the I/Q modulator. Values are:
 	\begin{itemize}[]
 	\item 'BAS': internal baseband signal
-	\item 'ANAL': external analog signal 
+	\item 'ANAL': external Analog Wideband I/Q Input signal 
 	\item 'DIFF': differential analog signal ({\it only with option SMW-K739})
 	\end{itemize}
 \item {\bf gain()} Optimizes the modulation of the I/Q modulator for a subset of measurement requirements. Values are:
@@ -192,6 +192,7 @@ Combines all the parameters concerning the I/Q modulation.
 	\item 'AUTO': \\
 		The gain value is retrieved form the connected R\&S SZU\footnote{External Frequency Converter / Externally connected R\&S SZU IQ Upconverter}. The I/Q modulator is configured automatically.
 	\end{itemize}
+\item {\bf crest\_factor()} If source set to `ANAL' (Analog Wideband I/Q Input), sets the crest factor of the externally supplied analog signal. The crest factor gives the difference in level between the peak envelope power (PEP) and the average power value (RMS) in dB. The R\&S SMW uses this value for the calculation of the RF output power. The allowed range is from 0 dB to 35 dB.
 \item {\bf swap()} Activates/Deactives the swapping of the I and Q channel. Values are 'ON' and 'OFF'.
 \item {\bf wideband()} Actives/Deactivates the wideband mode. Values are 'ON' and 'OFF'.
 \end{itemize}
@@ -303,6 +304,7 @@ Combines all the parameters concerning the pulse modulation.
 Combines all the parameters concerning the phase modulation.
 \begin{itemize}
 \item {\bf state()} Activates/deactivates phase modulation. Activation of phase modulation deactivates frequency modulation. Possible values are 'ON' and 'OFF'.
+\item {\bf deviation()} Sets the modulation deviation of the phase modulation in RAD.
 \item {\bf source()} Selects the modulation source. Values are:
 	\begin{itemize}[]
 	\item 'INT': equals 'LF1' ({\it for channel 2 only available with option SMW-K24})
