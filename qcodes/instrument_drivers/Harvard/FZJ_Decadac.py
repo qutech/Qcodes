@@ -835,9 +835,10 @@ class Decadac(VisaInstrument):
             cmd (str):    command
         """
         if obj != None:
-            if isinstance(obj, DacSlot):
+            # do not use isinstance due to autoreload
+            if type(obj).__name__ == 'DacSlot':
                 self._set_slot(obj)
-            elif isinstance(obj, DacChannel):
+            elif type(obj).__name__ == 'DacChannel':
                 self._set_channel(obj._parent, obj)
 
         buf = super().ask_raw(cmd)
