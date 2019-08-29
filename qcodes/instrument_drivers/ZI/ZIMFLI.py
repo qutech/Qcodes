@@ -3964,7 +3964,7 @@ class lockinBufferedParameter(BufferedSweepableParameter):
                  parameter: str,
                  *args, **kwargs) -> None:
         """
-        Creates a new lockinBufferedArrayParameter.
+        Creates a new BufferedSweepableParameter.
         Args:
             name: the internal QCoDeS name of the parameter
             instrument: the internal parent instrument
@@ -4124,7 +4124,7 @@ class lockinBufferedParameter(BufferedSweepableParameter):
             print("DBG: reset_programs")
         bufferedConfig = {}
 
-    
+
 
 class ZIMFLI(Instrument):
     """

@@ -92,6 +92,7 @@
 02. Jul. 2019 & M.Wagener & Describe the simulation. \\ \hline
 17. Jul. 2019 & M.Wagener & Describe the Sweeper. \\ \hline
 23. Jul. 2019 & M.Wagener & Describe test scripts \\ \hline
+28. Aug. 2019 & M.Wagener & BufferedParameter example \\ \hline
 \end{longtable}
 
 
@@ -504,7 +505,7 @@ Combines all parameters concerning the PIDs. These Parameters are only available
 {\it This was not on the test device, so no code is changed for this. The available code is not tested.}
 
 
-\subsection{Sweeper}
+\subsection{Sweeper}\label{lblsweep}
 The sweeper function is inside the data server, running on the instrument. With the {\it MD option} installed there are more functions available. The Sweeper functionality consists of these parts:
 \begin{enumerate}
 \item the zidev.{\bf daq.sweep}() reference stored in {\it zidev.sweeper} \\
@@ -518,7 +519,7 @@ The sweeper function is inside the data server, running on the instrument. With 
 	Helper function to add the signal {\it attribute} to the output of the sweeper get function of the given demodulator number.
 \item zidev.{\bf remove\_signal\_from\_sweeper}(demodulator, attribute) \\
 	Helper function to remove the signal {\it attribute} from the output of the sweeper get function of the given demodulator number.
-\item[] For the both last functions the valid attributes are: \\[-0.5em]
+\item[] For the both last functions the valid attributes are:\label{sweepresult} \\[-0.5em]
 	\setlength{\LTleft}{1.5cm}
 	\begin{longtable}{|p{6cm}|p{8.5cm}|}
 	\hline
@@ -600,6 +601,35 @@ This class communicates with the sweeper function in the data server.
 This get() can be used inside the QCoDeS.Loop function.
 \end{itemize}
 An example how to use the sweeper commands is included in the following section.
+
+
+\subsection{BufferedParamter}
+
+The following parameters are used with the QCoDeS bufferedLoop function, see example. So only these parameters can be used in the sweep. They have all the same baseclass {\it lockinBufferedParameter}.
+\begin{itemize}
+\itemsep0pt
+\item {\bf buffered\_freq1}: Oscillator 1 frequency
+\item {\bf buffered\_auxout1}: Auxiliary output 1 offset
+\item {\bf buffered\_auxout2}: Auxiliary output 2 offset
+\item {\bf buffered\_auxout3}: Auxiliary output 3 offset
+\item {\bf buffered\_auxout4}: Auxiliary output 4 offset
+\item {\bf buffered\_phase1}: Demodulator 1 phase shift
+\item {\bf buffered\_phase2}: Demodulator 2 phase shift
+\item {\bf buffered\_out1ampl2}: Output 1 amplitude 2
+\item {\bf buffered\_out1off}: Output 1 offset
+\item[] {\it the following parameters are only available if the MD option is installed}
+\item {\bf buffered\_phase3}: Demodulator 3 phase shift
+\item {\bf buffered\_phase4}: Demodulator 4 phase shift
+\item {\bf buffered\_freq2}: Oscillator 2 frequency
+\item {\bf buffered\_out1ampl4}: Output 1 amplitude 4
+\item {\bf buffered\_out2ampl8}: Output 2 amplitude 8
+\item {\bf buffered\_out2off}: Output 2 offset
+\end{itemize}
+
+The parameter {\bf buffered\_result({\it lockinBufferedArrayParameter})} must be created later if the dimension of the result vector is known. The internal arrays cannot be resized after the parameter is instantiated. So it will be created in the routines {\it zidev.add\_signal\_to\_sweeper()} and {\it zidev.remove\_signal\_from\_sweeper()}. That means, this parameter is not accessible before a signal is added to the sweeper.
+
+            
+            
 
 \clearpage
 
@@ -790,6 +820,100 @@ zidev.close()
 \item Lines 37 - 38: construct the QCoDeS-Loop and run it.
 \item Line 39: close the connection to the device.
 \end{itemize}
+
+
+
+\subsubsection{test\_zimfli\_BufferedParameter.py}
+This example was a combination of the sweep functionality and the QCoDeS BufferedLoop function. It was tested with the instrument in the QCoDeS environment but without any hardware connected.
+
+\begin{lstlisting}[frame=single, language=Python, numbers=left, xleftmargin=1cm]
+import qcodes as qc
+from qcodes.instrument_drivers.ZI.ZIMFLI import ZIMFLI
+import zhinst.utils
+import time
+
+zidev = ZIMFLI( name='ZIMFLI', device_ID='DEV4039' )
+sc = zidev.submodules['sweeper_channel']
+sc.averaging_samples(1)
+sc.averaging_tc(1.0)
+sc.averaging_time(0.0)
+sc.bandwidth_mode('fixed')
+sc.bandwidth(1000.0)
+sc.order(4)
+sc.max_bandwidth(1250000.0)
+sc.omega_suppression(40.0)
+sc.settling_time(1e-6)
+sc.settling_inaccuracy(0.0001)
+sc.history_length(100)
+
+zidev.add_signal_to_sweeper( 1, 'In1'  )
+zidev.add_signal_to_sweeper( 1, 'X' )
+zidev.add_signal_to_sweeper( 1, 'Y' )
+zidev.add_signal_to_sweeper( 1, 'R' )
+
+amplitude=0.5
+out_channel = 0
+in_channel = 0
+in_chanstring = 'Sig In {}'.format(in_channel+1)
+demod_index = 0 # zero based!
+osc_index = 0
+demod_rate = 1e3
+time_constant = 0.01
+freq_start = 400e3
+freq_stop  = 450e3
+freq_step  =  10e3
+
+sigin = zidev.submodules['signal_in{}'.format(in_channel+1)]
+demod = zidev.submodules['demod{}'.format(demod_index+1)]
+sigout= zidev.submodules['signal_out{}'.format(out_channel+1)]
+
+sigin.ac( 'OFF' )
+sigin.range( 2*amplitude )
+demod.streaming( 'ON' )
+demod.samplerate( demod_rate )
+demod.signalin( in_chanstring )
+demod.order( 4 )
+demod.timeconstant( time_constant )
+demod.oscselect( osc_index )
+demod.harmonic( 1 )
+sigout.on( 'ON' )
+sigout.enable( 'ON' )
+sigout.range( 1 )
+sigout.amplitude( amplitude )
+
+time.sleep(10*time_constant)
+zidev.daq.sync()
+
+#bf = zidev.buffered_freq1.sweep( freq_start, freq_stop, step=freq_step )
+ba = zidev.buffered_auxout1.sweep( 0, 4, step=0.2 )
+l  = qc.Repetition(2) \
+       .buffered_loop(ba) \
+       .each(zidev.buffered_result)
+
+data = l.run()
+
+zidev.buffered_freq1.debug()
+zidev.close()
+\end{lstlisting}
+
+\begin{itemize}
+\itemsep0pt
+\item Lines 1 - 6: imports and device creation as usual.
+\item Lines 7 - 18: configuration of the sweeper channel. The instrument has only one sweeper channel available, that means, only one parameter can be swept.
+\item Lines 20 - 23: add the signals of interest for the resultant dataset, see page \pageref{sweepresult} what signals are possible.
+\item Lines 25 - 35: set some variables to be used later to configure the instrument.
+\item Lines 37 - 39: get references to the used submodules.
+\item Lines 41 - 53: configure the submodules.
+\item Lines 55 - 56: give the demodulator filter some time to settle and then perform a global synchronisation between the device and the data server. The both steps must be done before using the poll function during the sweep.
+\item Line 58: as an example the frequency sweep.
+\item Line 59: the currently used Aux1 Offset sweep.
+\item Lines 60 - 62: set up the QCoDeS bufferedLoop with 2 repetitions.
+\item Line 64: run the loop.
+\item Line 66: optional printout of the internal sweeper settings. This can only be done after the run command because only in this run command the sweep will be configured. All other calls before save some data but will not start the configuration calculations.
+\end{itemize}
+
+
+
 
 \clearpage
 
