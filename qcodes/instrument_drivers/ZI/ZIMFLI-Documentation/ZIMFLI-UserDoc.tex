@@ -59,6 +59,7 @@
 \usepackage{colortbl} % farbige Tabellenzellen
 \setlength{\LTpre}{0pt}  % Remove whitespace befor and after longtables
 \setlength{\LTpost}{0pt}
+%\setlength{\LTleft}{1cm} % makes 1cm space at the left side of each longtable
 
 \setlength{\tabcolsep}{1mm} % Setzt den Längenwert von {Abstand zwischen den Spalten einer Tabelle} auf den Wert 1mm
 \setcounter{tocdepth}{2}  % Tiefe des Inhaltsverzeichnisses
@@ -91,6 +92,7 @@
 02. Jul. 2019 & M.Wagener & Describe the simulation. \\ \hline
 17. Jul. 2019 & M.Wagener & Describe the Sweeper. \\ \hline
 23. Jul. 2019 & M.Wagener & Describe test scripts \\ \hline
+28. Aug. 2019 & M.Wagener & BufferedParameter example \\ \hline
 \end{longtable}
 
 
@@ -200,27 +202,29 @@ The following parameters / subroutines are accessible directly from the main dev
 
 \item zidev.{\bf bufferedReader}( demod\_index, total\_time, dolog, copyFreq, copyPhase, copyDIO, copyTrigger, copyAuxin ) \\
 	Read sample informations from the given demodulator for a given time as fast as possible (see Demodulator samplerate below) and returns it as a dict of arrays. The parameters are:
-	\begin{longtable}{p{0.8cm}p{3.1cm}p{12cm}}
-	&demod\_index & index of demodulator channel (1,2) \\
-	&total\_time  & number of seconds for measurement, during this time the function is blocking \\
-	&dolog & Flag if this function print some informations during running (elapsed time and data length) \\
-	&copyFreq & Flag to copy the frequency data \\
-	&copyPhase & Flag to copy the phase data \\
-	&copyDIO & Flag to copy the digital I/O data \\
-	&copyTrigger & Flag to copy the trigger data \\
-	&copyAuxin & Flag to copy both auxin port data \\
-	& \multicolumn{2}{p{15cm}}{\it The copy flags can be set to False (default if omitted) to preserve memory usage. Set them to True to get more arrays in the resulting dict.} \\
+	\setlength{\LTleft}{1cm}
+	\begin{longtable}{p{3.1cm}p{12cm}}
+	demod\_index & index of demodulator channel (1,2) \\
+	total\_time  & number of seconds for measurement, during this time the function is blocking \\
+	dolog & Flag if this function print some informations during running (elapsed time and data length) \\
+	copyFreq & Flag to copy the frequency data \\
+	copyPhase & Flag to copy the phase data \\
+	copyDIO & Flag to copy the digital I/O data \\
+	copyTrigger & Flag to copy the trigger data \\
+	copyAuxin & Flag to copy both auxin port data \\
+	\multicolumn{2}{p{15cm}}{\it The copy flags can be set to False (default if omitted) to preserve memory usage. Set them to True to get more arrays in the resulting dict.} \\
 	\end{longtable}
 	\textbf{\textit{Return:}} a dict with dict\_keys(['timestamp', 'x', 'y', {\it 'frequency'}, {\it 'phase'}, {\it 'dio'}, {\it 'trigger'}, {\it 'auxin0'}, {\it 'auxin1'}, 'time', 'R', 'phi']).
 	The fields `R' and `phi' are calculated from `x' and `y'. The italic fields must be switched on with the copy flags. All fields are arrays of the same length and contains the measured data. Execpt the field 'time' has the values:
-	\begin{longtable}{p{0.8cm}p{3.1cm}p{12cm}}
-	&'trigger' & 0 \\
-	&'dataloss' & False \\
-	&'blockloss' & False \\
-	&'ratechange' & False \\
-	&'invalidtimestamp' & False \\
-	&'mindelta' & 0 \\
-	&'clockbase' & 60000000.0  {\it this is used to calculate the correct time from the timestamps} \\
+%	\begin{longtable}{p{0.8cm}p{3.1cm}p{12cm}}
+	\begin{longtable}{p{3.1cm}p{12cm}}
+	'trigger' & 0 \\
+	'dataloss' & False \\
+	'blockloss' & False \\
+	'ratechange' & False \\
+	'invalidtimestamp' & False \\
+	'mindelta' & 0 \\
+	'clockbase' & 60000000.0  {\it this is used to calculate the correct time from the timestamps} \\
 	\end{longtable}
 
 \item zidev.{\bf version}() \\
@@ -228,10 +232,11 @@ The following parameters / subroutines are accessible directly from the main dev
 
 \item zidev.{\bf getLastSampleTimestamp}() \\
 	Get the time of last sample request. The return is a three value array:
-	\begin{longtable}{p{1.5cm}p{0.5cm}p{14.4cm}}
-	& [0] & the current system time in seconds from time.time(). \\
-	& [1] & the timestamp value of the device. \\
-	& [2] & the timestamp of the device divided by the clockbase to get seconds. The absolute value of the seconds is not relevant because there is no function to set the current time, but the differences are useful. \\
+	\setlength{\LTleft}{1.5cm}
+	\begin{longtable}{p{0.5cm}p{14.4cm}}
+	 $[0]$ & the current system time in seconds from time.time(). \\
+	 $[1]$ & the timestamp value of the device. \\
+	 $[2]$ & the timestamp of the device divided by the clockbase to get seconds. The absolute value of the seconds is not relevant because there is no function to set the current time, but the differences are useful. \\
 	\end{longtable}
 
 \item zidev.{\bf close}() \\
@@ -270,15 +275,16 @@ The Lock-In-Amplifier has two demodulator channels. Not all parameters are acces
 	\item {\bf bypass}: Allows to bypass the demodulator low-pass filter, thus increasing the bandwidth.
 	\item {\bf frequency}: {\it (ReadOnly)} Indicates the frequency used for demodulation and for output generation. The demodulation frequency is calculated with oscillator frequency times the harmonic factor. When the MOD option is used, linear combinations of oscillator frequencies including the harmonic factors define the demodulation frequencies.
 	\item {\bf order}: Selects the filter roll off. Allowed Values:
-	\begin{longtable}{p{1.5cm}p{1cm}p{14cm}}
-	& 1 & 1st order filter 6 dB/oct \\
-	& 2 & 2nd order filter 12 dB/oct \\
-	& 3 & 3rd order filter 18 dB/oct \\
-	& 4 & 4th order filter 24 dB/oct \\
-	& 5 & 5th order filter 30 dB/oct \\
-	& 6 & 6th order filter 36 dB/oct \\
-	& 7 & 7th order filter 42 dB/oct \\
-	& 8 & 8th order filter 48 dB/oct \\
+	\setlength{\LTleft}{1.5cm}
+	\begin{longtable}{p{1cm}p{14cm}}
+	1 & 1st order filter 6 dB/oct \\
+	2 & 2nd order filter 12 dB/oct \\
+	3 & 3rd order filter 18 dB/oct \\
+	4 & 4th order filter 24 dB/oct \\
+	5 & 5th order filter 30 dB/oct \\
+	6 & 6th order filter 36 dB/oct \\
+	7 & 7th order filter 42 dB/oct \\
+	8 & 8th order filter 48 dB/oct \\
 	\end{longtable}
 	\item {\bf harmonic}: Multiplies the demodulator's reference frequency by an integer factor. If the demodulator is used as a phase detector in external reference mode (PLL), the effect is that the internal oscillator locks to the external frequency divided by the integer factor.
 	\item {\bf oscselect}: Connects the demodulator with the supplied oscillator. Number of available oscillators depends on the installed options. Is a number between 0 and the number of oscillators -1.
@@ -287,40 +293,42 @@ The Lock-In-Amplifier has two demodulator channels. Not all parameters are acces
 	\item {\bf timeconstant}: Sets the integration time constant or in other words, the cutoff frequency of the demodulator low pass filter.
 	\item {\bf samplerate}$^{(*)}$: Defines the demodulator sampling rate, the number of samples that are sent to the host computer per second. A rate of about 7-10 higher as compared to the filter bandwidth usually provides sufficient aliasing suppression. This is also the rate of data received by LabOne Data Server and saved to the computer hard disk. This setting has no impact on the sample rate on the auxiliary outputs connectors. {\it Note: the value inserted by the user may be approximated to the nearest value supported by the instrument.}
 	\item {\bf sample}$^{(*)}$: {\it (ReadOnly)} Returns a dict with streamed demodulator samples with sample interval defined by the demodulator data rate. See note below. The dict contains the following entries:
-	\begin{longtable}{p{1.5cm}p{3cm}p{12cm}}
-	& 'timestamp' & array of uint64 with the internal timestamp of the measurement. Divide this by zidev.clockbase to get the real time in seconds. \\
-	& 'x' & array of double with the x part of the demodulated cartesian coordinates \\
-	& 'y' & array of double with the y part of the demodulated cartesian coordinates \\
-	& 'frequency' & array of double with the current frequency of the oscillator \\
-	& 'phase' & array of double with the angle of the demodulator polar coordinates \\
-	& 'dio' & array of uint32 with the values of the digital inputs \\
-	& 'trigger' & array of uint32 \\
-	& 'auxin0' & array of double with the voltage of the first auxiliary input \\
-	& 'auxin1' & array of double with the voltage of the second auxiliary input \\
-	& 'R' & array of double with the calculated radius of the demodulated polar coordinates, see note below. \\
-	& 'phi' & array of double with the calculated angle of the demodulated polar coordinates, see note below. \\
+	\setlength{\LTleft}{0.9cm}
+	\begin{longtable}{p{3.1cm}p{12.7cm}}
+	'timestamp' & array of uint64 with the internal timestamp of the measurement. Divide this by zidev.clockbase to get the real time in seconds. \\
+	'x' & array of double with the x part of the demodulated cartesian coordinates \\
+	'y' & array of double with the y part of the demodulated cartesian coordinates \\
+	'frequency' & array of double with the current frequency of the oscillator \\
+	'phase' & array of double with the angle of the demodulator polar coordinates \\
+	'dio' & array of uint32 with the values of the digital inputs \\
+	'trigger' & array of uint32 \\
+	'auxin0' & array of double with the voltage of the first auxiliary input \\
+	'auxin1' & array of double with the voltage of the second auxiliary input \\
+	'R' & array of double with the calculated radius of the demodulated polar coordinates, see note below. \\
+	'phi' & array of double with the calculated angle of the demodulated polar coordinates, see note below. \\
 	\end{longtable}
 	\item {\bf sinc}: Enables the sinc filter. When the filter bandwidth is comparable to or larger than the demodulation frequency, the demodulator output may contain frequency components at the frequency of demodulation and its higher harmonics. The sinc is an additional filter that attenuates these unwanted components in the demodulator output. Possible values are: 'ON', 'OFF'.
 	\item {\bf signalinput}: Selects the input signal for the demodulator. Possible values: 'Sig In 1', 'Curr In 1', 'Trigger 1', 'Trigger 2', 'Aux Out 1', 'Aux Out 2', 'Aux Out 3', 'Aux Out 4', 'Aux In 1', 'Aux In 2', 'Constant input'.
 	\item {\bf streaming}$^{(*)}$: Enables the data acquisition for the corresponding demodulator. Possible values are: `ON', `OFF'.
 	\item {\bf trigger}$^{(*)}$: Selects the acquisition mode (i.e. triggering) or the demodulator. The possible values are:
-	\begin{longtable}{p{0.7cm}p{3.1cm}p{12.7cm}}
-	&'Continuous' & demodulator data is continuously streamed to the host computer \\
-	&'Trigger in 1 Rise' & rising edge triggered \\
-	&'Trigger in 1 Fall' & falling edge triggered \\
-	&'Trigger in 1 Both' & triggering on both rising and falling edge \\
-	&'Trigger in 2 Rise' & rising edge triggered \\
-	&'Trigger in 2 Fall' & falling edge triggered \\
-	&'Trigger in 2 Both' & triggering on both rising and falling edge \\
-	&'Trigger in 1$\mid$2 Rise' & rising edge triggered on either input \\
-	&'Trigger in 1$\mid$2 Fall' & falling edge triggered on either input \\
-	&'Trigger in 1$\mid$2 Both' & triggering on both rising and falling edge or either trigger input \\
-	&'Trigger in 1 Low' & demodulator data is streamed to the host computer when the level is low (TTL) \\
-	&'Trigger in 1 High' & demodulator data is streamed to the host computer when the level is high (TTL) \\
-	&'Trigger in 2 Low' & demodulator data is streamed to the host computer when the level is low (TTL) \\
-	&'Trigger in 2 High' & demodulator data is streamed to the host computer when the level is high (TTL) \\
-	&'Trigger in 1$\mid$2 Low' & demodulator data is streamed to the host computer when either level is low (TTL) \\
-	&'Trigger in 1$\mid$2 High' & demodulator data is streamed to the host computer when either level is high (TTL) \\
+	\setlength{\LTleft}{0.9cm}
+	\begin{longtable}{p{3.1cm}p{12.7cm}}
+	'Continuous' & demodulator data is continuously streamed to the host computer \\
+	'Trigger in 1 Rise' & rising edge triggered \\
+	'Trigger in 1 Fall' & falling edge triggered \\
+	'Trigger in 1 Both' & triggering on both rising and falling edge \\
+	'Trigger in 2 Rise' & rising edge triggered \\
+	'Trigger in 2 Fall' & falling edge triggered \\
+	'Trigger in 2 Both' & triggering on both rising and falling edge \\
+	'Trigger in 1$\mid$2 Rise' & rising edge triggered on either input \\
+	'Trigger in 1$\mid$2 Fall' & falling edge triggered on either input \\
+	'Trigger in 1$\mid$2 Both' & triggering on both rising and falling edge or either trigger input \\
+	'Trigger in 1 Low' & demodulator data is streamed to the host computer when the level is low (TTL) \\
+	'Trigger in 1 High' & demodulator data is streamed to the host computer when the level is high (TTL) \\
+	'Trigger in 2 Low' & demodulator data is streamed to the host computer when the level is low (TTL) \\
+	'Trigger in 2 High' & demodulator data is streamed to the host computer when the level is high (TTL) \\
+	'Trigger in 1$\mid$2 Low' & demodulator data is streamed to the host computer when either level is low (TTL) \\
+	'Trigger in 1$\mid$2 High' & demodulator data is streamed to the host computer when either level is high (TTL) \\
 	\end{longtable}
 	\item {\bf x}: {\it (ReadOnly)} get sample of x coordinate. See note below.
 	\item {\bf y}: {\it (ReadOnly)} get sample of y coordinate. See note below.
@@ -475,7 +483,7 @@ The Lock-In-Amplifier has 32 digital input / output lines. They are available at
 
 
 \subsection{Multi device synchronization}
-The feature Multi device synchronization can be used to sync more than one Lock.-In Amplifier to use always the same clock phase. For more informations please look into the manual. {\it This feature is not tested!} The submodule is named {\bf mds}, the class is {\it MDSChannel} with the following parameters:
+The feature Multi device synchronization can be used to sync more than one Lock-In Amplifier to use always the same clock phase. For more informations please look into the manual. {\it This feature is not tested!} The submodule is named {\bf mds}, the class is {\it MDSChannel} with the following parameters:
 \begin{itemize}
 \item {\bf armed}: {\it (ReadOnly)} Indicates whether the mds module is armed and waiting for pulses.
 \item {\bf drive}: Enables output of synch pulses on trigger output 1. Possible values are 'ON' and 'OFF'.
@@ -497,7 +505,7 @@ Combines all parameters concerning the PIDs. These Parameters are only available
 {\it This was not on the test device, so no code is changed for this. The available code is not tested.}
 
 
-\subsection{Sweeper}
+\subsection{Sweeper}\label{lblsweep}
 The sweeper function is inside the data server, running on the instrument. With the {\it MD option} installed there are more functions available. The Sweeper functionality consists of these parts:
 \begin{enumerate}
 \item the zidev.{\bf daq.sweep}() reference stored in {\it zidev.sweeper} \\
@@ -511,13 +519,14 @@ The sweeper function is inside the data server, running on the instrument. With 
 	Helper function to add the signal {\it attribute} to the output of the sweeper get function of the given demodulator number.
 \item zidev.{\bf remove\_signal\_from\_sweeper}(demodulator, attribute) \\
 	Helper function to remove the signal {\it attribute} from the output of the sweeper get function of the given demodulator number.
-\item[] For the both last functions the valid attributes are: \\[-0.5em]
-	\begin{longtable}{p{0.7cm}|p{6cm}|p{9cm}|}
-	\cline{2-3}
-	&'X', 'Y', 'R', 'phase' & the sample measurements \\ \cline{2-3}
-	&'Xrms', 'Yrms', 'Rrms', 'phasePwr' & the square values of the sample measurements \\ \cline{2-3}
-	&'Freq', 'FreqPwr' & Frequency and its square \\ \cline{2-3}
-	&'In1', 'In2', 'In1Pwr', 'In2Pwr' & Aux-Inputs and the squares \\ \cline{2-3}
+\item[] For the both last functions the valid attributes are:\label{sweepresult} \\[-0.5em]
+	\setlength{\LTleft}{1.5cm}
+	\begin{longtable}{|p{6cm}|p{8.5cm}|}
+	\hline
+	'X', 'Y', 'R', 'phase' & the sample measurements \\ \hline
+	'Xrms', 'Yrms', 'Rrms', 'phasePwr' & the square values of the sample measurements \\ \hline
+	'Freq', 'FreqPwr' & Frequency and its square \\ \hline
+	'In1', 'In2', 'In1Pwr', 'In2Pwr' & Aux-Inputs and the squares \\ \hline
 	\end{longtable}
 
 \item zidev.{\bf print\_sweeper\_settings}() \\
@@ -540,25 +549,9 @@ This submodule is used to configure the sweep functionality. All parameter value
 \item {\bf endless}: Enable Endless mode to run the sweeper continuously ('ON'). If disabled ('OFF') the sweep runs only once.
 \item {\bf remaining\_time}: {\it (ReadOnly)} Reports the remaining time of the current sweep. A valid number is only returned once the sweeper has been started. An undefined sweep time is indicated as NAN, that means, the sweeper is not running.
 \item {\bf averaging\_samples}: Sets the number of data samples per sweeper parameter point that is considered in the measurement. The maximum of this value and averaging\_time is taken as the effective calculation time. The actual number of samples is the maximum of this value and the averaging\_time times the relevant sample rate.
+\item {\bf averaging\_tc}: Minimal averaging time constant.
 \item {\bf averaging\_time}: Sets the effective measurement time per sweeper parameter point that is considered in the measurement. The maximum between of this value and averaging\_samples is taken as the effective calculation time. The actual number of samples is the maximum of this value times the relevant sample rate and the averaging\_samples.
 \item {\bf bandwidth\_mode}: Specify how the sweeper should specify the bandwidth of each measurement point. Automatic is recommended in particular for logarithmic sweeps and assures the whole spectrum is covered. Possible values are:
-
-	\begin{longtable}{p{1.5cm}p{3cm}p{12cm}}
-	& 'timestamp' & array of uint64 with the internal timestamp of the measurement. Divide this by zidev.clockbase to get the real time in seconds. \\
-	& 'x' & array of double with the x part of the demodulated cartesian coordinates \\
-	& 'y' & array of double with the y part of the demodulated cartesian coordinates \\
-	& 'frequency' & array of double with the current frequency of the oscillator \\
-	& 'phase' & array of double with the angle of the demodulator polar coordinates \\
-	& 'dio' & array of uint32 with the values of the digital inputs \\
-	& 'trigger' & array of uint32 \\
-	& 'auxin0' & array of double with the voltage of the first auxiliary input \\
-	& 'auxin1' & array of double with the voltage of the second auxiliary input \\
-	& 'R' & array of double with the calculated radius of the demodulated polar coordinates, see note below. \\
-	& 'phi' & array of double with the calculated angle of the demodulated polar coordinates, see note below. \\
-	\end{longtable}
-
-
-
 	\begin{itemize}[]
 	\itemsep0pt
 	\item 'current': the sweeper module leaves the demodulator bandwidth settings entirely untouched
@@ -594,7 +587,9 @@ This submodule is used to configure the sweep functionality. All parameter value
 \item {\bf clear\_history}: Remove all records from the history list. Possible values are: 'ON' or 'OFF'.
 \item {\bf directory}: The directory to which sweeper measurements are saved to via Sweep.save().
 \item {\bf fileformat}: The format of the file for saving sweeper measurements. Possible values are: `Matlab' or `CSV'.
-\item {\bf \_get\_sweep\_time()}: function to calculate the estimation of the sweep duration. This is not precise to more than a few percent. The return is None if the bandwidth\_mode setting is 'auto' (then all bets are off), otherwise a time in seconds.
+\item {\bf sweeptime}: {\it (ReadOnly)} calculate the estimation of the sweep duration. This is not precise to more than a few percent. The return is None if the bandwidth\_mode setting is 'auto' (then all bets are off), otherwise a time in seconds.
+\item {\bf units}: {\it (ReadOnly)} get the unit of the current sweep parameter set with {\it param}.
+\item {\bf sweeper\_timeout}: holds the maximum number of seconds for the sweep to finsh. If the sweep duration exeeds this time, it will be stopped. The initial value is set to 600s.
 \end{itemize}
 
 \subsubsection{Sweep}
@@ -606,6 +601,35 @@ This class communicates with the sweeper function in the data server.
 This get() can be used inside the QCoDeS.Loop function.
 \end{itemize}
 An example how to use the sweeper commands is included in the following section.
+
+
+\subsection{BufferedParamter}
+
+The following parameters are used with the QCoDeS bufferedLoop function, see example. So only these parameters can be used in the sweep. They have all the same baseclass {\it lockinBufferedParameter}.
+\begin{itemize}
+\itemsep0pt
+\item {\bf buffered\_freq1}: Oscillator 1 frequency
+\item {\bf buffered\_auxout1}: Auxiliary output 1 offset
+\item {\bf buffered\_auxout2}: Auxiliary output 2 offset
+\item {\bf buffered\_auxout3}: Auxiliary output 3 offset
+\item {\bf buffered\_auxout4}: Auxiliary output 4 offset
+\item {\bf buffered\_phase1}: Demodulator 1 phase shift
+\item {\bf buffered\_phase2}: Demodulator 2 phase shift
+\item {\bf buffered\_out1ampl2}: Output 1 amplitude 2
+\item {\bf buffered\_out1off}: Output 1 offset
+\item[] {\it the following parameters are only available if the MD option is installed}
+\item {\bf buffered\_phase3}: Demodulator 3 phase shift
+\item {\bf buffered\_phase4}: Demodulator 4 phase shift
+\item {\bf buffered\_freq2}: Oscillator 2 frequency
+\item {\bf buffered\_out1ampl4}: Output 1 amplitude 4
+\item {\bf buffered\_out2ampl8}: Output 2 amplitude 8
+\item {\bf buffered\_out2off}: Output 2 offset
+\end{itemize}
+
+The parameter {\bf buffered\_result({\it lockinBufferedArrayParameter})} must be created later if the dimension of the result vector is known. The internal arrays cannot be resized after the parameter is instantiated. So it will be created in the routines {\it zidev.add\_signal\_to\_sweeper()} and {\it zidev.remove\_signal\_from\_sweeper()}. That means, this parameter is not accessible before a signal is added to the sweeper.
+
+            
+            
 
 \clearpage
 
@@ -796,6 +820,100 @@ zidev.close()
 \item Lines 37 - 38: construct the QCoDeS-Loop and run it.
 \item Line 39: close the connection to the device.
 \end{itemize}
+
+
+
+\subsubsection{test\_zimfli\_BufferedParameter.py}
+This example was a combination of the sweep functionality and the QCoDeS BufferedLoop function. It was tested with the instrument in the QCoDeS environment but without any hardware connected.
+
+\begin{lstlisting}[frame=single, language=Python, numbers=left, xleftmargin=1cm]
+import qcodes as qc
+from qcodes.instrument_drivers.ZI.ZIMFLI import ZIMFLI
+import zhinst.utils
+import time
+
+zidev = ZIMFLI( name='ZIMFLI', device_ID='DEV4039' )
+sc = zidev.submodules['sweeper_channel']
+sc.averaging_samples(1)
+sc.averaging_tc(1.0)
+sc.averaging_time(0.0)
+sc.bandwidth_mode('fixed')
+sc.bandwidth(1000.0)
+sc.order(4)
+sc.max_bandwidth(1250000.0)
+sc.omega_suppression(40.0)
+sc.settling_time(1e-6)
+sc.settling_inaccuracy(0.0001)
+sc.history_length(100)
+
+zidev.add_signal_to_sweeper( 1, 'In1'  )
+zidev.add_signal_to_sweeper( 1, 'X' )
+zidev.add_signal_to_sweeper( 1, 'Y' )
+zidev.add_signal_to_sweeper( 1, 'R' )
+
+amplitude=0.5
+out_channel = 0
+in_channel = 0
+in_chanstring = 'Sig In {}'.format(in_channel+1)
+demod_index = 0 # zero based!
+osc_index = 0
+demod_rate = 1e3
+time_constant = 0.01
+freq_start = 400e3
+freq_stop  = 450e3
+freq_step  =  10e3
+
+sigin = zidev.submodules['signal_in{}'.format(in_channel+1)]
+demod = zidev.submodules['demod{}'.format(demod_index+1)]
+sigout= zidev.submodules['signal_out{}'.format(out_channel+1)]
+
+sigin.ac( 'OFF' )
+sigin.range( 2*amplitude )
+demod.streaming( 'ON' )
+demod.samplerate( demod_rate )
+demod.signalin( in_chanstring )
+demod.order( 4 )
+demod.timeconstant( time_constant )
+demod.oscselect( osc_index )
+demod.harmonic( 1 )
+sigout.on( 'ON' )
+sigout.enable( 'ON' )
+sigout.range( 1 )
+sigout.amplitude( amplitude )
+
+time.sleep(10*time_constant)
+zidev.daq.sync()
+
+#bf = zidev.buffered_freq1.sweep( freq_start, freq_stop, step=freq_step )
+ba = zidev.buffered_auxout1.sweep( 0, 4, step=0.2 )
+l  = qc.Repetition(2) \
+       .buffered_loop(ba) \
+       .each(zidev.buffered_result)
+
+data = l.run()
+
+zidev.buffered_freq1.debug()
+zidev.close()
+\end{lstlisting}
+
+\begin{itemize}
+\itemsep0pt
+\item Lines 1 - 6: imports and device creation as usual.
+\item Lines 7 - 18: configuration of the sweeper channel. The instrument has only one sweeper channel available, that means, only one parameter can be swept.
+\item Lines 20 - 23: add the signals of interest for the resultant dataset, see page \pageref{sweepresult} what signals are possible.
+\item Lines 25 - 35: set some variables to be used later to configure the instrument.
+\item Lines 37 - 39: get references to the used submodules.
+\item Lines 41 - 53: configure the submodules.
+\item Lines 55 - 56: give the demodulator filter some time to settle and then perform a global synchronisation between the device and the data server. The both steps must be done before using the poll function during the sweep.
+\item Line 58: as an example the frequency sweep.
+\item Line 59: the currently used Aux1 Offset sweep.
+\item Lines 60 - 62: set up the QCoDeS bufferedLoop with 2 repetitions.
+\item Line 64: run the loop.
+\item Line 66: optional printout of the internal sweeper settings. This can only be done after the run command because only in this run command the sweep will be configured. All other calls before save some data but will not start the configuration calculations.
+\end{itemize}
+
+
+
 
 \clearpage
 

@@ -95,7 +95,7 @@ class ZIMFLIsweeper():
 
 
     def __init__(self):
-        print("DBG: ZIMFLIsweeper(): Init")
+        #print("DBG: ZIMFLIsweeper(): Init")
         self.params.update( {'device': '?', # The device ID to perform the sweep on
                              'gridnode': ['oscs/0/freq'], # The device parameter (specified by node) to be swept
                              'start': [0],
@@ -123,7 +123,7 @@ class ZIMFLIsweeper():
                              'historylength': [0], #vals=vals.Ints(0, 2**64-1))
                              'clearhistory': [0], # val_mapping={'ON': 1, 'OFF': 0})
                              'directory': ['./'],
-                             'filefomat': [1],  #val_mapping={'Matlab': 0, 'CSV': 1})
+                             'fileformat': [1],  #val_mapping={'Matlab': 0, 'CSV': 1})
                              'awgcontrol': [0],
                              'save': {'csvlocale': ['C'],
                                       'csvseparator': [';'],
@@ -137,7 +137,7 @@ class ZIMFLIsweeper():
     def set( self, topic:str, value ) -> None:
         if topic.startswith('sweep/'):
             topic = topic[6:]
-        print("DBG: ZIMFLIsweeper(): Set ", topic, "=", value )
+        #print("DBG: ZIMFLIsweeper(): Set ", topic, "=", value )
         t = topic.split("/")
         if len(t) == 1:
             self.params.update( {topic: [value]} )
@@ -149,7 +149,7 @@ class ZIMFLIsweeper():
                 tmp = self.params[t[0]]
                 tmp.update( {'tc': [value/11.0]} )
                 self.params.update( {t[0]: tmp} )
-                print("DBG:                  Set  settling/tc =", value/11.0 )
+                #print("DBG:                  Set  settling/tc =", value/11.0 )
         else:
             raise RuntimeError("More than 2 depth in nested dict")
         
@@ -161,10 +161,10 @@ class ZIMFLIsweeper():
         pass
 
     def subscribe( self, path:str ) -> None:
-        print("DBG: ZIMFLIsweeper(): subscribe ", path)
+        print("SIM: ZIMFLIsweeper(): subscribe ", path)
 
     def unsubscribe( self, path:str ) -> None:
-        print("DBG: ZIMFLIsweeper(): unsubscribe ", path)
+        print("SIM: ZIMFLIsweeper(): unsubscribe ", path)
 
     def execute(self):
         self.startTime = time.time()
