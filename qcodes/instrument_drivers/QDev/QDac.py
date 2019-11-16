@@ -94,7 +94,7 @@ class QDac(VisaInstrument):
                                label='Channel ' + stri,
                                unit='V',
                                set_cmd=partial(self._set_voltage, i),
-                               vals=vals.Numbers(-10, 10),
+                               vals=vals.Numbers(-3, 0),
                                get_cmd=partial(self.read_state, i, 'v')
                                )
             self.add_parameter(name='ch{:02}_vrange'.format(i),
@@ -175,6 +175,16 @@ class QDac(VisaInstrument):
         log.info('[*] Querying all channels for voltages and currents...')
         self._get_status(readcurrents=update_currents)
         log.info('[+] Done')
+
+        print('default setting for QDac: \nslope 0.1V/s for ch01 to ch08 \nirange to 1uA for all channels\nvrange to [-10,10]V for all channels')
+
+        for chan in range(1,9):
+        	self.parameters['ch{:02}_slope'.format(i)].set(0.1)
+
+        for chan in self.chan_range:
+        	self.parameters['ch{:02}_irange'.format(i)].set(0)
+        	self.parameters['ch{:02}_vrange'.format(i)].set(0)
+
 
     def snapshot_base(self, update=False, params_to_skip_update=None):
         # call get_status here if updates are requested
