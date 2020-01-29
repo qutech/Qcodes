@@ -73,16 +73,23 @@ class Sync:
 
 class ExplicitSync(Sync):
     """Explicit sync points"""
-    def __init__(self, sync_times: numpy.ndarray, points_lengths: numpy.ndarray, duration=None):
+    def __init__(self, sync_times: numpy.ndarray, sync_lengths: numpy.ndarray, duration=None):
+        """
+
+        Args:
+            sync_times: Time points of sync i.e. where something should happen
+            sync_lengths: Lengths of sync i.e. how long should a measurement be / a set value be constant
+            duration: Total duration of the sync object. Needs to be >= sync_times[-1] + sync_lengths[-1]
+        """
         assert numpy.all(numpy.diff(sync_times) >= 0)
-        assert numpy.all(points_lengths >= 0)
-        assert sync_times.size == points_lengths.size
+        assert numpy.all(sync_lengths >= 0)
+        assert sync_times.size == sync_lengths.size
 
         if duration is None:
-            duration = sync_times[-1] + points_lengths[-1]
+            duration = sync_times[-1] + sync_lengths[-1]
         super().__init__()
 
-        self._explicit = self.Explicit(sync_times, points_lengths)
+        self._explicit = self.Explicit(sync_times, sync_lengths)
         self._duration = duration
 
     def duration(self):
