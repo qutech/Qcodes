@@ -15,7 +15,7 @@ Open question:
 import numpy
 
 from abc import abstractmethod
-from typing import Mapping, NamedTuple, Optional
+from typing import Mapping, NamedTuple, Optional, Dict, List
 
 
 class Sync:
@@ -36,19 +36,18 @@ class Sync:
                                        ('length', numpy.ndarray)])
 
     def __init__(self):
-        self._commands = {}
+        self._commands = {}  # Dict[AsyncInstrument, List[AsyncCommand]]
 
-    @abstractmethod
-    def _compile_commands(self) -> Mapping['AsyncInstrument', 'AsyncCommand']:
-        """compile the commands of this and"""
+    def _compile_commands(self) -> Dict['AsyncInstrument', 'AsyncCommand']:
+        """Compile the commands of this Sync object and it's eventual children.
+
+        This means merging the list of commands in _commands into a single command."""
+        return {instrument: first_command.parallel(*commands)
+                for (instrument, (first_command, *commands)) in self._commands.items()}
 
     def execute(self):
         for instrument, commands in self._compile_commands().items():
             instrument.prepare(self, commands)
-
-    def delayed(self, delay) -> 'Sync':
-        """Utility function to create a delayed copy if a device is triggered later"""
-        raise NotImplementedError()
 
     def repeated(self, count) -> 'Sync':
         return RepeatedSync(self, count)
@@ -83,6 +82,8 @@ class ExplicitSync(Sync):
         """
         assert numpy.all(numpy.diff(sync_times) >= 0)
         assert numpy.all(sync_lengths >= 0)
+        assert sync_times.ndim == 1
+        assert sync_lengths.ndim == 1
         assert sync_times.size == sync_lengths.size
 
         if duration is None:
@@ -104,6 +105,9 @@ class ExplicitSync(Sync):
     def as_explicit(self) -> Sync.Explicit:
         return self._explicit
 
+    def num_sync_points(self) -> int:
+        return self._explicit.begin.size
+
 
 class RepeatedSync(Sync):
     def __init__(self, sync: Sync, count: int):
@@ -111,15 +115,18 @@ class RepeatedSync(Sync):
         self.count = count
         self.sync = sync
 
-    def _compile_commands(self) -> Mapping['AsyncInstrument', 'AsyncCommand']:
-        resulting_commands = self._commands.copy()
+    def _compile_commands(self) -> Dict['AsyncInstrument', 'AsyncCommand']:
+        resulting_commands = super()._compile_commands()
+        to_repeat = self.sync._compile_commands()
 
-        for instrument, command in self.sync._compile_commands().items():
+        for instrument, command in to_repeat.items():
             repeated_command = command.repeated(self.count)
+
             if instrument in resulting_commands:
+                # merge the command from this sync with the repeated command from sub sync
                 resulting_commands[instrument] = resulting_commands[instrument].parallel(repeated_command)
             else:
-                resulting_commands[instrument] = command
+                resulting_commands[instrument] = repeated_command
         return resulting_commands
 
     def duration(self):
@@ -158,7 +165,7 @@ class AsyncCommand:
         """Concatenate multiple commands raises if concatenation not possible"""
         raise NotImplementedError()
 
-    def parallel(self, *async_commands):
+    def parallel(self, *async_commands: 'AsyncCommand') -> 'AsyncCommand':
         """see _parallel"""
         if async_commands:
             return self._parallel(*async_commands)
@@ -166,10 +173,14 @@ class AsyncCommand:
             return self
 
     @abstractmethod
-    def _parallel(*async_commands):
-        """
+    def _parallel(*async_commands: 'AsyncCommand') -> 'AsyncCommand':
+        """ Build a new command that merges all provided commands
 
-        Same length?
+        Args:
+            *async_commands: Commands to merge into one
+
+        Returns:
+            Merged commands
         """
         raise NotImplementedError()
 
