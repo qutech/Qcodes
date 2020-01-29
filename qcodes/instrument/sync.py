@@ -1,9 +1,9 @@
-"""This modules contains classes that define a unified interface for "asynchronous" instrument/parameter control.
+"""This modules contains classes that define a unified interface for "synchronous" instrument/parameter control.
 Asynchronous means that the python/QCoDeS delegates the timing control to the physical instruments.
 
 Example applications are fast voltage sweeps but also parameter sweeps of qupulse pulses.
 
-The Sync class represents synchronisation points with a certain length. It can be created by hand or by an async_set
+The Sync class represents synchronisation points with a certain length. It can be created by hand or by an sync_set
 command.
 
 Open question:
@@ -15,17 +15,18 @@ Open question:
 import numpy
 
 from abc import abstractmethod
-from typing import Mapping, NamedTuple, Optional, Dict, List
+from typing import NamedTuple, Optional, Dict, List, Callable, Set
 
 
 class Sync:
-    """Consists of several sync points which are relative to a trigger event.
+    """Synchronization proxy between `SyncParameter.sync_get` and `SyncParameter.sync_set` calls. Consists of several
+    sync points which are relative to a trigger event. Stores synchronous commands together with their instruments.
 
-    1. Nest syncs
-    2. delay ´maybe indirect as delay between triggers
-    3. Sync point length? Other meta data?
+    The time points can either be explicit i.e. a list of begin, length pairs or implicit i.e. a periodic description.
+    Obviously not all syncs gan be described as period but some(most) instruments will require periodic sync points
+    because they sample with a fixed rate.
 
-    Errors are raised on execution
+    Call execute to prepare all involved instruments for the synchronous operation.
     """
     Periodic = NamedTuple('Periodic', [('period', float),
                                        ('begin', float),
@@ -36,9 +37,16 @@ class Sync:
                                        ('length', numpy.ndarray)])
 
     def __init__(self):
-        self._commands = {}  # Dict[AsyncInstrument, List[AsyncCommand]]
+        self._commands = {}  # type: Dict[SyncInstrument, List[SyncCommand]]
 
-    def _compile_commands(self) -> Dict['AsyncInstrument', 'AsyncCommand']:
+    def get_instruments(self) -> Set['SyncInstrument']:
+        """
+        Returns:
+            Set of all instruments involved in this sync operation.
+        """
+        return set(self._commands.keys())
+
+    def _compile_commands(self) -> Dict['SyncInstrument', 'SyncCommand']:
         """Compile the commands of this Sync object and it's eventual children.
 
         This means merging the list of commands in _commands into a single command."""
@@ -46,27 +54,54 @@ class Sync:
                 for (instrument, (first_command, *commands)) in self._commands.items()}
 
     def execute(self):
+        """Prepare all instruments for synchronous operation. The function returns when all instruments are prepared.
+        Triggering is not specified. It probably needs to be done externally."""
         for instrument, commands in self._compile_commands().items():
             instrument.prepare(self, commands)
 
+    def cancel(self) -> Set['SyncInstrument']:
+        """Cancel all synchronous preparations / operations.
+        Returns:
+            Set of instruments where canceling might have failed
+        """
+        failed = set()
+        for instrument in self.get_instruments():
+            successful_cancel = instrument.cancel_sync_operations()
+            if not successful_cancel:
+                failed.add(instrument)
+        return failed
+
     def repeated(self, count) -> 'Sync':
+        """Creates a new sync operation that is a repetition of the current.
+
+        Args:
+            count: repetition count
+
+        Returns:
+            new sync operation
+        """
         return RepeatedSync(self, count)
 
+    @abstractmethod
     def as_periodic(self) -> Optional[Periodic]:
         """Return periodic sync point description or None"""
-        raise NotImplementedError()
 
+    @abstractmethod
     def as_explicit(self) -> Explicit:
         """Return explicit sync point description with shape == (N, 2)"""
-        raise NotImplementedError()
 
-    def duration(self):
-        raise NotImplementedError()
+    @abstractmethod
+    @property
+    def duration(self) -> float:
+        """Duration of the sync object."""
 
+    @abstractmethod
+    @property
     def num_sync_points(self) -> int:
-        raise NotImplementedError()
+        """Number of synchronization points"""
 
-    def add_command(self, instrument: 'AsyncInstrument', command):
+    def add_command(self, instrument: 'SyncInstrument', command):
+        """Add a new command to this sync object."""
         self._commands.setdefault(instrument, []).append(command)
 
 
@@ -93,6 +128,7 @@ class ExplicitSync(Sync):
         self._explicit = self.Explicit(sync_times, sync_lengths)
         self._duration = duration
 
+    @property
     def duration(self):
         return self._duration
 
@@ -105,6 +141,7 @@ class ExplicitSync(Sync):
     def as_explicit(self) -> Sync.Explicit:
         return self._explicit
 
+    @property
     def num_sync_points(self) -> int:
         return self._explicit.begin.size
 
@@ -115,7 +152,10 @@ class RepeatedSync(Sync):
         self.count = count
         self.sync = sync
 
-    def _compile_commands(self) -> Dict['AsyncInstrument', 'AsyncCommand']:
+    def get_instruments(self) -> Set['SyncInstrument']:
+        return super().get_instruments().union(self.sync.get_instruments())
+
+    def _compile_commands(self) -> Dict['SyncInstrument', 'SyncCommand']:
         resulting_commands = super()._compile_commands()
         to_repeat = self.sync._compile_commands()
 
@@ -129,8 +169,9 @@ class RepeatedSync(Sync):
                 resulting_commands[instrument] = repeated_command
         return resulting_commands
 
+    @property
     def duration(self):
-        return self.sync.duration() * self.sync
+        return self.sync.duration * self.count
 
     def as_periodic(self):
         """Return periodic sync point description or None"""
@@ -147,88 +188,133 @@ class RepeatedSync(Sync):
         length = numpy.repeat(inner.length, self.count)
         return self.Explicit(begin, length)
 
+    @property
     def num_sync_points(self) -> int:
         return self.count * self.sync.num_sync_points()
 
 
-class AsyncCommand:
-    """Carries the instrument specific configuration for an (a)synchronous command. The exact timing information is
+class SyncCommand:
+    """Carries the instrument specific configuration for an synchronous command. The exact timing information is
     not stored here but in the Sync object.
 
-    This needs to be subclassed and implemented by each async instrument. Examples are sweeps and
+    This needs to be subclassed and implemented by each sync instrument. Examples are sweeps and
     buffered acquisitions."""
 
-    def repeated(self, count: int) -> 'AsyncCommand':
+    @abstractmethod
+    def repeated(self, count: int) -> 'SyncCommand':
+        """Create a command that is a repetition of the current if possible.
+
+        Args:
+            count: repetition_count
+        Raises:
+            TypeError if this command cannot be repeated
+        """
+
+    def concatenate(*sync_commands):
+        """Concatenate multiple commands
+
+        Args:
+            *sync_commands: commands to concatenate
+
+        Raises:
+            TypeError if concatenation not possible
+
+        Returns:
+            A single command representing the concatenation
+        """
         raise NotImplementedError()
 
-    def concatenate(*async_commands):
-        """Concatenate multiple commands raises if concatenation not possible"""
-        raise NotImplementedError()
-
-    def parallel(self, *async_commands: 'AsyncCommand') -> 'AsyncCommand':
+    def parallel(self, *sync_commands: 'SyncCommand') -> 'SyncCommand':
         """see _parallel"""
-        if async_commands:
-            return self._parallel(*async_commands)
+        if sync_commands:
+            return self._parallel(*sync_commands)
         else:
             return self
 
     @abstractmethod
-    def _parallel(*async_commands: 'AsyncCommand') -> 'AsyncCommand':
+    def _parallel(*sync_commands: 'SyncCommand') -> 'SyncCommand':
         """ Build a new command that merges all provided commands
 
         Args:
-            *async_commands: Commands to merge into one
+            *sync_commands: Commands to merge into one
 
         Returns:
-            Merged commands
+            Merged command
         """
         raise NotImplementedError()
 
 
-class AsyncInstrument:
-    """TODO: interface to cancel preparation
-    """
+class SyncInstrument:
+    @abstractmethod
+    def prepare(self, sync: Sync, sync_command: SyncCommand):
+        """Prepare the instrument to execute the synchronous command. The trigger
+
+        Requirement for implementation: Logs every change of the instrument state for easy debugging.
+        Logs should go to instrument.sync
+
+        Args:
+            sync:
+            sync_command:
+        """
 
     @abstractmethod
-    def prepare(self, sync, async_command: AsyncCommand):
-        """prepare the instrument to execute the asynchronous command.
+    def cancel_sync_operations(self) -> bool:
+        """
+        - Cancel all running threads and coroutines
+        - Cancel sweep of instrument
+        - Set instrument to a usable state i.e. simple get and set on parameters work
 
-        :param sync:
-        :param async_command:
-        :return:
+        Returns:
+              True if instrument is usable afterwards, False if one if the above is impossible/failed
         """
 
 
-class AsyncParameter:
-    def async_set(self, values, sync: Sync = None) -> Sync:
-        """If the sync is None a new sync is created. Here an async command is created and placed in the sync.
-        The AsyncCommand does not need to
+class SyncParameter:
+    def sync_set(self, values, sync: Sync = None) -> Sync:
+        """If the sync is None a new sync is created. Here an sync command is created and placed in the sync.
+        The SyncCommand does not need to.
 
-        :param values:
-        :param sync:
-        :return:
+        Args:
+            values:
+            sync:
+
+        Returns:
+            sync or new Sync object
         """
 
-    def async_get(self, sync: Sync) -> callable:
+    def sync_get(self, sync: Sync) -> Callable[[], numpy.ndarray]:
+        """Create the commands that are necessary to do a synchronous measurement and add them to the provided sync
+        object. Use the returned callable to obtain the measured values.
+
+        Args:
+            sync: Specifies the times points when to measure
+
+        Returns:
+            Callable that blocks until it returns the measured values. It raises an exception if the instrument was not
+            configured via sync.execute.
         """
-        :param sync:
-        :return:
+
+    def is_running(self) -> bool:
+        """
+
+        Returns:
+            True if set or get is in progress
         """
 
 
-class AsyncDacCommand(AsyncCommand):
+class SyncDacCommand(SyncCommand):
     def __init__(self, ramp_rate, commands: str):
         raise NotImplementedError('This should result in a script for DecaDac')
 
-    def _parallel(*async_commands):
+    def _parallel(*sync_commands):
         raise NotImplementedError('parallel deca dac ramps not implemented yet')
 
 
-class AsyncDacVoltage(AsyncParameter):
+class SyncDacVoltage(SyncParameter):
     def __init__(self, channel):
         self.channel = channel
 
-    def async_set(self, values, sync: Sync = None) -> Sync:
+    def sync_set(self, values, sync: Sync = None) -> Sync:
         if sync is None:
             # calc sync from ramp rate and values
             raise NotImplementedError()
@@ -237,11 +323,9 @@ class AsyncDacVoltage(AsyncParameter):
             if period is None:
                 raise ValueError('dac only periodic')
             else:
-                raise NotImplementedError('sync.add_command(self.channel.instrument, AsyncDacCommand())')
+                raise NotImplementedError('sync.add_command(self.channel.instrument, SyncDacCommand())')
 
 
-class AsyncDac(AsyncInstrument):
-    def prepare(self, sync, async_command: AsyncCommand):
+class SyncDac(SyncInstrument):
+    def prepare(self, sync, sync_command: SyncCommand):
         raise NotImplementedError('create the "script" and upload it to the decadac')
-
-
