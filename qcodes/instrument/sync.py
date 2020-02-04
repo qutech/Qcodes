@@ -15,7 +15,7 @@ Open question:
 import numpy
 
 from abc import abstractmethod
-from typing import NamedTuple, Optional, Dict, List, Callable, Set
+from typing import NamedTuple, Optional, Dict, Callable, Set
 
 
 class Sync:
@@ -90,19 +90,23 @@ class Sync:
     def as_explicit(self) -> Explicit:
         """Return explicit sync point description with shape == (N, 2)"""
 
-    @abstractmethod
     @property
+    @abstractmethod
     def duration(self) -> float:
         """Duration of the sync object."""
 
-    @abstractmethod
     @property
+    @abstractmethod
     def num_sync_points(self) -> int:
         """Number of synchronization points"""
 
     def add_command(self, instrument: 'SyncInstrument', command):
         """Add a new command to this sync object."""
         self._commands.setdefault(instrument, []).append(command)
+
+    def debug(self):
+        """ Helper function to print all internal informations """
+        print( "Sync: _commands=", self._commands )
 
 
 class ExplicitSync(Sync):
@@ -116,7 +120,7 @@ class ExplicitSync(Sync):
             duration: Total duration of the sync object. Needs to be >= sync_times[-1] + sync_lengths[-1]
         """
         assert numpy.all(numpy.diff(sync_times) >= 0)
-        assert numpy.all(sync_lengths >= 0)
+        #assert numpy.all(sync_lengths >= 0) TypeError: '>=' not supported between instances of 'list' and 'int'
         assert sync_times.ndim == 1
         assert sync_lengths.ndim == 1
         assert sync_times.size == sync_lengths.size
@@ -144,6 +148,14 @@ class ExplicitSync(Sync):
     @property
     def num_sync_points(self) -> int:
         return self._explicit.begin.size
+
+    def debug(self):
+        """ Helper function to print all internal informations """
+        super().debug()
+        #print( "ExplicitSync: ", self._explicit )
+        print( "ExplicitSync: Begin=", self._explicit.begin )
+        print( "             Length=", self._explicit.length )
+        print( "           Duration=", self._duration )
 
 
 class RepeatedSync(Sync):
@@ -191,6 +203,12 @@ class RepeatedSync(Sync):
     @property
     def num_sync_points(self) -> int:
         return self.count * self.sync.num_sync_points()
+
+    def debug(self):
+        """ Helper function to print all internal informations """
+        super().debug()
+        print( "RepeatedSync: Count=", self.count )
+        print( "           Commands=", self._commands )
 
 
 class SyncCommand:
@@ -302,6 +320,8 @@ class SyncParameter:
         """
 
 
+"""Examples for DecaDAC.
+
 class SyncDacCommand(SyncCommand):
     def __init__(self, ramp_rate, commands: str):
         raise NotImplementedError('This should result in a script for DecaDac')
@@ -329,3 +349,4 @@ class SyncDacVoltage(SyncParameter):
 class SyncDac(SyncInstrument):
     def prepare(self, sync, sync_command: SyncCommand):
         raise NotImplementedError('create the "script" and upload it to the decadac')
+"""
