@@ -6,7 +6,7 @@ Author: Sarah Fleitmann, ZEA-2, s.fleitmann@fz-juelich.de
 Purpose: Testing the parameters of AmplitudeModulation
 """
 
-from SMW200A import RohdeSchwarz_SMW200A
+from qcodes.instrument_drivers.rohde_schwarz.SMW200A import RohdeSchwarz_SMW200A
 
 dev = RohdeSchwarz_SMW200A( name='SMW200A', address='TCPIP::134.61.7.134::hislip0::INSTR' )
 dev.reset()

@@ -23,15 +23,15 @@ print( "--- set commands ---" )
 Please uncomment a group if you want to test this special set command.
 """
 
-## fprintf(RSVec,['SOUR:FREQ:CENT ' num2str(19.9e9) 'Hz']);
-#print( "'SOUR:FREQ:CENT '  -> OutputChannel::sweep_center(...)" )
-#dev.submodules['rfoutput1'].sweep_center( 19.9e9 )
-#print( dev.get_error()[0] ) -> Data out of range
-
 ## fprintf(RSVec,'SOUR:FREQ:SPAN 200000000 Hz');
-#print( "'SOUR:FREQ:SPAN ... Hz' -> OutputChannel::sweep_span(...)" )
-#dev.submodules['rfoutput1'].sweep_span( 200000000 )
-#print( dev.get_error()[0] )
+print( "'SOUR:FREQ:SPAN ... Hz' -> OutputChannel::sweep_span(...)" )
+dev.submodules['rfoutput1'].sweep_span( 200000000 )
+print( dev.get_error()[0] )
+
+## fprintf(RSVec,['SOUR:FREQ:CENT ' num2str(19.9e9) 'Hz']);
+print( "'SOUR:FREQ:CENT '  -> OutputChannel::sweep_center(...)" )
+dev.submodules['rfoutput1'].sweep_center( 19.9e9 )
+print( dev.get_error()[0] ) # -> Data out of range
 
 ## fprintf(RSVec,'SOUR:SWE:FREQ:STEP:LIN 2000000 Hz');
 #print( "'SOUR:SWE:FREQ:STEP:LIN ... Hz' -> OutputFrequencySweep::lin_step(...)" )

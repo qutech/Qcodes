@@ -11,8 +11,8 @@ from qcodes.instrument_drivers.rohde_schwarz.SMW200A import RohdeSchwarz_SMW200A
 from qcodes.instrument.channel import ChannelList
 import re
 
-# List to collect all not readable parameters
-notreadlist = []
+notreadlist = [] # List to collect all not readable parameters
+nodoclist = [] # List to collect all not documented parameters (docstring)
 
 # helper function to go through all parameters of one module
 def helper( mod, params ):
@@ -31,9 +31,16 @@ def helper( mod, params ):
         if par.__doc__ is not None:
             if par.__doc__[:9] != "Parameter" and par.__doc__[:9] != "MultiPara":
                 tmp = re.sub(' {2,}', ' ', par.__doc__)
-                tmp = tmp[:tmp.index('Parameter class:')].split('\n')
-                tmp2 = ['  '+s for s in tmp if len(s)>2]
-                print( '\n'.join(tmp2) )
+                print( "DOC: ", tmp[:tmp.index('Parameter class:')].strip(), "\n" )
+            else:
+                nodoclist.append( mod + "." + p )
+        else:
+            nodoclist.append( mod + "." + p )
+
+#                tmp = re.sub(' {2,}', ' ', par.__doc__)
+#                tmp = tmp[:tmp.index('Parameter class:')].split('\n')
+#                tmp2 = ['  '+s for s in tmp if len(s)>2]
+#                print( '\n'.join(tmp2) )
 
 # Open Device. Be sure that the device-id is correct
 dev = RohdeSchwarz_SMW200A( name='SMW200A', address='TCPIP::134.61.7.134::hislip0::INSTR' )
@@ -56,5 +63,7 @@ for m in dev.submodules:
 
 if len(notreadlist) > 0:
     print( "\nNot readable: ", notreadlist )
+if len(nodoclist) > 0:
+    print( "\nNot documented: ", nodoclist )
 
 dev.close()

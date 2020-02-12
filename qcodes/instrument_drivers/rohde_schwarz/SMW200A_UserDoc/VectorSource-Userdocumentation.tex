@@ -89,6 +89,7 @@
 19. Jun 2019 & M.Wagener & Fixup formatting. \\ \hline
 24. Jun 2019 & M.Wagener & Last corrections. \\ \hline
 01. Aug 2019 & M.Wagener & Short descriptions of test scripts. \\ \hline
+29. Jan. 2020 & M.Wagener & Add genTriggerPulse() function. \\ \hline
 \end{longtable}
 
 
@@ -549,6 +550,9 @@ Some global functions can be used for general purpose.
 \item {\bf getall(submod)} returns a dict with all parameters. \\
 This will scan all submodules with all parameters. If the parameter {\it submod} is given, then the parameters for only this submodule are read out.
 
+\item {\bf genTriggerPulse(val)} Function to generate a trigger pulse. \\
+The port for this pulse is always defined by the user. The Options SMW-K22 and SMW-K23 must be installed. The value gives the pulse width in seconds. Tested with 0.0001 (100$\mu$s). The pulse starts directly and this function will wait until the the pulse is finished to switch the pulse generator off.
+
 \end{itemize}
 
 
@@ -569,12 +573,13 @@ This script go through all submodules and prints all parameters. This script was
 \subsection{Tests for special functions}
 The following scripts are for testing the submodules.
 \begin{itemize}
-\item test\_amplitude\_modulation.py
-\item test\_frequency\_modulation.py
-\item test\_iq\_modulation.py
-\item test\_iq\_output\_channel.py
-\item test\_phase\_modulation.py
-\item test\_pulse\_modulation.py
+\item test\_amplitude\_modulation.py - Amplituden modulation
+\item test\_frequency\_modulation.py - Frequency modulation
+\item test\_iq\_modulation.py - IQ modulation
+\item test\_iq\_output\_channel.py - IQ output generation
+\item test\_phase\_modulation.py - Phase modulation
+\item test\_pulse\_modulation.py - Pulse modulation
+\item test\_smw200a\_PulsGen.py - Generate a single trigger pulse
 \end{itemize}
 
 \subsection{Test of RWTH commands}

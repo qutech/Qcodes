@@ -26,7 +26,7 @@ class MockVisaHandle:
     
     # List of possible commands asked the instrument to give a realistic answer.
     cmddef = {'*IDN?': 'Rohde&Schwarz,SMW200A,1412.0000K02/105578,04.30.005.29 SP2',
-              '*OPT?': 'SMW-B13T,SMW-B22,SMW-B120,SMW-K22',
+              '*OPT?': 'SMW-B13T,SMW-B22,SMW-B120,SMW-K22,SMW-K23',
               
               'STAT?': '0',
               
@@ -138,6 +138,10 @@ class MockVisaHandle:
               'SOUR1:PULM:IMP?': 'G1K',
               'SOUR1:PULM:TRIG:EXT:IMP?': 'G50',
               
+              'SOUR1:PGEN:OUTP:POL?': 'NORM',
+              'SOUR1:PGEN:OUTP:STAT': 'OFF',
+              'SOUR1:PGEN:STAT': 'OFF',
+              
               'SOUR1:IQ:SOUR?': 'BAS',
               'SOUR1:IQ:STAT?': '0',
               'SOUR1:IQ:GAIN?': 'DB4',
@@ -184,7 +188,10 @@ class MockVisaHandle:
         print("DBG-Mock: MockVisaHandle write", cmd)
         if self.closed:
             raise RuntimeError("Trying to write to a closed instrument")
-        num = float(cmd.split(':')[-1])
+        try:
+            num = float(cmd.split(':')[-1])
+        except:
+            num = 1
         self.state = num
 
         if num < 0:
