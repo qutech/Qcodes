@@ -1,9 +1,10 @@
 """Standard location_provider class(es) for creating DataSet locations."""
+from typing import cast
 from datetime import datetime
 import re
 import string
 
-import qcodes.config
+import qcodes
 
 class SafeFormatter(string.Formatter):
 
@@ -14,7 +15,7 @@ class SafeFormatter(string.Formatter):
         try:
             return super().get_value(key, args, kwargs)
         except:
-            return '{{{}}}'.format(key)
+            return f'{{{key}}}'
 
 
 class FormatLocation:
@@ -84,6 +85,7 @@ class FormatLocation:
     """
 
     default_fmt = qcodes.config['core']['default_fmt']
+    default_fmt = cast(str, default_fmt)
 
     def __init__(self, fmt=None, fmt_date=None, fmt_time=None,
                  fmt_counter=None, record=None):

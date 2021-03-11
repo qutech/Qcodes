@@ -6,21 +6,28 @@ the default configuration.
 """
 
 import io
+import platform
+from datetime import datetime
 import logging
 # logging.handlers is not imported by logging. This extra import is necessary
 import logging.handlers
 
 import os
-from pathlib import Path
 from collections import OrderedDict
 from contextlib import contextmanager
 from copy import copy
 
-from typing import Optional, Union, Sequence
+from typing import Optional, Union, Sequence, TYPE_CHECKING, Iterator, Type
+from types import TracebackType
+from opencensus.ext.azure.log_exporter import AzureLogHandler
+from opencensus.ext.azure.common.protocol import Envelope
 
 import qcodes as qc
+import qcodes.utils.installation_info as ii
+from qcodes.utils.helpers import get_qcodes_user_path
 
-log = logging.getLogger(__name__)
+
+log: logging.Logger = logging.getLogger(__name__)
 
 LevelType = Union[int, str]
 
@@ -31,7 +38,6 @@ LOGGING_SEPARATOR = ' ¦ '
 """
 HISTORY_LOG_NAME = "command_history.log"
 PYTHON_LOG_NAME = 'qcodes.log'
-QCODES_USER_PATH_ENV = 'QCODES_USER_PATH'
 
 FORMAT_STRING_DICT = OrderedDict([
     ('asctime', 's'),
@@ -50,6 +56,20 @@ FORMAT_STRING_DICT = OrderedDict([
 # console hander.
 console_handler: Optional[logging.Handler] = None
 file_handler: Optional[logging.Handler] = None
+telemetry_handler: Optional[AzureLogHandler] = None
+
+
+_opencensus_filter = logging.Filter(name="opencensus")
+_urllib3_connection_filter = logging.Filter(name="urllib3.connection")
+
+
+def filter_out_telemetry_log_records(record: logging.LogRecord) -> int:
+    """
+    here we filter any message that is likely to be thrown from
+    opencensus so it is not shown in the user console
+    """
+    return (not _opencensus_filter.filter(record)
+            and not _urllib3_connection_filter.filter(record))
 
 
 def get_formatter() -> logging.Formatter:
@@ -59,6 +79,18 @@ def get_formatter() -> logging.Formatter:
     """
     format_string_items = [f'%({name}){fmt}'
                            for name, fmt in FORMAT_STRING_DICT.items()]
+    format_string = LOGGING_SEPARATOR.join(format_string_items)
+    return logging.Formatter(format_string)
+
+
+def get_formatter_for_telemetry() -> logging.Formatter:
+    """
+    Returns :class:`logging.Formatter` with only name, function name and
+    message keywords from FORMAT_STRING_DICT
+    """
+    format_string_items = [f'%({name}){fmt}'
+                           for name, fmt in FORMAT_STRING_DICT.items()
+                           if name in ['message', 'name', 'funcName']]
     format_string = LOGGING_SEPARATOR.join(format_string_items)
     return logging.Formatter(format_string)
 
@@ -121,27 +153,35 @@ def get_level_code(level: Union[str, int]) -> int:
                            'string or int.')
 
 
-def _get_qcodes_user_path() -> str:
+def generate_log_file_name() -> str:
     """
-    Get ``~/.qcodes`` path or if defined the path defined in the
-    ``QCODES_USER_PATH`` environment variable.
+    Generates the name of the log file based on process id, date, time and
+    PYTHON_LOG_NAME
+    """
 
-    Returns:
-        user_path: path to the user qcodes directory
-    """
-    path = os.environ.get(QCODES_USER_PATH_ENV,
-                          os.path.join(Path.home(), '.qcodes'))
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    return path
+    pid = str(os.getpid())
+    dt_str = datetime.now().strftime("%y%m%d")
+    python_log_name = '-'.join([dt_str, pid, PYTHON_LOG_NAME])
+    return python_log_name
 
 
 def get_log_file_name() -> str:
     """
-    Get the full path to the logfile currently used.
+    Get the full path to the log file currently used.
     """
-    return os.path.join(_get_qcodes_user_path(),
+    return os.path.join(get_qcodes_user_path(),
                         LOGGING_DIR,
-                        PYTHON_LOG_NAME)
+                        generate_log_file_name())
+
+
+def flush_telemetry_traces() -> None:
+    """
+    Flush the traces of the telemetry logger. If telemetry is not enabled, this
+    function does nothing.
+    """
+    global telemetry_handler
+    if qc.config.telemetry.enabled and telemetry_handler is not None:
+        telemetry_handler.flush()
 
 
 def start_logger() -> None:
@@ -158,6 +198,7 @@ def start_logger() -> None:
     """
     global console_handler
     global file_handler
+    global telemetry_handler
 
     # set loggers to the supplied levels
     for name, level in qc.config.logger.logger_levels.items():
@@ -167,7 +208,7 @@ def start_logger() -> None:
     root_logger.setLevel(logging.DEBUG)
 
     # remove previously set handlers
-    for handler in (console_handler, file_handler):
+    for handler in (console_handler, file_handler, telemetry_handler):
         if handler is not None:
             handler.close()
             root_logger.removeHandler(handler)
@@ -177,6 +218,7 @@ def start_logger() -> None:
     console_handler = logging.StreamHandler()
     console_handler.setLevel(qc.config.logger.console_level)
     console_handler.setFormatter(get_formatter())
+    console_handler.addFilter(filter_out_telemetry_log_records)
     root_logger.addHandler(console_handler)
 
     # file
@@ -193,7 +235,34 @@ def start_logger() -> None:
     # capture any warnings from the warnings module
     logging.captureWarnings(capture=True)
 
+    if qc.config.telemetry.enabled:
+        # Transport module of opencensus-ext-azure logs info 'transmission
+        # succeeded' which is also exported to azure if AzureLogHandler is
+        # in root_logger. The following lines stops that.
+        logging.getLogger('opencensus.ext.azure.common.transport').setLevel(
+            logging.WARNING)
+
+        loc = qc.config.GUID_components.location
+        stat = qc.config.GUID_components.work_station
+
+        def callback_function(envelope: Envelope) -> bool:
+            envelope.tags['ai.user.accountId'] = platform.node()
+            envelope.tags['ai.user.id'] = f'{loc:02x}-{stat:06x}'
+            return True
+
+        telemetry_handler = AzureLogHandler(
+            connection_string=f'InstrumentationKey='
+                              f'{qc.config.telemetry.instrumentation_key}')
+        telemetry_handler.add_telemetry_processor(callback_function)
+        telemetry_handler.setLevel(logging.INFO)
+        telemetry_handler.setFormatter(get_formatter_for_telemetry())
+        root_logger.addHandler(telemetry_handler)
+
     log.info("QCoDes logger setup completed")
+
+    log_qcodes_versions(log)
+
+    print(f'Qcodes Logfile : {filename}')
 
 
 def start_command_history_logger(log_dir: Optional[str] = None) -> None:
@@ -213,7 +282,7 @@ def start_command_history_logger(log_dir: Optional[str] = None) -> None:
                     " outside of IPython/Jupyter")
         return
 
-    log_dir = log_dir or os.path.join(_get_qcodes_user_path(), LOGGING_DIR)
+    log_dir = log_dir or os.path.join(get_qcodes_user_path(), LOGGING_DIR)
     filename = os.path.join(log_dir, HISTORY_LOG_NAME)
     os.makedirs(os.path.dirname(filename), exist_ok=True)
 
@@ -222,18 +291,84 @@ def start_command_history_logger(log_dir: Optional[str] = None) -> None:
     log.info("Started logging IPython history")
 
 
+def log_qcodes_versions(logger: logging.Logger) -> None:
+    """
+    Log the version information relevant to QCoDeS. This function logs
+    the currently installed qcodes version, whether QCoDeS is installed in
+    editable mode, and the installed versions of QCoDeS' requirements.
+    """
+
+    qc_version = ii.get_qcodes_version()
+    qc_e_inst = ii.is_qcodes_installed_editably()
+    qc_req_vs = ii.get_qcodes_requirements_versions()
+
+    logger.info(f'QCoDeS version: {qc_version}')
+    logger.info(f'QCoDeS installed in editable mode: {qc_e_inst}')
+    logger.info(f'QCoDeS requirements versions: {qc_req_vs}')
+
+
 def start_all_logging() -> None:
     """
     Starts python log module logging and ipython command history logging.
     """
-    start_logger()
     start_command_history_logger()
+    start_logger()
+
+
+def conditionally_start_all_logging() -> None:
+    """Start logging if qcodesrc.json setup for it and in tool environment.
+
+    This function will start logging if the session is not being executed by
+    a tool such as pytest and under the following conditions depending on the
+    qcodes configuration of ``config.logger.start_logging_on_import``:
+
+    For ``never``:
+
+        don't start logging automatically
+
+    For ``always``:
+
+        Always start logging when not in test environment
+
+    For ``if_telemetry_set_up``:
+
+        Start logging if the GUID components and the instrumentation key for
+        telemetry are set up, and not in a test environment.
+    """
+    def start_logging_on_import() -> bool:
+        config = qc.config
+        if config.logger.start_logging_on_import == 'always':
+            return True
+        elif config.logger.start_logging_on_import == 'never':
+            return False
+        elif config.logger.start_logging_on_import == 'if_telemetry_set_up':
+            return (
+                config.GUID_components.location != 0 and
+                config.GUID_components.work_station != 0 and
+                config.telemetry.instrumentation_key != \
+                    "00000000-0000-0000-0000-000000000000"
+            )
+        else:
+            raise RuntimeError('Error in qcodesrc validation.')
+
+    def running_in_test_or_tool() -> bool:
+        import sys
+        tools = (
+            'pytest.py',
+            'pytest',
+            '_jb_pytest_runner.py',  # Jetbrains Pycharm
+            'testlauncher.py'        # VSCode
+        )
+        return any(sys.argv[0].endswith(tool) for tool in tools)
+
+    if start_logging_on_import() and not running_in_test_or_tool():
+        start_all_logging()
 
 
 @contextmanager
 def handler_level(level: LevelType,
                   handler: Union[logging.Handler,
-                                 Sequence[logging.Handler]]):
+                                 Sequence[logging.Handler]]) -> Iterator[None]:
     """
     Context manager to temporarily change the level of handlers.
 
@@ -242,8 +377,8 @@ def handler_level(level: LevelType,
         >>>     root_logger.debug('this is now visible')
 
     Args:
-        level: level to set the handlers to
-        handler: handle or sequence of handlers which to change
+        level: Level to set the handlers to.
+        handler: Handle or sequence of handlers which to change.
     """
     if isinstance(handler, logging.Handler):
         handler = (handler,)
@@ -258,7 +393,7 @@ def handler_level(level: LevelType,
 
 
 @contextmanager
-def console_level(level: LevelType):
+def console_level(level: LevelType) -> Iterator[None]:
     """
     Context manager to temporarily change the level of the qcodes console
     handler.
@@ -268,7 +403,7 @@ def console_level(level: LevelType):
         >>>     root_logger.debug('this is now visible')
 
     Args:
-        level: level to set the console handler to
+        level: Level to set the console handler to.
     """
     global console_handler
     if console_handler is None:
@@ -291,8 +426,8 @@ class LogCapture:
 
     """
 
-    def __init__(self, logger=logging.getLogger(),
-                 level: Optional[LevelType]=None) -> None:
+    def __init__(self, logger: logging.Logger = logging.getLogger(),
+                 level: Optional[LevelType] = None) -> None:
         self.logger = logger
         self.level = level or logging.DEBUG
 
@@ -300,14 +435,17 @@ class LogCapture:
         for h in self.stashed_handlers:
             self.logger.removeHandler(h)
 
-    def __enter__(self):
+    def __enter__(self) -> 'LogCapture':
         self.log_capture = io.StringIO()
         self.string_handler = logging.StreamHandler(self.log_capture)
         self.string_handler.setLevel(self.level)
         self.logger.addHandler(self.string_handler)
         return self
 
-    def __exit__(self, exception_type, exception_value, traceback):
+    def __exit__(self,
+                 exception_type: Optional[Type[BaseException]],
+                 exception_value: Optional[BaseException],
+                 traceback: Optional[TracebackType]) -> None:
         self.logger.removeHandler(self.string_handler)
         self.value = self.log_capture.getvalue()
         self.log_capture.close()

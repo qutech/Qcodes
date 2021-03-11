@@ -1,33 +1,37 @@
 """
 This module contains useful SQL queries and their combinations which are
 specific to the domain of QCoDeS database.
-
-Historically this code was part of sqlite_base.py file.
 """
 import logging
 import sqlite3
 import time
 import unicodedata
 import warnings
-from typing import Dict, List, Optional, Any, Sequence, Union, Tuple, \
-    Callable, cast
-
+from typing import (Any, Callable, Dict, List, Mapping, Optional, Sequence,
+                    Tuple, Union, cast)
+from copy import copy
 import numpy as np
+from numpy import VisibleDeprecationWarning
 
 import qcodes as qc
+from qcodes.dataset.descriptions.dependencies import InterDependencies_
+from qcodes.dataset.descriptions.param_spec import ParamSpec, ParamSpecBase
 from qcodes.dataset.descriptions.rundescriber import RunDescriber
-from qcodes.dataset.descriptions.param_spec import ParamSpec
-from qcodes.dataset.descriptions.versioning.converters import old_to_new
-from qcodes.dataset.descriptions.versioning import v0
 from qcodes.dataset.descriptions.versioning import serialization as serial
-from qcodes.dataset.guids import parse_guid, generate_guid
-from qcodes.dataset.sqlite.connection import transaction, ConnectionPlus, \
-    atomic_transaction, atomic
-from qcodes.dataset.sqlite.query_helpers import sql_placeholder_string, \
-    many_many, one, many, select_one_where, select_many_where, insert_values, \
-    insert_column, VALUES, update_where
+from qcodes.dataset.descriptions.versioning import v0
+from qcodes.dataset.descriptions.versioning.converters import old_to_new
+from qcodes.dataset.guids import generate_guid, parse_guid
+from qcodes.dataset.sqlite.connection import (ConnectionPlus, atomic,
+                                              atomic_transaction, transaction)
+from qcodes.dataset.sqlite.query_helpers import (VALUES, insert_column,
+                                                 insert_values,
+                                                 is_column_in_table, many,
+                                                 many_many, one,
+                                                 select_many_where,
+                                                 select_one_where,
+                                                 sql_placeholder_string,
+                                                 update_where)
 from qcodes.utils.deprecate import deprecate
-
 
 log = logging.getLogger(__name__)
 
@@ -40,11 +44,12 @@ _unicode_categories = ('Lu', 'Ll', 'Lt', 'Lm', 'Lo', 'Nd', 'Pc', 'Pd', 'Zs')
 RUNS_TABLE_COLUMNS = ["run_id", "exp_id", "name", "result_table_name",
                       "result_counter", "run_timestamp", "completed_timestamp",
                       "is_completed", "parameters", "guid",
-                      "run_description", "snapshot"]
+                      "run_description", "snapshot", "parent_datasets",
+                      "captured_run_id", "captured_counter"]
 
 
 def is_run_id_in_database(conn: ConnectionPlus,
-                          *run_ids) -> Dict[int, bool]:
+                          *run_ids: int) -> Dict[int, bool]:
     """
     Look up run_ids and return a dictionary with the answers to the question
     "is this run_id in the database?"
@@ -97,6 +102,8 @@ def _build_data_query(table_name: str,
     return query
 
 
+@deprecate('This method does not accurately represent the dataset.',
+               'Use `get_parameter_data` instead.')
 def get_data(conn: ConnectionPlus,
              table_name: str,
              columns: List[str],
@@ -162,39 +169,146 @@ def get_parameter_data(conn: ConnectionPlus,
         start: start of range; if None, then starts from the top of the table
         end: end of range; if None, then ends at the bottom of the table
     """
-    sql = """
-    SELECT run_id FROM runs WHERE result_table_name = ?
-    """
-    c = atomic_transaction(conn, sql, table_name)
-    run_id = one(c, 'run_id')
-
-    rd = serial.from_json_to_current(get_run_description(conn, run_id))
-    interdeps = rd.interdeps
+    rundescriber = get_rundescriber_from_result_table_name(conn, table_name)
 
     output = {}
     if len(columns) == 0:
-        columns = [ps.name for ps in interdeps.non_dependencies]
+        columns = [ps.name for ps in rundescriber.interdeps.non_dependencies]
 
     # loop over all the requested parameters
     for output_param in columns:
-        output_param_spec = interdeps._id_to_paramspec[output_param]
-        # find all the dependencies of this param
-        paramspecs = [output_param_spec] \
-                   + list(interdeps.dependencies.get(output_param_spec, ()))
-        param_names = [param.name for param in paramspecs]
-        types = [param.type for param in paramspecs]
+        output[output_param] = get_shaped_parameter_data_for_one_paramtree(
+            conn,
+            table_name,
+            rundescriber,
+            output_param,
+            start,
+            end)
+    return output
 
-        res = get_parameter_tree_values(conn,
-                                        table_name,
-                                        output_param,
-                                        *param_names[1:],
-                                        start=start,
-                                        end=end)
 
-        # if we have array type parameters expand all other parameters
-        # to arrays
-        if 'array' in types and ('numeric' in types or 'text' in types
-                                 or 'complex' in types):
+def get_shaped_parameter_data_for_one_paramtree(
+        conn: ConnectionPlus,
+        table_name: str,
+        rundescriber: RunDescriber,
+        output_param: str,
+        start: Optional[int],
+        end: Optional[int]
+) -> Dict[str, np.ndarray]:
+    """
+    Get the data for a parameter tree and reshape it according to the
+    metadata about the dataset. This will only reshape the loaded data if
+    the number of points in the loaded data matches the expected number of
+    points registered in the metadata.
+    If there are more measured datapoints
+    than expected a warning will be given.
+    """
+
+    one_param_output, _ = get_parameter_data_for_one_paramtree(
+        conn,
+        table_name,
+        rundescriber,
+        output_param,
+        start,
+        end
+    )
+    if rundescriber.shapes is not None:
+        shape = rundescriber.shapes.get(output_param)
+
+        if shape is not None:
+            total_len_shape = np.prod(shape)
+            for name, paramdata in one_param_output.items():
+                total_data_shape = np.prod(paramdata.shape)
+                if total_data_shape == total_len_shape:
+                    one_param_output[name] = paramdata.reshape(shape)
+                elif total_data_shape > total_len_shape:
+                    log.warning(f"Tried to set data shape for {name} in "
+                                f"dataset {output_param} "
+                                f"from metadata when "
+                                f"loading but found inconsistent lengths "
+                                f"{total_data_shape} and {total_len_shape}")
+    return one_param_output
+
+
+def get_rundescriber_from_result_table_name(
+        conn: ConnectionPlus,
+        result_table_name: str
+) -> RunDescriber:
+    sql = """
+    SELECT run_id FROM runs WHERE result_table_name = ?
+    """
+    c = atomic_transaction(conn, sql, result_table_name)
+    run_id = one(c, 'run_id')
+    rd = serial.from_json_to_current(get_run_description(conn, run_id))
+    return rd
+
+
+def get_interdeps_from_result_table_name(conn: ConnectionPlus, result_table_name: str) -> InterDependencies_:
+    rd = get_rundescriber_from_result_table_name(conn, result_table_name)
+    interdeps = rd.interdeps
+    return interdeps
+
+
+def get_parameter_data_for_one_paramtree(
+        conn: ConnectionPlus,
+        table_name: str,
+        rundescriber: RunDescriber,
+        output_param: str,
+        start: Optional[int],
+        end: Optional[int]
+) -> Tuple[Dict[str, np.ndarray], int]:
+    interdeps = rundescriber.interdeps
+    data, paramspecs, n_rows = _get_data_for_one_param_tree(
+        conn, table_name, interdeps, output_param, start, end
+    )
+    if not paramspecs[0].name == output_param:
+        raise ValueError("output_param should always be the first "
+                         "parameter in a parameter tree. It is not")
+    _expand_data_to_arrays(data, paramspecs)
+
+    param_data = {}
+    # Benchmarking shows that transposing the data with python types is
+    # faster than transposing the data using np.array.transpose
+    res_t = map(list, zip(*data))
+
+    for paramspec, column_data in zip(paramspecs, res_t):
+        try:
+            if paramspec.type == "numeric":
+                # there is no reliable way to
+                # tell the difference between a float and and int loaded
+                # from sqlite numeric columns so always fall back to float
+                dtype: Optional[type] = np.float64
+            else:
+                dtype = None
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    category=VisibleDeprecationWarning,
+                    message="Creating an ndarray from ragged nested sequences"
+                )
+                # numpy warns here and coming versions
+                # will eventually raise
+                # for ragged arrays if you don't explicitly set
+                # dtype=object
+                # It is time consuming to detect ragged arrays here
+                # and it is expected to be a relatively rare situation
+                # so fallback to object if the regular dtype fail
+                param_data[paramspec.name] = np.array(column_data, dtype=dtype)
+        except:
+            # Not clear which error to catch here. This will only be clarified
+            # once numpy actually starts to raise here.
+            param_data[paramspec.name] = np.array(column_data, dtype=object)
+    return param_data, n_rows
+
+
+def _expand_data_to_arrays(data: List[List[Any]], paramspecs: Sequence[ParamSpecBase]) -> None:
+    types = [param.type for param in paramspecs]
+    # if we have array type parameters expand all other parameters
+    # to arrays
+    if 'array' in types:
+
+        if ('numeric' in types or 'text' in types
+                or 'complex' in types):
             first_array_element = types.index('array')
             numeric_elms = [i for i, x in enumerate(types)
                             if x == "numeric"]
@@ -202,11 +316,11 @@ def get_parameter_data(conn: ConnectionPlus,
                             if x == 'complex']
             text_elms = [i for i, x in enumerate(types)
                          if x == "text"]
-            for row in res:
+            for row in data:
                 for element in numeric_elms:
                     row[element] = np.full_like(row[first_array_element],
                                                 row[element],
-                                                dtype=np.float)
+                                                dtype=np.dtype(np.float64))
                     # todo should we handle int/float types here
                     # we would in practice have to perform another
                     # loop to check that all elements of a given can be cast to
@@ -215,23 +329,54 @@ def get_parameter_data(conn: ConnectionPlus,
                 for element in complex_elms:
                     row[element] = np.full_like(row[first_array_element],
                                                 row[element],
-                                                dtype=np.complex)
+                                                dtype=np.dtype(np.complex128))
                 for element in text_elms:
                     strlen = len(row[element])
                     row[element] = np.full_like(row[first_array_element],
                                                 row[element],
-                                                dtype=f'U{strlen}')
+                                                dtype=np.dtype(f'U{strlen}'))
 
-        # Benchmarking shows that transposing the data with python types is
-        # faster than transposing the data using np.array.transpose
-        res_t = map(list, zip(*res))
-        output[output_param] = {name: np.array(column_data)
-                                for name, column_data
-                                in zip(param_names, res_t)}
+        for row in data:
+            # now expand all one element arrays to match the expected size
+            # one element arrays are introduced if scalar values are stored
+            # with an explicit array storage type
+            sizes = tuple(array.size for array in row)
+            max_size = max(sizes)
+            max_index = sizes.index(max_size)
 
-    return output
+            for i, array in enumerate(row):
+                if array.size != max_size:
+                    if array.size == 1:
+                        row[i] = np.full_like(row[max_index],
+                                              row[i],
+                                              dtype=row[i].dtype)
+                    else:
+                        log.warning(f"Cannot expand array of size {array.size} "
+                                    f"to size {row[max_index].size}")
 
 
+def _get_data_for_one_param_tree(conn: ConnectionPlus, table_name: str,
+                                 interdeps: InterDependencies_, output_param: str,
+                                 start: Optional[int], end: Optional[int]) \
+        -> Tuple[List[List[Any]], List[ParamSpecBase], int]:
+    output_param_spec = interdeps._id_to_paramspec[output_param]
+    # find all the dependencies of this param
+
+    dependency_params = list(interdeps.dependencies.get(output_param_spec, ()))
+    dependency_names = [param.name for param in dependency_params]
+    paramspecs = [output_param_spec] + dependency_params
+    res = get_parameter_tree_values(conn,
+                                    table_name,
+                                    output_param,
+                                    *dependency_names,
+                                    start=start,
+                                    end=end)
+    n_rows = len(res)
+    return res, paramspecs, n_rows
+
+
+@deprecate('This method does not accurately represent the dataset.',
+           'Use `get_parameter_data` instead.')
 def get_values(conn: ConnectionPlus,
                table_name: str,
                param_name: str) -> List[List[Any]]:
@@ -259,7 +404,7 @@ def get_values(conn: ConnectionPlus,
 def get_parameter_tree_values(conn: ConnectionPlus,
                               result_table_name: str,
                               toplevel_param_name: str,
-                              *other_param_names,
+                              *other_param_names: str,
                               start: Optional[int] = None,
                               end: Optional[int] = None) -> List[List[Any]]:
     """
@@ -287,8 +432,8 @@ def get_parameter_tree_values(conn: ConnectionPlus,
         index is parameter value (first toplevel_param, then other_param_names)
     """
 
-    offset = (start - 1) if start is not None else 0
-    limit = (end - offset) if end is not None else -1
+    offset = max((start - 1), 0) if start is not None else 0
+    limit = max((end - offset), 0) if end is not None else -1
 
     if start is not None and end is not None and start > end:
         limit = 0
@@ -320,6 +465,7 @@ def get_parameter_tree_values(conn: ConnectionPlus,
     return res
 
 
+@deprecate(alternative="get_parameter_data")
 def get_setpoints(conn: ConnectionPlus,
                   table_name: str,
                   param_name: str) -> Dict[str, List[List[Any]]]:
@@ -447,38 +593,81 @@ def get_runid_from_guid(conn: ConnectionPlus, guid: str) -> Union[int, None]:
     return run_id
 
 
-@deprecate()
-def get_layout(conn: ConnectionPlus,
-               layout_id) -> Dict[str, str]:
+def get_guids_from_run_spec(conn: ConnectionPlus,
+                            captured_run_id: Optional[int] = None,
+                            captured_counter: Optional[int] = None,
+                            experiment_name: Optional[str] = None,
+                            sample_name: Optional[str] = None) -> List[str]:
     """
-    Get the layout of a single parameter for plotting it
+    Get the GUIDs of runs matching the supplied run specifications.
+
+    # Todo: do we need to select by start/end time too? Is result name useful?
 
     Args:
-        conn: The database connection
-        layout_id: The run_id as in the layouts table
+        conn: connection to the database.
+        captured_run_id: the run_id that was assigned to this
+            run at capture time.
+        captured_counter: the counter that was assigned to this
+            run at capture time.
+        experiment_name: Name of the experiment that the runs should belong to.
+        sample_name: Name of the sample that the query should be restricted to.
 
     Returns:
-        A dict with name, label, and unit
+        A list of the GUIDs matching the supplied specifications.
     """
-    sql = """
-    SELECT parameter, label, unit FROM layouts WHERE layout_id=?
-    """
-    c = atomic_transaction(conn, sql, layout_id)
-    t_res = many(c, 'parameter', 'label', 'unit')
-    res = dict(zip(['name', 'label', 'unit'], t_res))
-    return res
+    # first find all experiments that match the given sample
+    # and experiment name
+    exp_query = {}
+    exp_ids: Optional[List[int]]
+    if experiment_name is not None or sample_name is not None:
+        if sample_name is not None:
+            exp_query['sample_name'] = sample_name
+        if experiment_name is not None:
+            exp_query['name'] = experiment_name
+        exp_ids = get_matching_exp_ids(conn,
+                                       **exp_query)
+        if exp_ids == []:
+            return []
+    else:
+        exp_ids = None
 
+    conds = []
+    inputs = []
 
-@deprecate()
-def get_layout_id(conn: ConnectionPlus,
-                  parameter: Union[ParamSpec, str],
-                  run_id: int) -> int:
-    return _get_layout_id(conn, parameter, run_id)
+    if exp_ids is not None:
+        exp_placeholder = sql_placeholder_string(len(exp_ids))
+        conds.append(f"exp_id in {exp_placeholder}")
+        inputs.extend(exp_ids)
+    if captured_run_id is not None:
+        conds.append("captured_run_id is ?")
+        inputs.append(captured_run_id)
+    if captured_counter is not None:
+        conds.append("captured_counter is ?")
+        inputs.append(captured_counter)
+
+    if len(conds) >= 1:
+        where_clause = " WHERE " + " AND ".join(conds)
+    else:
+        where_clause = ""
+
+    query = "SELECT guid from runs" + where_clause + " ORDER BY run_id"
+
+    cursor = conn.cursor()
+    if len(inputs) > 0:
+        cursor.execute(query, inputs)
+    else:
+        cursor.execute(query)
+
+    rows = cursor.fetchall()
+    results = []
+    for r in rows:
+        results.append(r['guid'])
+    return results
 
 
 def _get_layout_id(conn: ConnectionPlus,
-                  parameter: Union[ParamSpec, str],
-                  run_id: int) -> int:
+                   parameter: Union[ParamSpec, str],
+                   run_id: int) -> int:
     """
     Get the layout id of a parameter in a given run
 
@@ -508,12 +697,6 @@ def _get_layout_id(conn: ConnectionPlus,
     return res
 
 
-@deprecate()
-def get_dependents(conn: ConnectionPlus,
-                   run_id: int) -> List[int]:
-    return _get_dependents(conn, run_id)
-
-
 def _get_dependents(conn: ConnectionPlus,
                     run_id: int) -> List[int]:
     """
@@ -527,12 +710,6 @@ def _get_dependents(conn: ConnectionPlus,
     c = atomic_transaction(conn, sql, run_id)
     res = [d[0] for d in many_many(c, 'layout_id')]
     return res
-
-
-@deprecate()
-def get_dependencies(conn: ConnectionPlus,
-                     layout_id: int) -> List[List[int]]:
-    return _get_dependencies(conn, layout_id)
 
 
 def _get_dependencies(conn: ConnectionPlus,
@@ -553,65 +730,7 @@ def _get_dependencies(conn: ConnectionPlus,
     return res
 
 
-@deprecate(alternative='DataSet.dependent_parameters')
-def get_non_dependencies(conn: ConnectionPlus,
-                         run_id: int) -> List[str]:
-    """
-    Return all parameters for a given run that are not dependencies of
-    other parameters, i.e. return the top level parameters of the given
-    run
-
-    Args:
-        conn: connection to the database
-        run_id: The run_id of the run in question
-
-    Returns:
-        A list of the parameter names.
-    """
-    parameters = get_parameters(conn, run_id)
-    maybe_independent = []
-    dependent = []
-    dependencies: List[str] = []
-
-    for param in parameters:
-        if len(param.depends_on) == 0:
-            maybe_independent.append(param.name)
-        else:
-            dependent.append(param.name)
-            dependencies.extend(param.depends_on.split(', '))
-
-    independent_set = set(maybe_independent) - set(dependencies)
-    dependent_set = set(dependent)
-    result = independent_set.union(dependent_set)
-    return sorted(list(result))
-
-
 # Higher level Wrappers
-
-@deprecate()
-def get_parameter_dependencies(conn: ConnectionPlus, param: str,
-                               run_id: int) -> List[ParamSpec]:
-    """
-    Given a parameter name return a list of ParamSpecs where the first
-    element is the ParamSpec of the given parameter and the rest of the
-    elements are ParamSpecs of its dependencies.
-
-    Args:
-        conn: connection to the database
-        param: the name of the parameter to look up
-        run_id: run_id: The run_id of the run in question
-
-    Returns:
-        List of ParameterSpecs of the parameter followed by its dependencies.
-    """
-    layout_id = get_layout_id(conn, param, run_id)
-    deps = get_dependencies(conn, layout_id)
-    parameters = [get_paramspec(conn, run_id, param)]
-
-    for dep in deps:
-        depinfo = get_layout(conn, dep[0])
-        parameters.append(get_paramspec(conn, run_id, depinfo['name']))
-    return parameters
 
 
 def new_experiment(conn: ConnectionPlus,
@@ -655,13 +774,12 @@ def new_experiment(conn: ConnectionPlus,
 
 # TODO(WilliamHPNielsen): we should remove the redundant
 # is_completed
-def mark_run_complete(conn: ConnectionPlus, run_id: int):
+def mark_run_complete(conn: ConnectionPlus, run_id: int) -> None:
     """ Mark run complete
 
     Args:
         conn: database connection
         run_id: id of the run to mark complete
-        complete: wether the run is completed or not
     """
     query = """
     UPDATE
@@ -674,8 +792,8 @@ def mark_run_complete(conn: ConnectionPlus, run_id: int):
     atomic_transaction(conn, query, time.time(), True, run_id)
 
 
-def completed(conn: ConnectionPlus, run_id) -> bool:
-    """ Check if the run scomplete
+def completed(conn: ConnectionPlus, run_id: int) -> bool:
+    """ Check if the run is complete
 
     Args:
         conn: database connection
@@ -715,12 +833,12 @@ def get_guid_from_run_id(conn: ConnectionPlus, run_id: int) -> str:
     return select_one_where(conn, "runs", "guid", "run_id", run_id)
 
 
-def finish_experiment(conn: ConnectionPlus, exp_id: int):
+def finish_experiment(conn: ConnectionPlus, exp_id: int) -> None:
     """ Finish experiment
 
     Args:
         conn: database connection
-        name: the name of the experiment
+        exp_id: the id of the experiment
     """
     query = """
     UPDATE experiments SET end_time=? WHERE exp_id=?;
@@ -736,7 +854,7 @@ def get_run_counter(conn: ConnectionPlus, exp_id: int) -> int:
         exp_id: experiment identifier
 
     Returns:
-        the exepriment run counter
+        the experiment run counter
 
     """
     return select_one_where(conn, "experiments", "run_counter",
@@ -760,7 +878,8 @@ def get_experiments(conn: ConnectionPlus) -> List[sqlite3.Row]:
     return c.fetchall()
 
 
-def get_matching_exp_ids(conn: ConnectionPlus, **match_conditions) -> List:
+def get_matching_exp_ids(conn: ConnectionPlus,
+                         **match_conditions: Any) -> List[int]:
     """
     Get exp_ids for experiments matching the match_conditions
 
@@ -846,6 +965,8 @@ def get_runs(conn: ConnectionPlus,
 
     Args:
         conn: database connection
+        exp_id: id of the experiment to look inside.
+            If None all experiments will be included
 
     Returns:
         list of rows
@@ -866,24 +987,33 @@ def get_runs(conn: ConnectionPlus,
     return c.fetchall()
 
 
-def get_last_run(conn: ConnectionPlus, exp_id: int) -> Optional[int]:
+def get_last_run(conn: ConnectionPlus,
+                 exp_id: Optional[int] = None) -> Optional[int]:
     """
     Get run_id of the last run in experiment with exp_id
 
     Args:
         conn: connection to use for the query
-        exp_id: id of the experiment to look inside
+        exp_id: id of the experiment to look inside.
+            If None all experiments will be included
 
     Returns:
         the integer id of the last run or None if there are not runs in the
         experiment
     """
-    query = """
-    SELECT run_id, max(run_timestamp), exp_id
-    FROM runs
-    WHERE exp_id = ?;
-    """
-    c = atomic_transaction(conn, query, exp_id)
+    if exp_id is not None:
+        query = """
+            SELECT run_id, max(run_timestamp), exp_id
+            FROM runs
+            WHERE exp_id = ?;
+            """
+        c = atomic_transaction(conn, query, exp_id)
+    else:
+        query = """
+            SELECT run_id, max(run_timestamp)
+            FROM runs
+            """
+        c = atomic_transaction(conn, query)
     return one(c, 'run_id')
 
 
@@ -936,7 +1066,11 @@ def format_table_name(fmt_str: str, name: str, exp_id: int,
 def _insert_run(conn: ConnectionPlus, exp_id: int, name: str,
                 guid: str,
                 parameters: Optional[List[ParamSpec]] = None,
-                ):
+                captured_run_id: Optional[int] = None,
+                captured_counter: Optional[int] = None,
+                parent_dataset_links: str = "[]"
+                ) -> Tuple[int, str, int]:
+
     # get run counter and formatter from experiments
     run_counter, format_string = select_many_where(conn,
                                                    "experiments",
@@ -945,6 +1079,21 @@ def _insert_run(conn: ConnectionPlus, exp_id: int, name: str,
                                                    where_column="exp_id",
                                                    where_value=exp_id)
     run_counter += 1
+    if captured_counter is None:
+        with atomic(conn) as conn:
+            query = """
+            SELECT
+                max(captured_counter)
+            FROM
+                runs
+            WHERE
+                exp_id = ?"""
+            curr = transaction(conn, query, exp_id)
+            existing_captured_counter = one(curr, 0)
+            if existing_captured_counter is not None:
+                captured_counter = existing_captured_counter + 1
+            else:
+                captured_counter = run_counter
     formatted_name = format_table_name(format_string, name, exp_id,
                                        run_counter)
     table = "runs"
@@ -953,6 +1102,20 @@ def _insert_run(conn: ConnectionPlus, exp_id: int, name: str,
 
     run_desc = RunDescriber(old_to_new(v0.InterDependencies(*parameters)))
     desc_str = serial.to_json_for_storage(run_desc)
+
+    if captured_run_id is None:
+        with atomic(conn) as conn:
+            query = """
+            SELECT
+                max(captured_run_id)
+            FROM
+                runs"""
+            curr = transaction(conn, query)
+            existing_captured_run_id = one(curr, 0)
+        if existing_captured_run_id is not None:
+            captured_run_id = existing_captured_run_id + 1
+        else:
+            captured_run_id = 1
 
     with atomic(conn) as conn:
 
@@ -967,9 +1130,12 @@ def _insert_run(conn: ConnectionPlus, exp_id: int, name: str,
                  run_timestamp,
                  parameters,
                  is_completed,
-                 run_description)
+                 run_description,
+                 captured_run_id,
+                 captured_counter,
+                 parent_datasets)
             VALUES
-                (?,?,?,?,?,?,?,?,?)
+                (?,?,?,?,?,?,?,?,?,?,?,?)
             """
             curr = transaction(conn, query,
                                name,
@@ -980,7 +1146,10 @@ def _insert_run(conn: ConnectionPlus, exp_id: int, name: str,
                                None,
                                ",".join([p.name for p in parameters]),
                                False,
-                               desc_str)
+                               desc_str,
+                               captured_run_id,
+                               captured_counter,
+                               parent_dataset_links)
 
             _add_parameters_to_layout_and_deps(conn, formatted_name,
                                                *parameters)
@@ -995,9 +1164,12 @@ def _insert_run(conn: ConnectionPlus, exp_id: int, name: str,
                  result_counter,
                  run_timestamp,
                  is_completed,
-                 run_description)
+                 run_description,
+                 captured_run_id,
+                 captured_counter,
+                 parent_datasets)
             VALUES
-                (?,?,?,?,?,?,?,?)
+                (?,?,?,?,?,?,?,?,?,?,?)
             """
             curr = transaction(conn, query,
                                name,
@@ -1007,8 +1179,13 @@ def _insert_run(conn: ConnectionPlus, exp_id: int, name: str,
                                run_counter,
                                None,
                                False,
-                               desc_str)
+                               desc_str,
+                               captured_run_id,
+                               captured_counter,
+                               parent_dataset_links)
+
     run_id = curr.lastrowid
+
     return run_counter, formatted_name, run_id
 
 
@@ -1020,12 +1197,6 @@ def _update_experiment_run_counter(conn: ConnectionPlus, exp_id: int,
     WHERE exp_id = ?
     """
     atomic_transaction(conn, query, run_counter, exp_id)
-
-
-@deprecate()
-def get_parameters(conn: ConnectionPlus,
-                   run_id: int) -> List[ParamSpec]:
-    return _get_parameters(conn, run_id)
 
 
 def _get_parameters(conn: ConnectionPlus,
@@ -1055,13 +1226,6 @@ def _get_parameters(conn: ConnectionPlus,
         parspecs.append(_get_paramspec(conn, run_id, param_name))
 
     return parspecs
-
-
-@deprecate()
-def get_paramspec(conn: ConnectionPlus,
-                  run_id: int,
-                  param_name: str) -> ParamSpec:
-    return _get_paramspec(conn, run_id, param_name)
 
 
 def _get_paramspec(conn: ConnectionPlus,
@@ -1141,7 +1305,7 @@ def update_run_description(conn: ConnectionPlus, run_id: int,
         serial.from_json_to_current(description)
     except Exception as e:
         raise ValueError("Invalid description string. Must be a JSON string "
-                         "representaion of a RunDescriber object.") from e
+                         "representation of a RunDescriber object.") from e
 
     _update_run_description(conn, run_id, description)
 
@@ -1159,6 +1323,23 @@ def _update_run_description(conn: ConnectionPlus, run_id: int,
           """
     with atomic(conn) as conn:
         conn.cursor().execute(sql, (description, run_id))
+
+
+def update_parent_datasets(conn: ConnectionPlus,
+                           run_id: int, links_str: str) -> None:
+    """
+    Update (i.e. overwrite) the parent_datasets field for the given run_id
+    """
+    if not is_column_in_table(conn, 'runs', 'parent_datasets'):
+        insert_column(conn, 'runs', 'parent_datasets')
+
+    sql = """
+          UPDATE runs
+          SET parent_datasets = ?
+          WHERE run_id = ?
+          """
+    with atomic(conn) as conn:
+        conn.cursor().execute(sql, (links_str, run_id))
 
 
 def set_run_timestamp(conn: ConnectionPlus, run_id: int) -> None:
@@ -1193,7 +1374,7 @@ def set_run_timestamp(conn: ConnectionPlus, run_id: int) -> None:
 
 def add_parameter(conn: ConnectionPlus,
                   formatted_name: str,
-                  *parameter: ParamSpec):
+                  *parameter: ParamSpec) -> None:
     """
     Add parameters to the dataset
 
@@ -1342,8 +1523,11 @@ def _create_run_table(conn: ConnectionPlus,
 def create_run(conn: ConnectionPlus, exp_id: int, name: str,
                guid: str,
                parameters: Optional[List[ParamSpec]] = None,
-               values:  List[Any] = None,
-               metadata: Optional[Dict[str, Any]] = None
+               values:  Optional[List[Any]] = None,
+               metadata: Optional[Mapping[str, Any]] = None,
+               captured_run_id: Optional[int] = None,
+               captured_counter: Optional[int] = None,
+               parent_dataset_links: str = "[]"
                ) -> Tuple[int, int, str]:
     """ Create a single run for the experiment.
 
@@ -1359,6 +1543,12 @@ def create_run(conn: ConnectionPlus, exp_id: int, name: str,
         - parameters: optional list of parameters this run has
         - values:  optional list of values for the parameters
         - metadata: optional metadata dictionary
+        - captured_run_id: The run_id this data was originally captured with.
+            Should only be supplied when inserting an already completed run
+            from another database into this database. Otherwise leave as None.
+        - captured_counter: The counter this data was originally captured with.
+            Should only be supplied when inserting an already completed run
+            from another database into this database. Otherwise leave as None.
 
     Returns:
         - run_counter: the id of the newly created run (not unique)
@@ -1371,7 +1561,10 @@ def create_run(conn: ConnectionPlus, exp_id: int, name: str,
                                                           exp_id,
                                                           name,
                                                           guid,
-                                                          parameters)
+                                                          parameters,
+                                                          captured_run_id,
+                                                          captured_counter,
+                                                          parent_dataset_links)
         if metadata:
             add_meta_data(conn, run_id, metadata)
         _update_experiment_run_counter(conn, exp_id, run_counter)
@@ -1388,14 +1581,42 @@ def get_run_description(conn: ConnectionPlus, run_id: int) -> str:
                             "run_id", run_id)
 
 
-def get_metadata(conn: ConnectionPlus, tag: str, table_name: str):
+def get_parent_dataset_links(conn: ConnectionPlus, run_id: int) -> str:
+    """
+    Return the (JSON string) of the parent-child dataset links for the
+    specified run
+    """
+
+    # We cannot in general trust that NULLs will not appear in the column,
+    # even if the column is present in the runs table.
+
+    link_str: str
+    maybe_link_str: Optional[str]
+
+    if not is_column_in_table(conn, 'runs', 'parent_datasets'):
+        maybe_link_str = None
+    else:
+        maybe_link_str = select_one_where(conn, "runs", "parent_datasets",
+                                           "run_id", run_id)
+
+    if maybe_link_str is None:
+        link_str = "[]"
+    else:
+        link_str = str(maybe_link_str)
+
+    return link_str
+
+
+def get_metadata(conn: ConnectionPlus, tag: str, table_name: str) -> str:
     """ Get metadata under the tag from table
     """
     return select_one_where(conn, "runs", tag,
                             "result_table_name", table_name)
 
 
-def get_metadata_from_run_id(conn: ConnectionPlus, run_id: int) -> Dict:
+def get_metadata_from_run_id(
+        conn: ConnectionPlus, run_id: int
+) -> Dict[str, Any]:
     """
     Get all metadata associated with the specified run
     """
@@ -1428,7 +1649,7 @@ def get_metadata_from_run_id(conn: ConnectionPlus, run_id: int) -> Dict:
 
 
 def insert_meta_data(conn: ConnectionPlus, row_id: int, table_name: str,
-                     metadata: Dict[str, Any]) -> None:
+                     metadata: Mapping[str, Any]) -> None:
     """
     Insert new metadata column and add values. Note that None is not a valid
     metadata value
@@ -1449,7 +1670,7 @@ def insert_meta_data(conn: ConnectionPlus, row_id: int, table_name: str,
 
 
 def update_meta_data(conn: ConnectionPlus, row_id: int, table_name: str,
-                     metadata: Dict[str, Any]) -> None:
+                     metadata: Mapping[str, Any]) -> None:
     """
     Updates metadata (they must exist already)
 
@@ -1464,7 +1685,7 @@ def update_meta_data(conn: ConnectionPlus, row_id: int, table_name: str,
 
 def add_meta_data(conn: ConnectionPlus,
                   row_id: int,
-                  metadata: Dict[str, Any],
+                  metadata: Mapping[str, Any],
                   table_name: str = "runs") -> None:
     """
     Add metadata data (updates if exists, create otherwise).
@@ -1514,7 +1735,7 @@ def update_GUIDs(conn: ConnectionPlus) -> None:
 
     log.info('Commencing update of all GUIDs in database')
 
-    cfg = qc.Config()
+    cfg = qc.config
 
     location = cfg['GUID_components']['location']
     work_station = cfg['GUID_components']['work_station']
@@ -1536,20 +1757,22 @@ def update_GUIDs(conn: ConnectionPlus) -> None:
 
     # now, there are four actions we can take
 
-    def _both_nonzero(run_id: int, *args) -> None:
+    def _both_nonzero(run_id: int, *args: Any) -> None:
         log.info(f'Run number {run_id} already has a valid GUID, skipping.')
 
-    def _location_only_zero(run_id: int, *args) -> None:
+    def _location_only_zero(run_id: int, *args: Any) -> None:
         log.warning(f'Run number {run_id} has a zero (default) location '
                     'code, but a non-zero work station code. Please manually '
                     'resolve this, skipping the run now.')
 
-    def _workstation_only_zero(run_id: int, *args) -> None:
+    def _workstation_only_zero(run_id: int, *args: Any) -> None:
         log.warning(f'Run number {run_id} has a zero (default) work station'
                     ' code, but a non-zero location code. Please manually '
                     'resolve this, skipping the run now.')
 
-    def _both_zero(run_id: int, conn, guid_comps) -> None:
+    def _both_zero(run_id: int,
+                   conn: ConnectionPlus,
+                   guid_comps: Dict[str, Any]) -> None:
         guid_str = generate_guid(timeint=guid_comps['time'],
                                  sampleint=guid_comps['sample'])
         with atomic(conn) as conn:
@@ -1563,7 +1786,8 @@ def update_GUIDs(conn: ConnectionPlus) -> None:
 
         log.info(f'Succesfully updated run number {run_id}.')
 
-    actions: Dict[Tuple[bool, bool], Callable]
+    actions: Dict[Tuple[bool, bool],
+                  Callable[[int, ConnectionPlus, Dict[str, Any]], None]]
     actions = {(True, True): _both_zero,
                (False, True): _workstation_only_zero,
                (True, False): _location_only_zero,
@@ -1587,6 +1811,48 @@ def remove_trigger(conn: ConnectionPlus, trigger_id: str) -> None:
 
     Args:
         conn: database connection object
-        name: id of the trigger
+        trigger_id: id of the trigger
     """
     transaction(conn, f"DROP TRIGGER IF EXISTS {trigger_id};")
+
+
+def load_new_data_for_rundescriber(
+        conn: ConnectionPlus,
+        table_name: str,
+        rundescriber: RunDescriber,
+        read_status: Mapping[str, int],
+) -> Tuple[Dict[str, Dict[str, np.ndarray]], Dict[str, int]]:
+    """
+    Load all new data for a given rundesciber since the rows given by read_status.
+
+    Args:
+        conn: The connection to the sqlite database
+        table_name: The name of the table the data is stored in
+        rundescriber: The rundescriber that describes the run
+        read_status: Mapping from dependent parameter name to number of rows
+          read from the db previously.
+
+    Returns:
+        new data and an updated number of rows read.
+
+    """
+
+    parameters = tuple(ps.name for ps in
+                       rundescriber.interdeps.non_dependencies)
+    updated_read_status: Dict[str, int] = dict(read_status)
+    new_data_dict: Dict[str, Dict[str, np.ndarray]] = {}
+
+    for meas_parameter in parameters:
+
+        start = read_status.get(meas_parameter, 0) + 1
+        new_data, n_rows_read = get_parameter_data_for_one_paramtree(
+            conn,
+            table_name,
+            rundescriber=rundescriber,
+            output_param=meas_parameter,
+            start=start,
+            end=None
+        )
+        new_data_dict[meas_parameter] = new_data
+        updated_read_status[meas_parameter] = start + n_rows_read - 1
+    return new_data_dict, updated_read_status

@@ -1,17 +1,16 @@
-from typing import List, Any, Sequence, Tuple, Dict, Union
+from typing import List, Any, Sequence, Tuple, Dict, Union, cast
 import logging
 
 import numpy as np
 
 from qcodes.dataset.descriptions.param_spec import ParamSpecBase
-from qcodes.dataset.sqlite.queries import (get_dependencies, get_dependents,
-                                           get_layout)
 from qcodes.dataset.data_set import load_by_id
 
 log = logging.getLogger(__name__)
 
 
-def flatten_1D_data_for_plot(rawdata: Sequence[Sequence[Any]]) -> np.ndarray:
+def flatten_1D_data_for_plot(rawdata: Union[Sequence[Sequence[Any]],
+                                            np.ndarray]) -> np.ndarray:
     """
     Cast the return value of the database query to
     a numpy array
@@ -30,10 +29,11 @@ def flatten_1D_data_for_plot(rawdata: Sequence[Sequence[Any]]) -> np.ndarray:
     return dataarray
 
 
-def get_data_by_id(run_id: int) -> List:
+def get_data_by_id(run_id: int) -> \
+        List[List[Dict[str, Union[str, np.ndarray]]]]:
     """
     Load data from database and reshapes into 1D arrays with minimal
-    name, unit and label metadata (see `get_layout` function).
+    name, unit and label metadata.
     Only returns data from parameters that depend on other parameters or
     parameters that other parameters depend on, i.e. data for standalone
     parameters are not returned.
@@ -83,17 +83,17 @@ def get_data_by_id(run_id: int) -> List:
         dep_data_dict_index = None
 
         for param_name, data in data_dict.items():
-            data_dict = {}
+            my_data_dict: Dict[str, Union[str, np.ndarray]] = {}
 
-            data_dict['name'] = param_name
+            my_data_dict['name'] = param_name
 
-            data_dict['data'] = data.flatten()
+            my_data_dict['data'] = data.flatten()
 
             ps = ds.paramspecs[param_name]
-            data_dict['unit'] = ps.unit
-            data_dict['label'] = ps.label
+            my_data_dict['unit'] = ps.unit
+            my_data_dict['label'] = ps.label
 
-            data_dicts_list.append(data_dict)
+            data_dicts_list.append(my_data_dict)
 
             if param_name == dep_name:
                 dep_data_dict_index = len(data_dicts_list) - 1
@@ -109,7 +109,7 @@ def get_data_by_id(run_id: int) -> List:
     return output
 
 
-def _all_steps_multiples_of_min_step(rows: Sequence[np.ndarray]) -> bool:
+def _all_steps_multiples_of_min_step(rows: np.ndarray) -> bool:
     """
     Are all steps integer multiples of the smallest step?
     This is used in determining whether the setpoints correspond
@@ -122,12 +122,12 @@ def _all_steps_multiples_of_min_step(rows: Sequence[np.ndarray]) -> bool:
         The answer to the question
     """
 
-    steps: List[np.ndarray] = []
+    steps_list: List[np.ndarray] = []
     for row in rows:
         # TODO: What is an appropriate precision?
-        steps += list(np.unique(np.diff(row).round(decimals=15)))
+        steps_list += list(np.unique(np.diff(row).round(decimals=15)))
 
-    steps = np.unique((steps))
+    steps = np.unique(steps_list)
     remainders = np.mod(steps[1:]/steps[0], 1)
 
     # TODO: What are reasonable tolerances for allclose?
@@ -384,8 +384,8 @@ def reshape_2D_data(x: np.ndarray, y: np.ndarray, z: np.ndarray
         z_to_plot = np.full((ny, nx), '', dtype=z.dtype)
     else:
         z_to_plot = np.full((ny, nx), np.nan)
-    x_index = np.zeros_like(x, dtype=np.int)
-    y_index = np.zeros_like(y, dtype=np.int)
+    x_index = np.zeros_like(x, dtype=np.dtype(np.int_))
+    y_index = np.zeros_like(y, dtype=np.dtype(np.int_))
     for i, xval in enumerate(xrow):
         x_index[np.where(x == xval)[0]] = i
     for i, yval in enumerate(yrow):
@@ -396,7 +396,9 @@ def reshape_2D_data(x: np.ndarray, y: np.ndarray, z: np.ndarray
     return xrow, yrow, z_to_plot
 
 
-def get_shaped_data_by_runid(run_id: int) -> List:
+def get_shaped_data_by_runid(
+        run_id: int
+) -> List[List[Dict[str, Union[str, np.ndarray]]]]:
     """
     Get data for a given run ID, but shaped according to its nature
 
@@ -422,13 +424,20 @@ def get_shaped_data_by_runid(run_id: int) -> List:
             independet[1]['data'] = flatten_1D_data_for_plot(
                 independet[1]['data'])
 
-            datatype = datatype_from_setpoints_2d(independet[0]['data'],
-                                                  independet[1]['data'])
-            if datatype in ('grid', 'equidistant'):
-                independet[0]['data'], \
-                independet[1]['data'], \
-                independet[2]['data'] = reshape_2D_data(independet[0]['data'],
-                                                        independet[1]['data'],
-                                                        independet[2]['data'])
+            datatype = datatype_from_setpoints_2d(
+                cast(np.ndarray, independet[0]['data']),
+                cast(np.ndarray, independet[1]['data'])
+            )
+
+            if datatype in ('2D_grid', '2D_equidistant'):
+                (
+                    independet[0]['data'],
+                    independet[1]['data'],
+                    independet[2]['data']
+                ) = reshape_2D_data(
+                    cast(np.ndarray, independet[0]['data']),
+                    cast(np.ndarray, independet[1]['data']),
+                    cast(np.ndarray, independet[2]['data'])
+                )
 
     return mydata

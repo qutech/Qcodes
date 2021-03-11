@@ -4,25 +4,37 @@ Contributing
 Hi, thanks for your interest in the project! We welcome pull requests
 from developers of all skill levels.
 
-Jens H. Nielsen (Jens.Nielsen@microsoft.com), William H.P Nielsen
-(wihpniel@microsoft.com@nbi.ku.dk), Dominik Vogel (a-dovoge@microsoft.com), and
-Mikhail Astafev (a-miasta@microsoft.com) are the current maintainers of
-QCoDeS (aka core developers), along with a group of talented and smart
-volunteers. Please don't hesitate to reach out if you have any
-questions, or just need a little help getting started.
+Jens H. Nielsen, William H.P Nielsen, Mikhail Astafev and Trevor Morgan
+are the current maintainers of QCoDeS (aka core developers), along with a
+group of talented and smart volunteers. Please don't hesitate to reach out at
+qcodes-support@microsoft.com if you have any questions, or just need a
+little help getting started.
 
-Join us on Slack, where informal discussion is more than welcome. (For
-now email one of us to be invited)
+Join us on Slack, where informal discussion is more than welcome.
+(Please email us to be invited!)
 
 .. contents::
+
+QCoDeS Community Drivers
+------------------------
+
+The QCoDeS instrument drivers that are not supported by the QCoDeS developers
+should be pushed to the dedicated repository in GitHub:
+
+https://github.com/QCoDeS/Qcodes_contrib_drivers
+
+These drivers are supported on a best effort basis by the developers of the individual drivers.
+
+Note that, any pull request to the main QCoDeS repository concerning unsupported
+drivers will not be reviewed and/or merged with the QCoDeS core.
 
 Bugs reports and feature requests
 ---------------------------------
 
-We use github's `issues <https://github.com/qdev-dk/Qcodes/issues>`__.
+We use github's `issues <https://github.com/QCoDeS/Qcodes/issues>`__.
 Search for existing and closed issues. If your problem or idea is not yet
 addressed, `please open a new issue
-<https://github.com/qdev-dk/Qcodes/issues/new>`__
+<https://github.com/QCoDeS/Qcodes/issues/new>`__
 
 The github GUI will show you a template both for bugs and features.
 Delete the wrong part and try to follow the template. Writing a good

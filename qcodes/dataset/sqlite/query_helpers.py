@@ -5,8 +5,8 @@ are useful for building more database-specific queries out of them.
 import itertools
 import sqlite3
 from distutils.version import LooseVersion
-from numbers import Number
-from typing import List, Any, Union, Dict, Tuple, Optional
+
+from typing import List, Any, Union, Dict, Tuple, Optional, Sequence
 
 import numpy as np
 from numpy import ndarray
@@ -14,10 +14,11 @@ from numpy import ndarray
 from qcodes.dataset.sqlite.connection import ConnectionPlus, \
     atomic_transaction, transaction, atomic
 from qcodes.dataset.sqlite.settings import SQLiteSettings
+from qcodes.utils.deprecate import deprecate
 
 
 # represent the type of  data we can/want map to sqlite column
-VALUE = Union[str, Number, List, ndarray, bool]
+VALUE = Union[str, complex, List, ndarray, bool, None]
 VALUES = List[VALUE]
 
 
@@ -113,7 +114,7 @@ def _massage_dict(metadata: Dict[str, Any]) -> Tuple[str, List[Any]]:
 
 
 def update_where(conn: ConnectionPlus, table: str,
-                 where_column: str, where_value: Any, **updates) -> None:
+                 where_column: str, where_value: Any, **updates: Any) -> None:
     _updates, values = _massage_dict(updates)
     query = f"""
     UPDATE
@@ -150,8 +151,8 @@ def insert_values(conn: ConnectionPlus,
 
 def insert_many_values(conn: ConnectionPlus,
                        formatted_name: str,
-                       columns: List[str],
-                       values: List[VALUES],
+                       columns: Sequence[str],
+                       values: Sequence[VALUES],
                        ) -> int:
     """
     Inserts many values for the specified columns.
@@ -222,6 +223,7 @@ def insert_many_values(conn: ConnectionPlus,
     return return_value
 
 
+@deprecate('Unused private method to be removed in a future version')
 def modify_values(conn: ConnectionPlus,
                   formatted_name: str,
                   index: int,
@@ -249,6 +251,7 @@ def modify_values(conn: ConnectionPlus,
     return c.rowcount
 
 
+@deprecate('Unused private method to be removed in a future version')
 def modify_many_values(conn: ConnectionPlus,
                        formatted_name: str,
                        start_index: int,
@@ -279,14 +282,14 @@ def length(conn: ConnectionPlus,
            formatted_name: str
            ) -> int:
     """
-    Return the lenght of the table
+    Return the length of the table
 
     Args:
         conn: the connection to the sqlite database
         formatted_name: name of the table
 
     Returns:
-        the lenght of the table
+        the length of the table
     """
     query = f"select MAX(id) from '{formatted_name}'"
     c = atomic_transaction(conn, query)

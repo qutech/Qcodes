@@ -1,8 +1,12 @@
+"""
+This plotting module provides various functions to plot the data measured
+using QCoDeS.
+"""
+
 import logging
-from collections import OrderedDict
 from functools import partial
 from typing import (Optional, List, Sequence, Union, Tuple, Dict,
-                    Any, Set)
+                    Any, Set, cast)
 import inspect
 import numpy as np
 import matplotlib
@@ -11,8 +15,9 @@ from matplotlib.ticker import FuncFormatter
 from contextlib import contextmanager
 
 import qcodes as qc
-from qcodes.dataset.data_set import load_by_id, DataSet
-from qcodes.utils.plotting import auto_color_scale_from_config
+from qcodes.dataset.data_set import load_by_run_spec, DataSet
+from qcodes.utils.plotting import (auto_color_scale_from_config,
+                                   find_scale_and_prefix)
 
 from .data_export import (get_data_by_id, flatten_1D_data_for_plot,
                           get_1D_plottype, get_2D_plottype, reshape_2D_data,
@@ -44,7 +49,7 @@ SUBPLOTS_KWARGS = SUBPLOTS_OWN_KWARGS.union(FIGURE_KWARGS)
 @contextmanager
 def _appropriate_kwargs(plottype: str,
                         colorbar_present: bool,
-                        **kwargs):
+                        **kwargs: Any) -> Any:
     """
     NB: Only to be used inside :func"`plot_dataset`.
 
@@ -60,11 +65,11 @@ def _appropriate_kwargs(plottype: str,
         colorbar_present: Is there a non-None colorbar in this plot iteration?
     """
 
-    def linehandler(**kwargs):
+    def linehandler(**kwargs: Any) -> Any:
         kwargs.pop('cmap', None)
         return kwargs
 
-    def heatmaphandler(**kwargs):
+    def heatmaphandler(**kwargs: Any) -> Any:
         if not(colorbar_present) and 'cmap' not in kwargs:
             kwargs['cmap'] = qc.config.plotting.default_color_map
         return kwargs
@@ -93,7 +98,7 @@ def plot_dataset(dataset: DataSet,
                                                    Number]] = None,
                  complex_plot_type: str = 'real_and_imag',
                  complex_plot_phase: str = 'radians',
-                 **kwargs) -> AxesTupleList:
+                 **kwargs: Any) -> AxesTupleList:
     """
     Construct all plots for a given dataset
 
@@ -114,39 +119,36 @@ def plot_dataset(dataset: DataSet,
 
     ``**kwargs`` are passed to matplotlib's relevant plotting functions
     By default the data in any vector plot will be rasterized
-    for scatter plots and heatmaps if more that 5000 points are supplied.
+    for scatter plots and heatmaps if more than 5000 points are supplied.
     This can be overridden by supplying the `rasterized` kwarg.
 
     Args:
-        dataset:
-            The dataset to plot
-        axes:
-            Optional Matplotlib axes to plot on. If not provided, new axes
+        dataset: The dataset to plot
+        axes: Optional Matplotlib axes to plot on. If not provided, new axes
             will be created
-        colorbars:
-            Optional Matplotlib Colorbars to use for 2D plots. If not
+        colorbars: Optional Matplotlib Colorbars to use for 2D plots. If not
             provided, new ones will be created
-        rescale_axes: if True, tick labels and units for axes of parameters
+        rescale_axes: If True, tick labels and units for axes of parameters
             with standard SI units will be rescaled so that, for example,
             '0.00000005' tick label on 'V' axis are transformed to '50' on 'nV'
             axis ('n' is 'nano')
-        auto_color_scale: if True, the colorscale of heatmap plots will be
+        auto_color_scale: If True, the colorscale of heatmap plots will be
             automatically adjusted to disregard outliers.
-        cutoff_percentile: percentile of data that may maximally be clipped
+        cutoff_percentile: Percentile of data that may maximally be clipped
             on both sides of the distribution.
             If given a tuple (a,b) the percentile limits will be a and 100-b.
             See also the plotting tuorial notebook.
-        complex_plot_type: method for converting complex-valued parameters
+        complex_plot_type: Method for converting complex-valued parameters
             into two real-valued parameters, either ``"real_and_imag"`` or
             ``"mag_and_phase"``. Applicable only for the cases where the
             dataset contains complex numbers
-        complex_plot_phase: format of phase for plotting complex-valued data,
+        complex_plot_phase: Format of phase for plotting complex-valued data,
             either ``"radians"`` or ``"degrees"``. Applicable only for the
             cases where the dataset contains complex numbers
 
     Returns:
-        a list of axes and a list of colorbars of the same length. The
-        colorbar axes may be None if no colorbar is created (e.g. for
+        A list of axes and a list of colorbars of the same length. The
+        colorbar axes may be `None` if no colorbar is created (e.g. for
         1D plots)
 
     Config dependencies: (qcodesrc.json)
@@ -171,7 +173,8 @@ def plot_dataset(dataset: DataSet,
 
     experiment_name = dataset.exp_name
     sample_name = dataset.sample_name
-    title = f"Run #{dataset.run_id}, Experiment {experiment_name} ({sample_name})"
+    title = f"Run #{dataset.captured_run_id}, " \
+            f"Experiment {experiment_name} ({sample_name})"
 
     alldata: NamedData = get_data_by_id(dataset.run_id)
     alldata = _complex_to_real_preparser(alldata,
@@ -181,36 +184,38 @@ def plot_dataset(dataset: DataSet,
     nplots = len(alldata)
 
     if isinstance(axes, matplotlib.axes.Axes):
-        axes = [axes]
+        axeslist = [axes]
+    else:
+        axeslist = cast(List[matplotlib.axes.Axes], axes)
     if isinstance(colorbars, matplotlib.colorbar.Colorbar):
         colorbars = [colorbars]
 
-    if axes is None:
-        axes = []
+    if axeslist is None:
+        axeslist = []
         for i in range(nplots):
             fig, ax = plt.subplots(1, 1, **subplots_kwargs)
-            axes.append(ax)
+            axeslist.append(ax)
     else:
         if len(subplots_kwargs) != 0:
             raise RuntimeError(f"Error: You cannot provide arguments for the "
                                f"axes/figure creation if you supply your own "
                                f"axes. "
                                f"Provided arguments: {subplots_kwargs}")
-        if len(axes) != nplots:
+        if len(axeslist) != nplots:
             raise RuntimeError(f"Trying to make {nplots} plots, but"
-                               f"received {len(axes)} axes objects.")
+                               f"received {len(axeslist)} axes objects.")
 
     if colorbars is None:
-        colorbars = len(axes)*[None]
+        colorbars = len(axeslist)*[None]
     new_colorbars: List[matplotlib.colorbar.Colorbar] = []
 
-    for data, ax, colorbar in zip(alldata, axes, colorbars):
+    for data, ax, colorbar in zip(alldata, axeslist, colorbars):
 
         if len(data) == 2:  # 1D PLOTTING
             log.debug(f'Doing a 1D plot with kwargs: {kwargs}')
 
-            xpoints: np.ndarray = data[0]['data']
-            ypoints: np.ndarray = data[1]['data']
+            xpoints = cast(np.ndarray, data[0]['data'])
+            ypoints = cast(np.ndarray, data[1]['data'])
 
             plottype = get_1D_plottype(xpoints, ypoints)
             log.debug(f'Determined plottype: {plottype}')
@@ -290,10 +295,10 @@ def plot_dataset(dataset: DataSet,
                         f'that.')
             new_colorbars.append(None)
 
-    if len(axes) != len(new_colorbars):
+    if len(axeslist) != len(new_colorbars):
         raise RuntimeError("Non equal number of axes. Perhaps colorbar is "
                            "missing from one of the cases above")
-    return axes, new_colorbars
+    return axeslist, new_colorbars
 
 
 def plot_by_id(run_id: int,
@@ -308,13 +313,16 @@ def plot_by_id(run_id: int,
                                                  Number]] = None,
                complex_plot_type: str = 'real_and_imag',
                complex_plot_phase: str = 'radians',
-               **kwargs) -> AxesTupleList:
+               **kwargs: Any) -> AxesTupleList:
     """
-    Construct all plots for a given `run_id`. All other arguments are forwarded
+    Construct all plots for a given `run_id`. Here `run_id` is an
+    alias for `captured_run_id` for historical reasons. See the docs
+    of :func:`.load_by_run_spec` for details of loading runs.
+    All other arguments are forwarded
     to :func:`.plot_dataset`, see this for more details.
     """
 
-    dataset = load_by_id(run_id)
+    dataset = load_by_run_spec(captured_run_id=run_id)
     return plot_dataset(dataset,
                         axes,
                         colorbars,
@@ -334,10 +342,10 @@ def _complex_to_real_preparser(alldata: NamedData,
     real and imaginary part or phase and magnitude part
 
     Args:
-        alldata: the data to convert, should be the output of get_data_by_id
+        alldata: The data to convert, should be the output of get_data_by_id
         conversion: the conversion method, either "real_and_imag" or
             "mag_and_phase"
-        degress: whether to return the phase in degrees. The default is to
+        degrees: Whether to return the phase in degrees. The default is to
             return the phase in radians
     """
 
@@ -359,7 +367,7 @@ def _complex_to_real_preparser(alldata: NamedData,
         new_group = []
         new_groups: NamedData = [[], []]
         for index, parameter in enumerate(group):
-            data: np.ndarray = parameter['data']
+            data = cast(np.ndarray, parameter['data'])
             if data.dtype.kind == 'c':
                 p1, p2 = _convert_complex_to_real(parameter,
                                                   conversion=conversion,
@@ -431,7 +439,7 @@ def _convert_complex_to_real(
     # out how to get mypy to correctly infer the type of iterated values
     # (the name, label, unit, and data above)
 
-    return new_parameters  # type: ignore
+    return new_parameters  # type: ignore[return-value]
 
 
 def _get_label_of_data(data_dict: Dict[str, Any]) -> str:
@@ -467,11 +475,11 @@ def _set_data_axes_labels(ax: matplotlib.axes.Axes,
 def plot_2d_scatterplot(x: np.ndarray, y: np.ndarray, z: np.ndarray,
                         ax: matplotlib.axes.Axes,
                         colorbar: matplotlib.colorbar.Colorbar = None,
-                        **kwargs) -> AxesTuple:
+                        **kwargs: Any) -> AxesTuple:
     """
     Make a 2D scatterplot of the data. ``**kwargs`` are passed to matplotlib's
     scatter used for the plotting. By default the data will be rasterized
-    in any vector plot if more that 5000 points are supplied. This can be
+    in any vector plot if more than 5000 points are supplied. This can be
     overridden by supplying the `rasterized` kwarg.
 
     Args:
@@ -523,7 +531,7 @@ def plot_on_a_plain_grid(x: np.ndarray,
                          z: np.ndarray,
                          ax: matplotlib.axes.Axes,
                          colorbar: matplotlib.colorbar.Colorbar = None,
-                         **kwargs
+                         **kwargs: Any
                          ) -> AxesTuple:
     """
     Plot a heatmap of z using x and y as axes. Assumes that the data
@@ -542,7 +550,7 @@ def plot_on_a_plain_grid(x: np.ndarray,
         y: The y values
         z: The z values
         ax: The axis to plot onto
-        colorbar: a colorbar to reuse the axis for
+        colorbar: A colorbar to reuse the axis for
 
     Returns:
         The matplotlib axes handle for plot and colorbar
@@ -619,46 +627,12 @@ def plot_on_a_plain_grid(x: np.ndarray,
     return ax, colorbar
 
 
-_UNITS_FOR_RESCALING: Set[str] = {
-    # SI units (without some irrelevant ones like candela)
-    # 'kg' is not included because it is 'kilo' and rarely used
-    'm', 's', 'A', 'K', 'mol', 'rad', 'Hz', 'N', 'Pa', 'J',
-    'W', 'C', 'V', 'F', 'ohm', 'Ohm', 'Ω',
-    '\N{GREEK CAPITAL LETTER OMEGA}', 'S', 'Wb', 'T', 'H',
-    # non-SI units as well, for convenience
-    'eV', 'g'
-}
-
-_ENGINEERING_PREFIXES: Dict[int, str] = OrderedDict({
-    -24: "y",
-    -21: "z",
-    -18: "a",
-    -15: "f",
-    -12: "p",
-     -9: "n",
-     -6: "\N{GREEK SMALL LETTER MU}",
-     -3: "m",
-      0: "",
-      3: "k",
-      6: "M",
-      9: "G",
-     12: "T",
-     15: "P",
-     18: "E",
-     21: "Z",
-     24: "Y"
-})
-
-_THRESHOLDS: Dict[float, int] = OrderedDict(
-    {10**(scale + 3): scale for scale in _ENGINEERING_PREFIXES.keys()})
-
-
 def _scale_formatter(tick_value: float, pos: int, factor: float) -> str:
     """
     Function for matplotlib.ticker.FuncFormatter that scales the tick values
     according to the given `scale` value.
     """
-    return "{0:g}".format(tick_value*factor)
+    return "{:g}".format(tick_value*factor)
 
 
 def _make_rescaled_ticks_and_units(data_dict: Dict[str, Any]) \
@@ -673,11 +647,12 @@ def _make_rescaled_ticks_and_units(data_dict: Dict[str, Any]) \
     are changed from "V" to "nV" ('n' is for 'nano').
 
     The units for which unit prefixes are added can be found in
-    `_UNITS_FOR_RESCALING`. For all other units an exponential scaling factor
-    is added to the label i.e. `(10^3 x e^2/hbar)`.
+    `qcodes.utils.plotting._UNITS_FOR_RESCALING`. For all other units
+    an exponential scaling factor is added to the label i.e.
+    `(10^3 x e^2/hbar)`.
 
     Args:
-        data_dict: a dictionary of the following structure
+        data_dict: A dictionary of the following structure
             {
                 'data': <1D numpy array of points>,
                 'name': <name of the parameter>,
@@ -686,32 +661,13 @@ def _make_rescaled_ticks_and_units(data_dict: Dict[str, Any]) \
             }
 
     Returns:
-        a tuple with the ticks formatter (matlplotlib.ticker.FuncFormatter) and
+        A tuple with the ticks formatter (matlplotlib.ticker.FuncFormatter) and
         the new label.
     """
     unit = data_dict['unit']
 
     maxval = np.nanmax(np.abs(data_dict['data']))
-    if unit in _UNITS_FOR_RESCALING:
-        for threshold, scale in _THRESHOLDS.items():
-            if maxval < threshold:
-                selected_scale = scale
-                prefix = _ENGINEERING_PREFIXES[scale]
-                break
-        else:
-            # here, maxval is larger than the largest threshold
-            largest_scale = max(list(_ENGINEERING_PREFIXES.keys()))
-            selected_scale = largest_scale
-            prefix = _ENGINEERING_PREFIXES[largest_scale]
-    else:
-        if maxval > 0:
-            selected_scale = 3*(np.floor(np.floor(np.log10(maxval))/3))
-        else:
-            selected_scale = 0
-        if selected_scale != 0:
-            prefix = f'$10^{{{selected_scale:.0f}}}$ '
-        else:
-            prefix = ''
+    prefix, selected_scale = find_scale_and_prefix(maxval, unit)
 
     new_unit = prefix + unit
     label = _get_label_of_data(data_dict)
@@ -726,7 +682,8 @@ def _make_rescaled_ticks_and_units(data_dict: Dict[str, Any]) \
 
 def _rescale_ticks_and_units(ax: matplotlib.axes.Axes,
                              data: List[Dict[str, Any]],
-                             cax: matplotlib.colorbar.Colorbar = None):
+                             cax: matplotlib.colorbar.Colorbar = None
+                             ) -> None:
     """
     Rescale ticks and units for the provided axes as described in
     :func:`~_make_rescaled_ticks_and_units`
@@ -761,8 +718,7 @@ def _is_string_valued_array(values: np.ndarray) -> bool:
     words, if it is string-valued.
 
     Args:
-        values:
-            a 1D numpy array of values
+        values: A 1D numpy array of values
 
     Returns:
         True, if the array contains string; False otherwise

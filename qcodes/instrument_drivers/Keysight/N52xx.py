@@ -23,26 +23,29 @@ class PNASweep(ArrayParameter):
                          setpoints=((0,),),
                          **kwargs)
 
-    @property # type: ignore
-    def shape(self) -> Sequence[int]: # type: ignore
+    @property  # type: ignore[override]
+    def shape(self) -> Sequence[int]:  # type: ignore[override]
         if self._instrument is None:
             return (0,)
         return (self._instrument.root_instrument.points(),)
+
     @shape.setter
     def shape(self, val: Sequence[int]) -> None:
         pass
 
-    @property # type: ignore
-    def setpoints(self) -> Sequence: # type: ignore
+    @property  # type: ignore[override]
+    def setpoints(self) -> Sequence[np.ndarray]:  # type: ignore[override]
         if self._instrument is None:
             raise RuntimeError("Cannot return setpoints if not attached "
                                "to instrument")
         start = self._instrument.root_instrument.start()
         stop = self._instrument.root_instrument.stop()
         return (np.linspace(start, stop, self.shape[0]),)
+
     @setpoints.setter
     def setpoints(self, val: Sequence[int]) -> None:
         pass
+
 
 class FormattedSweep(PNASweep):
     """
@@ -86,6 +89,7 @@ class FormattedSweep(PNASweep):
 
         return data
 
+
 class PNAPort(InstrumentChannel):
     """
     Allow operations on individual PNA ports.
@@ -122,6 +126,7 @@ class PNAPort(InstrumentChannel):
         """
         self.source_power.vals = Numbers(min_value=min_power,
                                          max_value=max_power)
+
 
 class PNATrace(InstrumentChannel):
     """
@@ -263,6 +268,7 @@ class PNATrace(InstrumentChannel):
         if not re.match("S[1-4][1-4]", val):
             raise ValueError("Invalid S parameter spec")
         self.write(f"CALC:PAR:MOD:EXT \"{val}\"")
+
 
 class PNABase(VisaInstrument):
     """
@@ -420,7 +426,11 @@ class PNABase(VisaInstrument):
         self.add_submodule("traces", self._traces)
         # Add shortcuts to first trace
         trace1 = self.traces[0]
-        for param in trace1.parameters.values():
+        params = trace1.parameters
+        if not isinstance(params, dict):
+            raise RuntimeError(f"Expected trace.parameters to be a dict got "
+                               f"{type(params)}")
+        for param in params.values():
             self.parameters[param.name] = param
         # And also add a link to run sweep
         self.run_sweep = trace1.run_sweep
@@ -465,7 +475,7 @@ class PNABase(VisaInstrument):
         self._traces.clear()
         for trace_name in parlist[::2]:
             trace_num = self.select_trace_by_name(trace_name)
-            pna_trace = PNATrace(self, "tr{}".format(trace_num),
+            pna_trace = PNATrace(self, f"tr{trace_num}",
                                  trace_name, trace_num)
             self._traces.append(pna_trace)
 
@@ -480,7 +490,7 @@ class PNABase(VisaInstrument):
         # Query the instrument for what options are installed
         return self.ask('*OPT?').strip('"').split(',')
 
-    def get_trace_catalog(self):
+    def get_trace_catalog(self) -> str:
         """
         Get the trace catalog, that is a list of trace and sweep types
         from the PNA.
@@ -500,19 +510,19 @@ class PNABase(VisaInstrument):
         self.write(f"CALC:PAR:SEL '{trace_name}'")
         return self.active_trace()
 
-    def reset_averages(self):
+    def reset_averages(self) -> None:
         """
         Reset averaging
         """
         self.write("SENS:AVER:CLE")
 
-    def averages_on(self):
+    def averages_on(self) -> None:
         """
         Turn on trace averaging
         """
         self.averages_enabled(True)
 
-    def averages_off(self):
+    def averages_off(self) -> None:
         """
         Turn off trace averaging
         """
@@ -528,6 +538,7 @@ class PNABase(VisaInstrument):
                                   max_value=max_power)
         for port in self.ports:
             port._set_power_limits(min_power, max_power)
+
 
 class PNAxBase(PNABase):
     def _enable_fom(self) -> None:
