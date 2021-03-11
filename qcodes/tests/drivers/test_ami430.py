@@ -1,23 +1,25 @@
 import io
-import numpy as np
-import re
-import pytest
-from hypothesis import given, settings
-from hypothesis.strategies import floats
-from hypothesis.strategies import tuples
 import logging
+import re
+import time
 import warnings
 from typing import List
 
-import qcodes.instrument.sims as sims
-from qcodes.instrument_drivers.american_magnetics.AMI430 import AMI430_3D, \
-    AMI430Warning
-from qcodes.instrument.ip_to_visa import AMI430_VISA
-from qcodes.math.field_vector import FieldVector
-from qcodes.utils.types import numpy_concrete_ints, numpy_concrete_floats, \
-    numpy_non_concrete_ints_instantiable, \
-    numpy_non_concrete_floats_instantiable
+import numpy as np
+import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis.strategies import floats, tuples
 
+import qcodes.instrument.sims as sims
+from qcodes.instrument.ip_to_visa import AMI430_VISA
+from qcodes.instrument_drivers.american_magnetics.AMI430 import (AMI430_3D,
+                                                                 AMI430Warning)
+from qcodes.math_utils.field_vector import FieldVector
+from qcodes.utils.types import (numpy_concrete_floats, numpy_concrete_ints,
+                                numpy_non_concrete_floats_instantiable,
+                                numpy_non_concrete_ints_instantiable)
+
+_time_resolution = time.get_clock_info('time').resolution
 
 # If any of the field limit functions are satisfied we are in the safe zone.
 # We can have higher field along the z-axis if x and y are zero.
@@ -65,12 +67,10 @@ def current_driver(magnet_axes_instances):
     driver.close()
 
 
-@pytest.fixture(scope='function',
-                params=(True, False))
-def ami430(request):
+@pytest.fixture(scope='function')
+def ami430():
     mag = AMI430_VISA('ami430', address='GPIB::1::INSTR', visalib=visalib,
-                      terminator='\n', port=1,
-                      has_current_rating=request.param)
+                      terminator='\n', port=1)
     yield mag
     mag.close()
 
@@ -108,7 +108,7 @@ random_coordinates = {
 
 
 @given(set_target=random_coordinates["cartesian"])
-@settings(max_examples=10)
+@settings(max_examples=10, suppress_health_check=(HealthCheck.function_scoped_fixture,))
 def test_cartesian_sanity(current_driver, set_target):
     """
     A sanity check to see if the driver remember vectors in any random
@@ -127,7 +127,7 @@ def test_cartesian_sanity(current_driver, set_target):
 
 
 @given(set_target=random_coordinates["spherical"])
-@settings(max_examples=10)
+@settings(max_examples=10, suppress_health_check=(HealthCheck.function_scoped_fixture,))
 def test_spherical_sanity(current_driver, set_target):
     """
     A sanity check to see if the driver remember vectors in any random
@@ -146,7 +146,7 @@ def test_spherical_sanity(current_driver, set_target):
 
 
 @given(set_target=random_coordinates["cylindrical"])
-@settings(max_examples=10)
+@settings(max_examples=10, suppress_health_check=(HealthCheck.function_scoped_fixture,))
 def test_cylindrical_sanity(current_driver, set_target):
     """
     A sanity check to see if the driver remember vectors in any random
@@ -165,7 +165,7 @@ def test_cylindrical_sanity(current_driver, set_target):
 
 
 @given(set_target=random_coordinates["cartesian"])
-@settings(max_examples=10)
+@settings(max_examples=10, suppress_health_check=(HealthCheck.function_scoped_fixture,))
 def test_cartesian_setpoints(current_driver, set_target):
     """
     Check that the individual x, y, z instruments are getting the set
@@ -186,7 +186,7 @@ def test_cartesian_setpoints(current_driver, set_target):
 
 
 @given(set_target=random_coordinates["spherical"])
-@settings(max_examples=10)
+@settings(max_examples=10, suppress_health_check=(HealthCheck.function_scoped_fixture,))
 def test_spherical_setpoints(current_driver, set_target):
     """
     Check that the individual x, y, z instruments are getting the set
@@ -208,7 +208,8 @@ def test_spherical_setpoints(current_driver, set_target):
 
 
 @given(set_target=random_coordinates["cylindrical"])
-@settings(max_examples=10, deadline=500)
+@settings(max_examples=10, deadline=500,
+          suppress_health_check=(HealthCheck.function_scoped_fixture,))
 def test_cylindrical_setpoints(current_driver, set_target):
     """
     Check that the individual x, y, z instruments are getting the set
@@ -230,7 +231,8 @@ def test_cylindrical_setpoints(current_driver, set_target):
 
 
 @given(set_target=random_coordinates["cartesian"])
-@settings(max_examples=10, deadline=500)
+@settings(max_examples=10, deadline=500,
+          suppress_health_check=(HealthCheck.function_scoped_fixture,))
 def test_measured(current_driver, set_target):
     """
     Simply call the measurement methods and verify that no exceptions
@@ -395,26 +397,6 @@ def test_spherical_poles(current_driver):
     assert np.allclose([field_m, theta_m, phi_m], [field, theta, phi])
 
 
-def test_warning_increased_max_ramp_rate():
-    """
-    Test that a warning is raised if we increase the maximum current
-    ramp rate. We want the user to be really sure what he or she is
-    doing, as this could risk quenching the magnet
-    """
-    max_ramp_rate = AMI430_VISA._DEFAULT_CURRENT_RAMP_LIMIT
-    # Increasing the maximum ramp rate should raise a warning
-    target_ramp_rate = max_ramp_rate + 0.01
-
-    with pytest.warns(AMI430Warning,
-                      match="Increasing maximum ramp rate") as excinfo:
-        inst = AMI430_VISA("testing_increased_max_ramp_rate",
-                           address='GPIB::4::INSTR', visalib=visalib,
-                           terminator='\n', port=1,
-                           current_ramp_limit=target_ramp_rate)
-        assert len(excinfo) >= 1  # Check we at least one warning.
-        inst.close()
-
-
 def test_ramp_rate_exception(current_driver):
     """
     Test that an exception is raised if we try to set the ramp rate
@@ -427,7 +409,7 @@ def test_ramp_rate_exception(current_driver):
     with pytest.raises(Exception) as excinfo:
         ix.ramp_rate(target_ramp_rate)
 
-        errmsg = "must be between 0 and {} inclusive".format(max_ramp_rate)
+        errmsg = f"must be between 0 and {max_ramp_rate} inclusive"
 
         assert errmsg in excinfo.value.args[0]
 
@@ -815,3 +797,101 @@ def test_numeric_field_limit(magnet_axes_instances, field_limit, request):
     with pytest.raises(ValueError,
                        match='_set_fields aborted; field would exceed limit'):
         ami.cartesian(target_outside_limit)
+
+
+def test_ramp_rate_units_and_field_units_at_init(ami430):
+    """
+    Test values of ramp_rate_units and field_units parameters at init,
+    and the units of other parameters which depend on the
+    values of ramp_rate_units and field_units parameters.
+    """
+    initial_ramp_rate_units = ami430.ramp_rate_units()
+    initial_field_units = ami430.field_units()
+
+    assert initial_ramp_rate_units == 'seconds'
+    assert initial_field_units == 'tesla'
+
+    assert ami430.coil_constant.unit == "T/A"
+    assert ami430.field_limit.unit == "T"
+    assert ami430.field.unit == "T"
+    assert ami430.setpoint.unit == "T"
+    assert ami430.ramp_rate.unit == "T/s"
+    assert ami430.current_ramp_limit.unit == "A/s"
+    assert ami430.field_ramp_limit.unit == "T/s"
+
+
+@pytest.mark.parametrize(('new_value', 'unit_string', 'scale'),
+                         (('seconds', 's', 1), ('minutes', 'min', 1/60)),
+                         ids=('seconds', 'minutes'))
+def test_change_ramp_rate_units_parameter(ami430, new_value, unit_string,
+                                          scale):
+    """
+    Test that changing value of ramp_rate_units parameter is reflected in
+    settings of other magnet parameters.
+    """
+    coil_constant_unit = ami430.coil_constant.unit
+    field_limit_unit = ami430.field_limit.unit
+    field_unit = ami430.field.unit
+    setpoint_unit = ami430.setpoint.unit
+    coil_constant_timestamp = ami430.coil_constant.get_latest.get_timestamp()
+    # this prevents possible flakiness of the timestamp comparison
+    # later in the test that may originate from the not-enough resolution
+    # of the time function used in `Parameter` and `GetLatest` classes
+    time.sleep(2 * _time_resolution)
+
+    ami430.ramp_rate_units(new_value)
+
+    ramp_rate_units__actual = ami430.ramp_rate_units()
+    assert ramp_rate_units__actual == new_value
+
+    assert ami430.coil_constant.unit == coil_constant_unit
+    assert ami430.field_limit.unit == field_limit_unit
+    assert ami430.field.unit == field_unit
+    assert ami430.setpoint.unit == setpoint_unit
+
+    assert ami430.ramp_rate.unit.endswith("/" + unit_string)
+    assert ami430.current_ramp_limit.unit.endswith("/" + unit_string)
+    assert ami430.field_ramp_limit.unit.endswith("/" + unit_string)
+
+    assert ami430.current_ramp_limit.scale == scale
+
+    # Assert `coil_constant` value has been updated
+    assert ami430.coil_constant.get_latest.get_timestamp() \
+           > coil_constant_timestamp
+
+
+@pytest.mark.parametrize(('new_value', 'unit_string'),
+                         (('tesla', 'T'), ('kilogauss', 'kG')),
+                         ids=('tesla', 'kilogauss'))
+def test_change_field_units_parameter(ami430, new_value, unit_string):
+    """
+    Test that changing value of field_units parameter is reflected in
+    settings of other magnet parameters.
+    """
+    current_ramp_limit_unit = ami430.current_ramp_limit.unit
+    current_ramp_limit_scale = ami430.current_ramp_limit.scale
+    coil_constant_timestamp = ami430.coil_constant.get_latest.get_timestamp()
+    # this prevents possible flakiness of the timestamp comparison
+    # later in the test that may originate from the not-enough resolution
+    # of the time function used in `Parameter` and `GetLatest` classes
+    time.sleep(2 * _time_resolution)
+
+    ami430.field_units(new_value)
+
+    field_units__actual = ami430.field_units()
+    assert field_units__actual == new_value
+
+    assert ami430.current_ramp_limit.unit == current_ramp_limit_unit
+    assert ami430.current_ramp_limit.scale == current_ramp_limit_scale
+
+    assert ami430.field_limit.unit == unit_string
+    assert ami430.field.unit == unit_string
+    assert ami430.setpoint.unit == unit_string
+
+    assert ami430.coil_constant.unit.startswith(unit_string + "/")
+    assert ami430.ramp_rate.unit.startswith(unit_string + "/")
+    assert ami430.field_ramp_limit.unit.startswith(unit_string + "/")
+
+    # Assert `coil_constant` value has been updated
+    assert ami430.coil_constant.get_latest.get_timestamp() \
+           > coil_constant_timestamp

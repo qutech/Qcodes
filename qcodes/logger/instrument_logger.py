@@ -1,12 +1,14 @@
 """
 This module defines a :class:`logging.LoggerAdapter` and
-:class:`logging.Filter` used to enable the capturing of output from specific
+:class:`logging.Filter`. They are used to enable the capturing of output from
+specific
 instruments.
 """
 
 from contextlib import contextmanager
 import logging
-from typing import Optional, Sequence, Union, TYPE_CHECKING
+from typing import Optional, Sequence, Union, TYPE_CHECKING, Any, Tuple, \
+    MutableMapping, Iterator
 import collections.abc
 from .logger import get_console_handler, LevelType, handler_level
 if TYPE_CHECKING:
@@ -15,7 +17,7 @@ if TYPE_CHECKING:
 
 class InstrumentLoggerAdapter(logging.LoggerAdapter):
     """
-    In the python logging module adapters are used to add context information
+    In the Python logging module adapters are used to add context information
     to logging. The :class:`logging.LoggerAdapter` has the same methods as the
     :class:`logging.Logger` and can thus be used as such.
 
@@ -29,9 +31,10 @@ class InstrumentLoggerAdapter(logging.LoggerAdapter):
         >>> LoggerAdapter(log, {'instrument': self.full_name})
 
     """
-    def process(self, msg, kwargs):
+    def process(self, msg: str, kwargs: MutableMapping[str, Any]) -> \
+            Tuple[str, MutableMapping[str, Any]]:
         """
-        returns the message and the kwargs for the handlers.
+        Returns the message and the kwargs for the handlers.
         """
         kwargs['extra'] = self.extra
         inst = self.extra['instrument']
@@ -49,21 +52,21 @@ class InstrumentFilter(logging.Filter):
     originate from the list of instruments that has been passed to the
     ``__init__`` method.
     """
-    def __init__(self, instruments):
+    def __init__(self, instruments: Union['InstrumentBase',
+                                          Sequence['InstrumentBase']]):
         # This local import is necessary to avoid a circular import dependency.
         # The alternative is to merge this module with the instrument.base,
         # which is also not favorable.
         super().__init__()
         if not isinstance(instruments, collections.abc.Sequence):
-            instrument_seq = (instruments,)
+            instrument_seq: Sequence['InstrumentBase'] = (instruments,)
         else:
             instrument_seq = instruments
         self.instrument_set = set(instrument_seq)
 
-    def filter(self, record):
-        try:
-            inst = record.instrument
-        except AttributeError:
+    def filter(self, record: logging.LogRecord) -> bool:
+        inst = getattr(record, 'instrument', False)
+        if inst is False:
             return False
         return not self.instrument_set.isdisjoint(inst.ancestors)
 
@@ -72,15 +75,16 @@ def get_instrument_logger(instrument_instance: 'InstrumentBase',
                           logger_name: Optional[str] = None
                           ) -> InstrumentLoggerAdapter:
     """
-    Return an :class:`InstrumentLoggerAdapter` that can be used to log messages
+    Returns an :class:`InstrumentLoggerAdapter` that can be used to log
+    messages
     including ``instrument_instance`` as  an additional context.
 
     The :class:`logging.LoggerAdapter` object can be used as any logger.
 
     Args:
-        instrument_instance: the instrument instance to be added to the context
+        instrument_instance: The instrument instance to be added to the context
             of the log record.
-        logger_name: name of the logger to which the records will be passed.
+        logger_name: Name of the logger to which the records will be passed.
             If `None`, defaults to the root logger.
 
     Returns:
@@ -98,7 +102,7 @@ def filter_instrument(instrument: Union['InstrumentBase',
                       handler: Optional[
                           Union[logging.Handler,
                                 Sequence[logging.Handler]]] = None,
-                      level: Optional[LevelType] = None):
+                      level: Optional[LevelType] = None) -> Iterator[None]:
     """
     Context manager that adds a filter that only enables the log messages of
     the supplied instruments to pass.
@@ -113,8 +117,8 @@ def filter_instrument(instrument: Union['InstrumentBase',
     Args:
         instrument: The instrument or sequence of instruments to enable
             messages from.
-        level: level to set the handlers to
-        handler: single or sequence of handlers which to change
+        level: Level to set the handlers to.
+        handler: Single or sequence of handlers to change.
     """
     handlers: Sequence[logging.Handler]
     if handler is None:

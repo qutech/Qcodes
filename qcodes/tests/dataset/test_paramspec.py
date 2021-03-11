@@ -128,9 +128,9 @@ alphabet = "".join([chr(i) for i in range(ord("a"), ord("z"))])
 
 
 @given(
-    name1=hst.text(min_size=4, alphabet=alphabet),
-    name2=hst.text(min_size=4, alphabet=alphabet),
-    name3=hst.text(min_size=4, alphabet=alphabet)
+    name1=hst.text(min_size=4, max_size=100, alphabet=alphabet),
+    name2=hst.text(min_size=4, max_size=100, alphabet=alphabet),
+    name3=hst.text(min_size=4, max_size=100, alphabet=alphabet)
 )
 def test_depends_on(name1, name2, name3):
     ps2 = ParamSpec(name2, "numeric")
@@ -148,9 +148,9 @@ def test_depends_on(name1, name2, name3):
 
 
 @given(
-    name1=hst.text(min_size=4, alphabet=alphabet),
-    name2=hst.text(min_size=4, alphabet=alphabet),
-    name3=hst.text(min_size=4, alphabet=alphabet)
+    name1=hst.text(min_size=4, max_size=100, alphabet=alphabet),
+    name2=hst.text(min_size=4, max_size=100, alphabet=alphabet),
+    name3=hst.text(min_size=4, max_size=100, alphabet=alphabet)
 )
 def test_inferred_from(name1, name2, name3):
     ps2 = ParamSpec(name2, "numeric")
@@ -169,8 +169,8 @@ def test_inferred_from(name1, name2, name3):
 
 
 @given(
-    name1=hst.text(min_size=4, alphabet=alphabet),
-    name2=hst.text(min_size=4, alphabet=alphabet)
+    name1=hst.text(min_size=4, max_size=100, alphabet=alphabet),
+    name2=hst.text(min_size=4, max_size=100, alphabet=alphabet)
 )
 def test_copy(name1, name2):
     ps_indep = ParamSpec(name1, "numeric")
@@ -299,3 +299,49 @@ def test_base_version(paramspecs):
                             unit=kwargs['unit'])
 
     assert ps.base_version() == ps_base
+
+
+def test_not_eq_for_list_attr():
+    """
+    test that two paramspecs that differ only
+    in list attrs are different
+    """
+
+    p1 = ParamSpec(name='foo',
+                   paramtype='numeric',
+                   depends_on=['a', 'b'])
+    p2 = ParamSpec(name='foo',
+                   paramtype='numeric',
+                   depends_on=['c', 'd'])
+    assert p1 != p2
+
+
+def test_not_eq_for_str_attr():
+    """
+    test that two paramspecs that differ only
+    in str attrs are different
+    """
+
+    p1 = ParamSpec(name='foo',
+                   label='myfoo',
+                   paramtype='numeric',
+                   depends_on=['a', 'b'])
+    p2 = ParamSpec(name='foo',
+                   label='someotherfoo',
+                   paramtype='numeric',
+                   depends_on=['a', 'b'])
+    assert p1 != p2
+
+
+def test_not_eq_non_paramspec():
+    """
+    test that two paramspecs that differ only
+    in str attrs are different
+    """
+
+    p1 = ParamSpec(name='foo',
+                   label='myfoo',
+                   paramtype='numeric',
+                   depends_on=['a', 'b'])
+    p2 = 1
+    assert p1 != p2
