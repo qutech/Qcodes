@@ -1,4 +1,4 @@
-name: qcodes
+name: qcodes_git
 channels:
  - defaults
  - conda-forge

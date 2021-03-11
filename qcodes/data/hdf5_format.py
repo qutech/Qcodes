@@ -223,8 +223,12 @@ class HDF5Format(Formatter):
                                 datasetshape[1])
             dset.resize(new_datasetshape)
             new_data_shape = (new_dlen - old_dlen, datasetshape[1])
-            dset[old_dlen:new_dlen] = x[old_dlen:new_dlen].reshape(
-                new_data_shape)
+            # dset[old_dlen:new_dlen] = x[old_dlen:new_dlen].reshape(
+            #     new_data_shape)
+            # As this causes problems when aborting measurements, I suggest to
+            # replace this line by:
+            dset[old_dlen:new_dlen] = x.flatten()[old_dlen:new_dlen].reshape(
+                  new_data_shape)
             # allow resizing extracted data, here so it gets written for
             # incremental writes aswell
             dset.attrs['shape'] = x.shape

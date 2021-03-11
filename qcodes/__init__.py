@@ -33,7 +33,7 @@ if plotlib in {'matplotlib', 'all'}:
 
 
 from qcodes.station import Station
-from qcodes.loops import Loop, active_loop, active_data_set
+from qcodes.loops import Loop, BufferedLoop, Repetition, BufferedRepetition, active_loop, active_data_set
 from qcodes.measure import Measure
 from qcodes.actions import Task, Wait, BreakIf
 haswebsockets = True
@@ -60,6 +60,8 @@ from qcodes.instrument.channel import InstrumentChannel, ChannelList
 from qcodes.instrument.function import Function
 from qcodes.instrument.parameter import (
     Parameter,
+    BufferedSweepableParameter,
+    BufferedReadableArrayParameter,
     ArrayParameter,
     MultiParameter,
     ParameterWithSetpoints,
