@@ -2,7 +2,7 @@ import re
 
 import pytest
 
-from qcodes.dataset.database import get_DB_location
+from qcodes.dataset.sqlite.database import get_DB_location
 from qcodes.dataset.experiment_container import (load_experiment_by_name,
                                                  new_experiment,
                                                  load_or_create_experiment,
@@ -11,9 +11,6 @@ from qcodes.dataset.experiment_container import (load_experiment_by_name,
                                                  Experiment,
                                                  load_last_experiment)
 from qcodes.dataset.measurements import Measurement
-# pylint: disable=unused-import
-from qcodes.tests.dataset.temporary_databases import empty_temp_db, dataset, \
-    experiment
 
 
 def assert_experiments_equal(exp, exp_2):
@@ -32,6 +29,7 @@ def test_run_loaded_experiment():
     exp_loaded = load_experiment_by_name("test", "test1")
 
     meas = Measurement(exp=exp_loaded)
+    meas.register_custom_parameter(name='dummy', paramtype='text')
     with meas.run():
         pass
 
@@ -111,7 +109,7 @@ def test_has_attributes_after_init():
     """
 
     attrs = ['name', 'exp_id', '_exp_id', 'sample_name', 'last_counter',
-             'path_to_db', '_path_to_db', 'conn', 'started_at',
+             'path_to_db', 'conn', 'started_at',
              'finished_at', 'format_string']
 
     # This creates an experiment in the db

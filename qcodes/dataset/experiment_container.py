@@ -1,34 +1,30 @@
 from collections.abc import Sized
-from typing import Optional, List
+from typing import Optional, List, Any
 import logging
 
 import qcodes
 from qcodes.dataset.data_set import (DataSet, load_by_id, load_by_counter,
                                      new_data_set, SPECS)
-
-from qcodes.dataset.sqlite_base import (select_one_where, finish_experiment,
-                                        get_run_counter, get_runs,
-                                        get_last_run,
-                                        connect, transaction,
-                                        get_last_experiment, get_experiments,
-                                        get_experiment_name_from_experiment_id,
-                                        get_runid_from_expid_and_counter,
-                                        get_sample_name_from_experiment_id,
-                                        ConnectionPlus)
-from qcodes.dataset.sqlite_base import new_experiment as ne
-from qcodes.dataset.database import get_DB_location, get_DB_debug
-
+from qcodes.dataset.sqlite.connection import transaction, ConnectionPlus
+from qcodes.dataset.sqlite.queries import new_experiment as ne, \
+    finish_experiment, get_run_counter, get_runs, get_last_run, \
+    get_last_experiment, get_experiments, \
+    get_experiment_name_from_experiment_id, get_runid_from_expid_and_counter, \
+    get_sample_name_from_experiment_id
+from qcodes.dataset.sqlite.database import get_DB_location, get_DB_debug, \
+    connect, conn_from_dbpath_or_conn
+from qcodes.dataset.sqlite.query_helpers import select_one_where, VALUES
 
 log = logging.getLogger(__name__)
 
 
 class Experiment(Sized):
-    def __init__(self, path_to_db: Optional[str]=None,
-                 exp_id: Optional[int]=None,
-                 name: Optional[str]=None,
-                 sample_name: Optional[str]=None,
-                 format_string: str="{}-{}-{}",
-                 conn: Optional[ConnectionPlus]=None) -> None:
+    def __init__(self, path_to_db: Optional[str] = None,
+                 exp_id: Optional[int] = None,
+                 name: Optional[str] = None,
+                 sample_name: Optional[str] = None,
+                 format_string: str = "{}-{}-{}",
+                 conn: Optional[ConnectionPlus] = None) -> None:
         """
         Create or load an experiment. If exp_id is None, a new experiment is
         created. If exp_id is not None, an experiment is loaded.
@@ -50,12 +46,7 @@ class Experiment(Sized):
               to the DB file specified in the config is made
         """
 
-        if path_to_db is not None and conn is not None:
-            raise ValueError('Received BOTH conn and path_to_db. Please '
-                             'provide only one or the other.')
-
-        self._path_to_db = path_to_db or get_DB_location()
-        self.conn = conn or connect(self.path_to_db, get_DB_debug())
+        self.conn = conn_from_dbpath_or_conn(conn, path_to_db)
 
         max_id = len(get_experiments(self.conn))
 
@@ -67,14 +58,15 @@ class Experiment(Sized):
 
             # it is better to catch an invalid format string earlier than later
             try:
-                # the sqlite_base will try to format
-                # (name, exp_id, run_counter)
+                # the corresponding function from sqlite module will try to
+                # format as `(name, exp_id, run_counter)`, hence we prepare
+                # for that here
                 format_string.format("name", 1, 1)
             except Exception as e:
                 raise ValueError("Invalid format string. Can not format "
                                  "(name, exp_id, run_counter)") from e
 
-            log.info("creating new experiment in {}".format(self.path_to_db))
+            log.info(f"creating new experiment in {self.path_to_db}")
 
             name = name or f"experiment_{max_id+1}"
             sample_name = sample_name or "some_sample"
@@ -86,7 +78,7 @@ class Experiment(Sized):
 
     @property
     def path_to_db(self) -> str:
-        return self._path_to_db
+        return self.conn.path_to_dbfile
 
     @property
     def name(self) -> str:
@@ -115,8 +107,10 @@ class Experiment(Sized):
         return select_one_where(self.conn, "experiments", "format_string",
                                 "exp_id", self.exp_id)
 
-    def new_data_set(self, name, specs: SPECS = None, values=None,
-                     metadata=None) -> DataSet:
+    def new_data_set(self, name: str,
+                     specs: Optional[SPECS] = None,
+                     values: Optional[VALUES] = None,
+                     metadata: Optional[Any] = None) -> DataSet:
         """
         Create a new dataset in this experiment
 
@@ -147,10 +141,7 @@ class Experiment(Sized):
     def data_sets(self) -> List[DataSet]:
         """Get all the datasets of this experiment"""
         runs = get_runs(self.conn, self.exp_id)
-        data_sets = []
-        for run in runs:
-            data_sets.append(load_by_id(run['run_id'], conn=self.conn))
-        return data_sets
+        return [load_by_id(run['run_id'], conn=self.conn) for run in runs]
 
     def last_data_set(self) -> DataSet:
         """Get the last dataset of this experiment"""
@@ -170,41 +161,40 @@ class Experiment(Sized):
         return len(self.data_sets())
 
     def __repr__(self) -> str:
-        out = []
-        heading = (f"{self.name}#{self.sample_name}#{self.exp_id}"
-                   f"@{self.path_to_db}")
-        out.append(heading)
-        out.append("-" * len(heading))
-        ds = self.data_sets()
-        if len(ds) > 0:
-            for d in ds:
-                out.append(f"{d.run_id}-{d.name}-{d.counter}"
-                           f"-{d.parameters}-{len(d)}")
-
+        out = [
+            f"{self.name}#{self.sample_name}#{self.exp_id}@{self.path_to_db}"
+        ]
+        out.append("-" * len(out[0]))
+        out += [
+            f"{d.run_id}-{d.name}-{d.counter}-{d.parameters}-{len(d)}"
+            for d in self.data_sets()
+        ]
         return "\n".join(out)
 
 
 # public api
 
-def experiments()->List[Experiment]:
+def experiments(conn: Optional[ConnectionPlus] = None) -> List[Experiment]:
     """
     List all the experiments in the container (database file from config)
+
+    Args:
+        conn: connection to the database. If not supplied, a new connection
+          to the DB file specified in the config is made
 
     Returns:
         All the experiments in the container
     """
-    log.info("loading experiments from {}".format(get_DB_location()))
-    rows = get_experiments(connect(get_DB_location(), get_DB_debug()))
-    experiments = []
-    for row in rows:
-        experiments.append(load_experiment(row['exp_id']))
-    return experiments
+    conn = conn_from_dbpath_or_conn(conn=conn, path_to_db=None)
+    log.info(f"loading experiments from {conn.path_to_dbfile}")
+    rows = get_experiments(conn)
+    return [load_experiment(row['exp_id'], conn) for row in rows]
 
 
 def new_experiment(name: str,
                    sample_name: Optional[str],
                    format_string: str = "{}-{}-{}",
-                   conn: Optional[ConnectionPlus]=None) -> Experiment:
+                   conn: Optional[ConnectionPlus] = None) -> Experiment:
     """
     Create a new experiment (in the database file from config)
 
@@ -224,19 +214,23 @@ def new_experiment(name: str,
                       conn=conn)
 
 
-def load_experiment(exp_id: int) -> Experiment:
+def load_experiment(exp_id: int,
+                    conn: Optional[ConnectionPlus] = None) -> Experiment:
     """
     Load experiment with the specified id (from database file from config)
 
     Args:
         exp_id: experiment id
+        conn: connection to the database. If not supplied, a new connection
+          to the DB file specified in the config is made
 
     Returns:
         experiment with the specified id
     """
     if not isinstance(exp_id, int):
         raise ValueError('Experiment ID must be an integer')
-    return Experiment(exp_id=exp_id)
+    return Experiment(exp_id=exp_id,
+                      conn=conn)
 
 
 def load_last_experiment() -> Experiment:

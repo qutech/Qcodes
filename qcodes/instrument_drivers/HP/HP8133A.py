@@ -1,3 +1,5 @@
+from typing import Any
+
 from qcodes import VisaInstrument
 from qcodes.utils.validators import Numbers, Ints, Enum
 
@@ -7,7 +9,12 @@ class HP8133A(VisaInstrument):
     This is the code for Hewlett Packard 8133A Pulse Generator
     """
 
-    def __init__(self, name, address, reset=False,  **kwargs):
+    def __init__(
+            self,
+            name: str,
+            address: str,
+            reset: bool = False,
+            **kwargs: Any):
         super().__init__(name, address,  terminator='\n', **kwargs)
 
         self.add_parameter(name='frequency',
@@ -81,10 +88,9 @@ class HP8133A(VisaInstrument):
                            val_mapping={'OFF': 0,
                                         'ON': 1})
 
-        #resets amplitude and offset each time user connects
+        # resets amplitude and offset each time user connects
         self.amplitude(0.1)
         self.amplitude_offset(0)
-
 
         self.add_function('reset', call_cmd='*RST')
         self.connect_message()

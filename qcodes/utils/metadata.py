@@ -1,6 +1,8 @@
+from typing import (Any, Dict, NamedTuple, NewType, Sequence, Tuple, TypeVar,
+                    Union, Optional)
+
 from .helpers import deep_update
 
-from typing import Dict, Tuple, Any, NewType, NamedTuple, TypeVar, Union, Sequence
 T = TypeVar('T')
 # NB: At the moment, the Snapshot type is a bit weak, as the Any
 #     for the value type doesn't tell us anything about the schema
@@ -21,31 +23,32 @@ ParameterKey = Union[
 ParameterDict = Dict[ParameterKey, T]
 RunId = NewType('RunId', int)
 
+
 class Metadatable:
     def __init__(self, metadata=None):
         self.metadata = {}
         self.load_metadata(metadata or {})
 
-    def load_metadata(self, metadata):
+    def load_metadata(self, metadata: Dict[Any, Any]) -> None:
         """
-        Load metadata
+        Load metadata into this classes metadata dictionary.
 
         Args:
-            metadata (dict): metadata to load
+            metadata: Metadata to load.
         """
         deep_update(self.metadata, metadata)
 
-    def snapshot(self, update=False):
+    def snapshot(self, update: Optional[bool] = False) -> Dict[Any, Any]:
         """
         Decorate a snapshot dictionary with metadata.
         DO NOT override this method if you want metadata in the snapshot
-        instead, override snapshot_base.
+        instead, override :meth:`snapshot_base`.
 
         Args:
-            update (bool): Passed to snapshot_base
+            update: Passed to snapshot_base.
 
         Returns:
-            dict: base snapshot
+            Base snapshot.
         """
 
         snap = self.snapshot_base(update=update)
@@ -55,10 +58,12 @@ class Metadatable:
 
         return snap
 
-    def snapshot_base(self, update: bool=False,
-                      params_to_skip_update: Sequence[str]=None):
+    def snapshot_base(
+            self, update: Optional[bool] = False,
+            params_to_skip_update: Optional[Sequence[str]] = None
+    ) -> Dict[Any, Any]:
         """
-        override this with the primary information for a subclass
+        Override this with the primary information for a subclass.
         """
         return {}
 
@@ -66,9 +71,9 @@ class Metadatable:
 class ParameterDiff(NamedTuple):
     # Cannot be generic in Python < 3.7:
     # https://stackoverflow.com/questions/50530959/generic-namedtuple-in-python-3-6
-    left_only : ParameterDict[Any]
-    right_only : ParameterDict[Any]
-    changed : ParameterDict[Tuple[Any, Any]]
+    left_only: ParameterDict[Any]
+    right_only: ParameterDict[Any]
+    changed: ParameterDict[Tuple[Any, Any]]
 
 ## FUNCTIONS ##
 
@@ -78,14 +83,17 @@ def extract_param_values(snapshot: Snapshot) -> Dict[ParameterKey, Any]:
     instrument and parameter names onto parameter values.
     """
     parameters = {}
-    for param_name, param in snapshot['station']['parameters'].items():
+    snapshot = snapshot.get('station', snapshot)
+    for param_name, param in snapshot['parameters'].items():
         parameters[param_name] = param['value']
-    for instrument_name, instrument in snapshot['station']['instruments'].items():
-        for param_name, param in instrument['parameters'].items():
-            if 'value' in param:
-                parameters[instrument_name, param_name] = param['value']
+    if 'instruments' in snapshot:
+        for instrument_name, instrument in snapshot['instruments'].items():
+            for param_name, param in instrument['parameters'].items():
+                if 'value' in param:
+                    parameters[instrument_name, param_name] = param['value']
 
     return parameters
+
 
 
 def diff_param_values(left_snapshot: Snapshot,

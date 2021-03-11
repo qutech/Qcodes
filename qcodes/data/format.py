@@ -96,7 +96,7 @@ class Formatter:
 
         data_files = io_manager.list(location)
         if not data_files:
-            raise IOError('no data found at ' + location)
+            raise OSError('no data found at ' + location)
 
         # in case the DataArrays exist but haven't been initialized
         for array in data_set.arrays.values():
@@ -115,7 +115,7 @@ class Formatter:
                     log.warning(format_exc())
 
     def write_metadata(self, data_set: 'DataSet',
-                       io_manager, location, read_first=True):
+                       io_manager, location, read_first=True, **kwargs):
         """
         Write the metadata for this DataSet to storage.
 
@@ -125,7 +125,7 @@ class Formatter:
             data_set: the data we are writing.
             io_manager (io_manager): base physical location to write to.
             location (str): the file location within the io_manager.
-            read_first (bool, optional): whether to first look for previously
+            read_first (Optional[bool]): whether to first look for previously
                 saved metadata that may contain more information than the local
                 copy.
         """
@@ -153,7 +153,7 @@ class Formatter:
         Args:
             data_set: the data we are reading into.
 
-            f (file-like): a file-like object to read from, as provided by
+            f: a file-like object to read from, as provided by
                 ``io_manager.open``.
 
             ids_read (set): ``array_ids`` that we have already read.
@@ -302,8 +302,8 @@ class Formatter:
               the setpoint array ids.
         """
 
-        set_array_sets = tuple(set(array.set_arrays
-                                   for array in arrays.values()))
+        set_array_sets = tuple({array.set_arrays
+                                   for array in arrays.values()})
         all_set_arrays = set()
         for set_array_set in set_array_sets:
             all_set_arrays.update(set_array_set)

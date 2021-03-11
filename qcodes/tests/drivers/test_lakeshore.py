@@ -1,5 +1,5 @@
 import pytest
-from typing import Dict, Callable
+from typing import Dict, Callable, Any
 import logging
 from functools import wraps
 from contextlib import suppress
@@ -25,14 +25,14 @@ class MockVisaInstrument:
         # ignore this line in mypy: Mypy does not support mixins yet
         # and seen by itself with this class definition it does not make sense
         # to call __init__ on the super()
-        super().__init__(*args, **kwargs)  # type: ignore
+        super().__init__(*args, **kwargs)  # type: ignore[call-arg]
         self.visa_log = get_instrument_logger(self, VISA_LOGGER)
 
         # This base class mixin holds two dictionaries associated with the
         # pyvisa_instrument.write()
-        self.cmds: Dict[str, Callable] = {}
+        self.cmds: Dict[str, Callable[..., Any]] = {}
         # and pyvisa_instrument.query() functions
-        self.queries: Dict[str, Callable] = {}
+        self.queries: Dict[str, Callable[..., Any]] = {}
         # the keys are the issued VISA commands like '*IDN?' or '*OPC'
         # the values are the corresponding methods to be called on the mock
         # instrument.
@@ -352,9 +352,13 @@ def test_select_range_limits(lakeshore_372):
     h = lakeshore_372.sample_heater
     ranges = list(range(1, 9))
     h.range_limits(ranges)
+
     for i in ranges:
-        h.set_range_from_temperature(i-0.5)
+        h.set_range_from_temperature(i - 0.5)
         assert h.output_range() == h.INVERSE_RANGES[i]
+
+    h.set_range_from_temperature(i + 0.5)
+    assert h.output_range() == h.INVERSE_RANGES[len(ranges)]
 
 
 def test_set_and_wait_unit_setpoint_reached(lakeshore_372):

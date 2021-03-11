@@ -9,7 +9,6 @@ from qcodes.dataset.measurements import Measurement
 from qcodes.station import Station
 
 # pylint: disable=unused-import
-from qcodes.tests.dataset.temporary_databases import experiment, empty_temp_db
 from qcodes.tests.test_station import set_default_station_to_none
 
 
@@ -85,6 +84,9 @@ def test_snapshot_creation_for_types_not_supported_by_builtin_json(experiment):
     station = Station(p1, p2, p3, p4)
 
     measurement = Measurement(experiment, station)
+
+    # we need at least 1 parameter to be able to run the measurement
+    measurement.register_custom_parameter('dummy')
 
     with measurement.run() as data_saver:
         # we do this in order to create a snapshot of the station and add it

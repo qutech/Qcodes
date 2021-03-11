@@ -1,4 +1,4 @@
-from typing import Dict, ClassVar, List
+from typing import Dict, ClassVar, List, Any, Sequence, Optional
 import time
 from bisect import bisect
 
@@ -29,8 +29,14 @@ class BaseOutput(InstrumentChannel):
     MODES: ClassVar[Dict[str, int]] = {}
     RANGES: ClassVar[Dict[str, int]] = {}
 
-    def __init__(self, parent, output_name, output_index, has_pid: bool=True) \
-            -> None:
+    _input_channel_parameter_kwargs: ClassVar[Dict[str, Any]] = {}
+
+    def __init__(
+            self,
+            parent: "LakeshoreBase",
+            output_name: str,
+            output_index: int,
+            has_pid: bool = True):
         super().__init__(parent, output_name)
 
         self.INVERSE_RANGES: Dict[int, str] = {
@@ -49,8 +55,8 @@ class BaseOutput(InstrumentChannel):
                            docstring='Specifies which measurement input to '
                                      'control from (note that only '
                                      'measurement inputs are available)',
-                           get_parser=int,
-                           parameter_class=GroupParameter)
+                           parameter_class=GroupParameter,
+                           **self._input_channel_parameter_kwargs)
         self.add_parameter('powerup_enable',
                            label='Power-up enable on/off',
                            docstring='Specifies whether the output remains on '
@@ -103,6 +109,18 @@ class BaseOutput(InstrumentChannel):
                            val_mapping=self.RANGES,
                            set_cmd=f'RANGE {output_index}, {{}}',
                            get_cmd=f'RANGE? {output_index}')
+
+        self.add_parameter('output',
+                           label='Output',
+                           unit='% of heater range',
+                           docstring='Specifies heater output in percent of '
+                                     'the current heater output range.\n'
+                                     'Note that when the heater is off, '
+                                     'this parameter will return the value '
+                                     'of 0.005.',
+                           get_parser=float,
+                           get_cmd=f'HTR? {output_index}',
+                           set_cmd=False)
 
         self.add_parameter('setpoint',
                            label='Setpoint value (in sensor units)',
@@ -174,15 +192,15 @@ class BaseOutput(InstrumentChannel):
                                      'cannot be reached within the current '
                                      'range.',
                            vals=vals.Numbers(0, 400),
-                           get_parser=float,
-                           set_cmd=self._set_blocking_t)
+                           set_cmd=self._set_blocking_t,
+                           snapshot_exclude=True)
 
-    def _set_blocking_t(self, temperature):
+    def _set_blocking_t(self, temperature: float) -> None:
         self.set_range_from_temperature(temperature)
         self.setpoint(temperature)
         self.wait_until_set_point_reached()
 
-    def set_range_from_temperature(self, temperature: float):
+    def set_range_from_temperature(self, temperature: float) -> str:
         """
         Sets the output range of this given heater from a given temperature.
 
@@ -205,7 +223,12 @@ class BaseOutput(InstrumentChannel):
                                'before automatically setting the range '
                                '(e.g. inst.range_limits([0.021, 0.1, 0.2, '
                                '1.1, 2, 4, 8]))')
-        i = bisect(self.range_limits.get_latest(), temperature)
+        range_limits = self.range_limits.get_latest()
+        i = bisect(range_limits, temperature)
+        # if temperature is larger than the highest range, then bisect returns
+        # an index that is +1 from the needed index, hence we need to take
+        # care of this corner case here:
+        i = min(i, len(range_limits) - 1)
         # there is a `+1` because `self.RANGES` includes `'off'` as the first
         # value.
         orange = self.INVERSE_RANGES[i+1] # this is `output range` not the fruit
@@ -214,7 +237,7 @@ class BaseOutput(InstrumentChannel):
         self.output_range(orange)
         return self.output_range()
 
-    def set_setpoint_and_range(self, temperature: float):
+    def set_setpoint_and_range(self, temperature: float) -> None:
         """
         Sets the range from the given temperature, and then sets the setpoint
         to this given temperature.
@@ -223,16 +246,17 @@ class BaseOutput(InstrumentChannel):
         kelvin.
 
         Args:
-            temperature
-                temperature in K
+            temperature: temperature in K
         """
         self.set_range_from_temperature(temperature)
         self.setpoint(temperature)
 
-    def wait_until_set_point_reached(self,
-                                     wait_cycle_time: float=None,
-                                     wait_tolerance: float=None,
-                                     wait_equilibration_time: float=None):
+    def wait_until_set_point_reached(
+            self,
+            wait_cycle_time: Optional[float] = None,
+            wait_tolerance: Optional[float] = None,
+            wait_equilibration_time: Optional[float] = None
+    ) -> None:
         """
         This function runs a loop that monitors the value of the heater's
         input channel until the read values is close to the setpoint value
@@ -243,22 +267,20 @@ class BaseOutput(InstrumentChannel):
         reached within the current range.
 
         Args:
-            wait_cycle_time
-                this time is being waited between the readings (same as
-                `wait_cycle_time` parameter); if None, then the value of the
-                corresponding `wait_cycle_time` parameter is used
-            wait_tolerance
-                this value is used to determine if the reading value is
-                close enough to the setpoint value according to the
+            wait_cycle_time: this time is being waited between the readings
+                (same as `wait_cycle_time` parameter); if None, then the value
+                of the corresponding `wait_cycle_time` parameter is used
+            wait_tolerance: this value is used to determine if the reading
+                value is close enough to the setpoint value according to the
                 following formula:
                 `abs(t_reading - t_setpoint)/t_reading < wait_tolerance`
                 (same as `wait_tolerance` parameter); if None, then the
                 value of the corresponding `wait_tolerance` parameter is used
-            wait_equilibration_time:
-                within this time, the reading value has to stay within the
-                defined tolerance in order for this function to return (same as
-                `wait_equilibration_time` parameter); if None, then the value
-                of the corresponding `wait_equilibration_time` parameter is used
+            wait_equilibration_time: within this time, the reading value has to
+                stay within the defined tolerance in order for this function to
+                return (same as `wait_equilibration_time` parameter);
+                if None, then the value of the corresponding
+                `wait_equilibration_time` parameter is used
         """
         wait_cycle_time = wait_cycle_time or self.wait_cycle_time.get_latest()
         tolerance = wait_tolerance or self.wait_tolerance.get_latest()
@@ -266,15 +288,22 @@ class BaseOutput(InstrumentChannel):
                                    self.wait_equilibration_time.get_latest())
 
         active_channel_id = self.input_channel()
-        active_channel_number_in_list = active_channel_id - 1
-        active_channel = \
-            self.root_instrument.channels[active_channel_number_in_list]
+        active_channel_name_on_instrument = (
+            self.root_instrument
+                .input_channel_parameter_values_to_channel_name_on_instrument[
+                active_channel_id
+            ]
+        )
+        active_channel = getattr(
+            self.root_instrument,
+            active_channel_name_on_instrument
+        )
 
         if active_channel.units() != 'kelvin':
             raise ValueError(f"Waiting until the setpoint is reached requires "
                              f"channel's {active_channel._channel!r} units to "
                              f"be set to 'kelvin'.")
-        
+
         t_setpoint = self.setpoint()
 
         time_now = time.perf_counter()
@@ -311,7 +340,11 @@ class BaseSensorChannel(InstrumentChannel):
     # the status to a status bit weighting (e.g. {4: 'VMIX OVL'})
     SENSOR_STATUSES: ClassVar[Dict[int, str]] = {}
 
-    def __init__(self, parent, name, channel):
+    def __init__(
+            self,
+            parent: "LakeshoreBase",
+            name: str,
+            channel: str):
         super().__init__(parent, name)
 
         self._channel = channel  # Channel on the temperature controller
@@ -319,7 +352,7 @@ class BaseSensorChannel(InstrumentChannel):
         # Add the various channel parameters
 
         self.add_parameter('temperature',
-                           get_cmd='KRDG? {}'.format(self._channel),
+                           get_cmd=f'KRDG? {self._channel}',
                            get_parser=float,
                            label='Temperature',
                            unit='K')
@@ -354,7 +387,7 @@ class BaseSensorChannel(InstrumentChannel):
                            vals=vals.Strings(15),
                            label='Sensor name')
 
-    def _decode_sensor_status(self, sum_of_codes: str):
+    def _decode_sensor_status(self, sum_of_codes: str) -> str:
         """
         Parses the sum of status code according to the `SENSOR_STATUSES` using
         an algorithm defined in `_get_sum_terms` method.
@@ -370,7 +403,10 @@ class BaseSensorChannel(InstrumentChannel):
         return ", ".join([self.SENSOR_STATUSES[k] for k in codes])
 
     @staticmethod
-    def _get_sum_terms(available_terms: List[int], number: int):
+    def _get_sum_terms(
+            available_terms: Sequence[int],
+            number: int
+    ) -> List[int]:
         """
         Returns a list of terms which make the given number when summed up
 
@@ -444,24 +480,31 @@ class LakeshoreBase(VisaInstrument):
     # will contain {'B': '2'} entry.
     channel_name_command: Dict[str, str] = {}
 
+    input_channel_parameter_values_to_channel_name_on_instrument: Dict[Any, str]
+
     def __init__(self,
                  name: str,
                  address: str,
-                 terminator: str ='\r\n',
-                 **kwargs
+                 terminator: str = '\r\n',
+                 **kwargs: Any
                  ) -> None:
         super().__init__(name, address, terminator=terminator, **kwargs)
 
         # Allow access to channels either by referring to the channel name
         # or through a channel list, i.e. instr.A.temperature() and
         # instr.channels[0].temperature() refer to the same parameter.
-        self.channels = ChannelList(self, "TempSensors",
-                                    self.CHANNEL_CLASS, snapshotable=False)
+        # Note that `snapshotable` is set to false in order to avoid duplicate
+        # snapshotting which otherwise will happen because each channel is also
+        # added as a submodule to the instrument.
+        channels = ChannelList(self,
+                               "TempSensors",
+                               self.CHANNEL_CLASS,
+                               snapshotable=False)
         for name, command in self.channel_name_command.items():
             channel = self.CHANNEL_CLASS(self, name, command)
-            self.channels.append(channel)
+            channels.append(channel)
             self.add_submodule(name, channel)
-        self.channels.lock()
-        self.add_submodule("channels", self.channels)
+        channels.lock()
+        self.add_submodule("channels", channels)
 
         self.connect_message()

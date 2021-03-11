@@ -1,9 +1,12 @@
+from typing import Any
+
 from qcodes import VisaInstrument, validators as vals
+from qcodes.utils.helpers import create_on_off_val_mapping
 
 
 class RohdeSchwarz_SGS100A(VisaInstrument):
     """
-    This is the qcodes driver for the Rohde & Schwarz SGS100A signal generator
+    This is the QCoDeS driver for the Rohde & Schwarz SGS100A signal generator.
 
     Status: beta-version.
 
@@ -26,7 +29,7 @@ class RohdeSchwarz_SGS100A(VisaInstrument):
     only the ones most commonly used.
     """
 
-    def __init__(self, name, address, **kwargs):
+    def __init__(self, name: str, address: str, **kwargs: Any) -> None:
         super().__init__(name, address, terminator='\n', **kwargs)
 
         self.add_parameter(name='frequency',
@@ -54,20 +57,20 @@ class RohdeSchwarz_SGS100A(VisaInstrument):
                            label='RF Output',
                            get_cmd=':OUTP:STAT?',
                            set_cmd=':OUTP:STAT {}',
-                           get_parser=self.get_parser_on_off,
-                           set_parser=self.set_parser_on_off)
+                           val_mapping=create_on_off_val_mapping(on_val='1',
+                                                                 off_val='0'))
         self.add_parameter('IQ_state',
                            label='IQ Modulation',
                            get_cmd=':IQ:STAT?',
                            set_cmd=':IQ:STAT {}',
-                           get_parser=self.get_parser_on_off,
-                           set_parser=self.set_parser_on_off)
+                           val_mapping=create_on_off_val_mapping(on_val='1',
+                                                                 off_val='0'))
         self.add_parameter('pulsemod_state',
                            label='Pulse Modulation',
                            get_cmd=':SOUR:PULM:STAT?',
                            set_cmd=':SOUR:PULM:STAT {}',
-                           get_parser=self.get_parser_on_off,
-                           set_parser=self.set_parser_on_off)
+                           val_mapping=create_on_off_val_mapping(on_val='1',
+                                                                 off_val='0'))
         self.add_parameter('pulsemod_source',
                            label='Pulse Modulation Source',
                            get_cmd='SOUR:PULM:SOUR?',
@@ -89,7 +92,8 @@ class RohdeSchwarz_SGS100A(VisaInstrument):
                            label='REF/LO Output',
                            get_cmd='CONN:REFL:OUTP?',
                            set_cmd='CONN:REFL:OUTP {}',
-                           vals=vals.Enum('REF', 'LO', 'OFF', 'ref', 'lo', 'off', 'Off'))
+                           vals=vals.Enum('REF', 'LO', 'OFF', 'ref', 'lo',
+                                          'off', 'Off'))
         # Frequency mw_source outputs when used as a reference
         self.add_parameter('ref_osc_output_freq',
                            label='Reference Oscillator Output Frequency',
@@ -108,8 +112,8 @@ class RohdeSchwarz_SGS100A(VisaInstrument):
                            label='IQ Impairments',
                            get_cmd=':SOUR:IQ:IMP:STAT?',
                            set_cmd=':SOUR:IQ:IMP:STAT {}',
-                           get_parser=self.get_parser_on_off,
-                           set_parser=self.set_parser_on_off)
+                           val_mapping=create_on_off_val_mapping(on_val='1',
+                                                                 off_val='0'))
         self.add_parameter('I_offset',
                            label='I Offset',
                            get_cmd='SOUR:IQ:IMP:LEAK:I?',
@@ -140,36 +144,8 @@ class RohdeSchwarz_SGS100A(VisaInstrument):
 
         self.connect_message()
 
-    def get_parser_on_off(self,value):
-        if value == '0':
-            ret = 'Off'
-        elif value == '1':
-            ret = 'On'
-        return ret
+    def on(self) -> None:
+        self.status('on')
 
-    def set_parser_on_off(self,value):
-        if isinstance(value, bool):
-            if value:
-                ret = '1'
-            else:
-                ret = '0'
-        elif isinstance(value, str):
-            if value.upper() in ['0', 'OFF']:
-                ret = '0'
-            if value.upper() in ['1', 'ON']:
-                ret = '1'
-        elif value in [1, 0]:
-            if value == 1:
-                ret = '1'
-            elif value == 0:
-                ret = '0'
-        else:
-            raise ValueError('Unable to set parameter to {} '\
-                                'expected "ON"/1/True or "OFF"/0/False.'.format(value))
-        return ret
-
-    def on(self):
-        self.set('status', 'on')
-
-    def off(self):
-        self.set('status', 'off')
+    def off(self) -> None:
+        self.status('off')

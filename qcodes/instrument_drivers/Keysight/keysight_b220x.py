@@ -1,3 +1,5 @@
+from typing import Any, TypeVar, Sequence, Set, Tuple, Callable
+
 import re
 import warnings
 from functools import wraps
@@ -5,8 +7,10 @@ from functools import wraps
 from qcodes import VisaInstrument
 from qcodes.utils.validators import MultiType, Ints, Enum, Lists
 
+T = TypeVar('T')
 
-def post_execution_status_poll(func):
+
+def post_execution_status_poll(func: Callable[..., T]) -> Callable[..., T]:
     """
     Generates a decorator that clears the instrument's status registers
     before executing the actual call and reads the status register after the
@@ -16,7 +20,7 @@ def post_execution_status_poll(func):
     """
 
     @wraps(func)
-    def wrapper(self, *args, **kwargs):
+    def wrapper(self: "KeysightB220X", *args: Any, **kwargs: Any) -> T:
         self.clear_status()
         retval = func(self, *args, **kwargs)
 
@@ -46,7 +50,7 @@ class KeysightB220X(VisaInstrument):
     _available_input_ports = Ints(1, 14)
     _available_output_ports = Ints(1, 48)
 
-    def __init__(self, name, address, **kwargs):
+    def __init__(self, name: str, address: str, **kwargs: Any):
         super().__init__(name, address, terminator='\n', **kwargs)
 
         self._card = 0
@@ -177,8 +181,10 @@ class KeysightB220X(VisaInstrument):
                            docstring="Param: True for ON, False for OFF"
                            )
 
+        self.connect_message()
+
     @post_execution_status_poll
-    def connect(self, input_ch, output_ch):
+    def connect(self, input_ch: int, output_ch: int) -> None:
         """Connect given input/output pair.
 
         :param input_ch: Input channel number 1-14
@@ -190,7 +196,17 @@ class KeysightB220X(VisaInstrument):
         self.write(f":CLOS (@{self._card:01d}{input_ch:02d}{output_ch:02d})")
 
     @post_execution_status_poll
-    def disconnect(self, input_ch, output_ch):
+    def connect_paths(self, paths: Sequence[Tuple[int, int]]) -> None:
+        channel_list_str = self.to_channel_list(paths)
+        self.write(f":CLOS {channel_list_str}")
+
+    @post_execution_status_poll
+    def disconnect_paths(self, paths: Sequence[Tuple[int, int]]) -> None:
+        channel_list_str = self.to_channel_list(paths)
+        self.write(f":OPEN {channel_list_str}")
+
+    @post_execution_status_poll
+    def disconnect(self, input_ch: int, output_ch: int) -> None:
         """Disconnect given Input/Output pair.
 
         :param input_ch: Input channel number 1-14
@@ -202,7 +218,7 @@ class KeysightB220X(VisaInstrument):
         self.write(f":OPEN (@{self._card:01d}{input_ch:02d}{output_ch:02d})")
 
     @post_execution_status_poll
-    def disconnect_all(self):
+    def disconnect_all(self) -> None:
         """
         opens all connections.
 
@@ -212,7 +228,7 @@ class KeysightB220X(VisaInstrument):
         self.write(f':OPEN:CARD {self._card}')
 
     @post_execution_status_poll
-    def bias_disable_all_outputs(self):
+    def bias_disable_all_outputs(self) -> None:
         """
         Removes all outputs from list of ports that will be connected to GND
         input if port is unused and bias mode is enabled.
@@ -220,7 +236,7 @@ class KeysightB220X(VisaInstrument):
         self.write(f':BIAS:CHAN:DIS:CARD {self._card}')
 
     @post_execution_status_poll
-    def bias_enable_all_outputs(self):
+    def bias_enable_all_outputs(self) -> None:
         """
         Adds all outputs to list of ports that will be connected to bias input
         if port is unused and bias mode is enabled.
@@ -228,7 +244,7 @@ class KeysightB220X(VisaInstrument):
         self.write(f':BIAS:CHAN:ENAB:CARD {self._card}')
 
     @post_execution_status_poll
-    def bias_enable_output(self, output):
+    def bias_enable_output(self, output: int) -> None:
         """
         Adds `output` to list of ports that will be connected to bias input
         if port is unused and bias mode is enabled.
@@ -241,7 +257,7 @@ class KeysightB220X(VisaInstrument):
                    )
 
     @post_execution_status_poll
-    def bias_disable_output(self, output):
+    def bias_disable_output(self, output: int) -> None:
         """
         Removes `output` from list of ports that will be connected to bias
         input if port is unused and bias mode is enabled.
@@ -253,7 +269,7 @@ class KeysightB220X(VisaInstrument):
         self.write(f':BIAS:CHAN:DIS (@{self._card}01{output:02d})')
 
     @post_execution_status_poll
-    def gnd_enable_output(self, output):
+    def gnd_enable_output(self, output: int) -> None:
         """
         Adds `output` to list of ports that will be connected to GND input
         if port is unused and bias mode is enabled.
@@ -265,7 +281,7 @@ class KeysightB220X(VisaInstrument):
         self.write(f':AGND:CHAN:ENAB (@{self._card}01{output:02d})')
 
     @post_execution_status_poll
-    def gnd_disable_output(self, output):
+    def gnd_disable_output(self, output: int) -> None:
         """
         Removes `output` from list of ports that will be connected to GND
         input if port is unused and bias mode is enabled.
@@ -277,7 +293,7 @@ class KeysightB220X(VisaInstrument):
         self.write(f':AGND:CHAN:DIS (@{self._card}01{output:02d})')
 
     @post_execution_status_poll
-    def gnd_enable_all_outputs(self):
+    def gnd_enable_all_outputs(self) -> None:
         """
         Adds all outputs to list of ports that will be connected to GND input
         if port is unused and bias mode is enabled.
@@ -285,7 +301,7 @@ class KeysightB220X(VisaInstrument):
         self.write(f':AGND:CHAN:ENAB:CARD {self._card}')
 
     @post_execution_status_poll
-    def gnd_disable_all_outputs(self):
+    def gnd_disable_all_outputs(self) -> None:
         """
         Removes all outputs from list of ports that will be connected to GND
         input if port is unused and bias mode is enabled.
@@ -293,7 +309,7 @@ class KeysightB220X(VisaInstrument):
         self.write(f':AGND:CHAN:DIS:CARD {self._card}')
 
     @post_execution_status_poll
-    def couple_port_autodetect(self):
+    def couple_port_autodetect(self) -> None:
         """Autodetect Kelvin connections on Input ports
 
         This will detect Kelvin connections on the input ports and enable
@@ -306,11 +322,11 @@ class KeysightB220X(VisaInstrument):
         """
         self.write(':COUP:PORT:DET')
 
-    def clear_status(self):
+    def clear_status(self) -> None:
         """Clears status register and error queue of the instrument."""
         self.write('*CLS')
 
-    def reset(self):
+    def reset(self) -> None:
         """Performs an instrument reset.
 
         Does not reset error queue!
@@ -318,7 +334,7 @@ class KeysightB220X(VisaInstrument):
         self.write('*RST')
 
     @post_execution_status_poll
-    def _set_connection_rule(self, mode):
+    def _set_connection_rule(self, mode: str) -> None:
         if 'free' == self.connection_rule() and 'SROU' == mode:
             warnings.warn('When going from *free* to *single* mode existing '
                           'connections are not released.')
@@ -326,11 +342,11 @@ class KeysightB220X(VisaInstrument):
         self.write(f':CONN:RULE {self._card},{mode}')
 
     @post_execution_status_poll
-    def _get_connection_rule(self):
+    def _get_connection_rule(self) -> str:
         return self.ask(f':CONN:RULE? {self._card}')
 
     @staticmethod
-    def parse_channel_list(channel_list: str):
+    def parse_channel_list(channel_list: str) -> Set[Tuple[int, int]]:
         """Generate a set of (input, output) tuples from a SCPI channel
         list string.
         """
@@ -338,3 +354,8 @@ class KeysightB220X(VisaInstrument):
                   r'?:[,\)\r\n]|$))'
         return {(int(match['input']), int(match['output'])) for match in
                 re.finditer(pattern, channel_list)}
+
+    def to_channel_list(self, paths: Sequence[Tuple[int, int]]) -> str:
+        l = [f'{self._card:01d}{i:02d}{o:02d}' for i, o in paths]
+        channel_list = f"(@{','.join(l)})"
+        return channel_list

@@ -1,5 +1,4 @@
-import os
-from typing import ClassVar, Dict
+from typing import ClassVar, Dict, Any
 
 from qcodes.instrument.group_parameter import GroupParameter, Group
 from .lakeshore_base import LakeshoreBase, BaseOutput, BaseSensorChannel
@@ -41,24 +40,20 @@ class Output_336_CurrentSource(BaseOutput):
         'medium': 2,
         'high': 3}
 
-    def __init__(self, parent, output_name, output_index):
-        super().__init__(parent, output_name, output_index, has_pid=True)
+    _input_channel_parameter_kwargs = {
+        'val_mapping': _channel_name_to_outmode_command_map}
 
-        # Redefine input_channel to use string names instead of numbers
-        self.add_parameter('input_channel',
-                           label='Input channel',
-                           docstring='Specifies which measurement input to '
-                                     'control from (note that only '
-                                     'measurement inputs are available)',
-                           val_mapping=_channel_name_to_outmode_command_map,
-                           parameter_class=GroupParameter)
+    def __init__(
+            self,
+            parent: "Model_336",
+            output_name: str,
+            output_index: int
+    ):
+        super().__init__(parent, output_name, output_index, has_pid=True)
 
         self.P.vals = vals.Numbers(0.1, 1000)
         self.I.vals = vals.Numbers(0.1, 1000)
         self.D.vals = vals.Numbers(0, 200)
-
-        self.range_limits.vals = vals.Sequence(
-            vals.Numbers(0, 400), length=2, require_sorted=True)
 
 
 class Output_336_VoltageSource(BaseOutput):
@@ -81,12 +76,13 @@ class Output_336_VoltageSource(BaseOutput):
         'medium': 2,
         'high': 3}
 
-    def __init__(self, parent, output_name, output_index):
+    def __init__(
+            self,
+            parent: "Model_336",
+            output_name: str,
+            output_index: int
+    ):
         super().__init__(parent, output_name, output_index, has_pid=False)
-
-        self.range_limits.vals = vals.Sequence(
-            vals.Numbers(0, 400), length=2, require_sorted=True)
-
 
 
 class Model_336_Channel(BaseSensorChannel):
@@ -97,7 +93,12 @@ class Model_336_Channel(BaseSensorChannel):
                        64: 'Sensor Units Zero',
                        128: 'Sensor Units Overrange'}
 
-    def __init__(self, parent, name, channel):
+    def __init__(
+            self,
+            parent: "Model_336",
+            name: str,
+            channel: str
+    ):
         super().__init__(parent, name, channel)
 
         # Parameters related to Input Type Parameter Command (INTYPE)
@@ -162,7 +163,10 @@ class Model_336(LakeshoreBase):
 
     CHANNEL_CLASS = Model_336_Channel
 
-    def __init__(self, name: str, address: str, **kwargs) -> None:
+    input_channel_parameter_values_to_channel_name_on_instrument = \
+        _channel_name_to_command_map
+
+    def __init__(self, name: str, address: str, **kwargs: Any) -> None:
         super().__init__(name, address, **kwargs)
 
         self.output_1 = Output_336_CurrentSource(self, 'output_1', 1)

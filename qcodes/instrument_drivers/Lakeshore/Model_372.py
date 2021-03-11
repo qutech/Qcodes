@@ -1,4 +1,4 @@
-from typing import Dict, ClassVar
+from typing import Dict, ClassVar, Any
 
 from qcodes.instrument_drivers.Lakeshore.lakeshore_base import (
     LakeshoreBase, BaseOutput, BaseSensorChannel)
@@ -35,12 +35,19 @@ class Output_372(BaseOutput):
         '31.6mA': 7,
         '100mA': 8}
 
-    def __init__(self, parent, output_name, output_index) -> None:
+    _input_channel_parameter_kwargs: ClassVar[Dict[str, Any]] = {
+        'get_parser': int,
+        'vals': vals.Numbers(1, _n_channels)}
+
+    def __init__(
+            self,
+            parent: "Model_372",
+            output_name: str,
+            output_index: int
+    ) -> None:
         super().__init__(parent, output_name, output_index, has_pid=True)
 
-        self.input_channel.vals = vals.Numbers(1, _n_channels)
-
-        # Add more parameters for OUTMODE command 
+        # Add more parameters for OUTMODE command
         # and redefine the corresponding group
         self.add_parameter('polarity',
                            label='Output polarity',
@@ -87,7 +94,12 @@ class Model_372_Channel(BaseSensorChannel):
                        64: 'T. OVER',
                        128: 'T. UNDER'}
 
-    def __init__(self, parent, name, channel):
+    def __init__(
+            self,
+            parent: "Model_372",
+            name: str,
+            channel: str
+    ):
         super().__init__(parent, name, channel)
 
         # Parameters related to Input Channel Parameter Command (INSET)
@@ -227,16 +239,20 @@ class Model_372(LakeshoreBase):
     """
     Lakeshore Model 372 Temperature Controller Driver
 
-    Note that interaction with the control input (referred to as 'A' in the 
+    Note that interaction with the control input (referred to as 'A' in the
     Computer Interface Operation section of the manual) is not implemented.
     """
-    channel_name_command: Dict[str, str] = {'ch{:02}'.format(i): str(i)
+    channel_name_command: Dict[str, str] = {f'ch{i:02}': str(i)
                                             for i in range(1, 1 + _n_channels)}
+    input_channel_parameter_values_to_channel_name_on_instrument = {
+        i: f'ch{i:02}' for i in range(1, 1 + _n_channels)
+    }
 
     CHANNEL_CLASS = Model_372_Channel
 
-    def __init__(self, name: str, address: str, **kwargs) -> None:
+    def __init__(self, name: str, address: str, **kwargs: Any) -> None:
         super().__init__(name, address, **kwargs)
-        self.sample_heater = Output_372(self, 'sample_heater', 0)
-        self.warmup_heater = Output_372(self, 'warmup_heater', 1)
-        self.analog_heater = Output_372(self, 'analog_heater', 2)
+
+        heaters = {'sample_heater': 0, 'warmup_heater': 1, 'analog_heater': 2}
+        for heater_name, heater_index in heaters.items():
+            self.add_submodule(heater_name, Output_372(self, heater_name, heater_index))

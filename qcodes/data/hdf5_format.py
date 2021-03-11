@@ -3,11 +3,14 @@ import logging
 import h5py
 import os
 import json
+from typing import TYPE_CHECKING
 
 from ..version import __version__ as _qcodes_version
 from .data_array import DataArray
 from .format import Formatter
 
+if TYPE_CHECKING:
+    from .data_set import DataSet
 
 class HDF5Format(Formatter):
     """
@@ -19,12 +22,12 @@ class HDF5Format(Formatter):
 
     _format_tag = 'hdf5'
 
-    def close_file(self, data_set):
+    def close_file(self, data_set: 'DataSet'):
         """
         Closes the hdf5 file open in the dataset.
 
         Args:
-            data_set (DataSet): DataSet object
+            data_set: DataSet object
         """
         if hasattr(data_set, '_h5_base_group'):
             data_set._h5_base_group.close()
@@ -36,7 +39,7 @@ class HDF5Format(Formatter):
 
     def _create_file(self, filepath):
         """
-        creates a hdf5 file (data_object) at a location specifed by
+        creates a hdf5 file (data_object) at a location specified by
         filepath
         """
         folder, _filename = os.path.split(filepath)
@@ -52,21 +55,34 @@ class HDF5Format(Formatter):
                                                 io_manager=data_set.io)
         data_set._h5_base_group = h5py.File(filepath, 'r+')
 
-    def read(self, data_set, location=None):
+    def read(self, data_set: 'DataSet', location=None):
         """
         Reads an hdf5 file specified by location into a data_set object.
         If no data_set is provided will create an empty data_set to read into.
 
 
         Args:
-            data_set (DataSet): the data to read into. Should already have
+            data_set: the data to read into. Should already have
                 attributes ``io`` (an io manager), ``location`` (string),
                 and ``arrays`` (dict of ``{array_id: array}``, can be empty
                 or can already have some or all of the arrays present, they
                 expect to be overwritten)
-            location (None or str): Location to write the data. If no location 
+            location (None or str): Location to write the data. If no location
                 is provided will use the location specified in the dataset.
         """
+        def decode_bytes_if_needed(s):
+            """
+            h5py 2 stores strings encoded as bytestrings
+            h5py 3 fixes this and stores them as regular utf8 strings
+
+            This is a simple wrapper to always convert to regular strings
+            """
+            try:
+                s = s.decode()
+            except AttributeError:
+                pass
+            return s
+
         self._open_file(data_set, location)
 
         if '__format_tag' in data_set._h5_base_group.attrs:
@@ -82,19 +98,20 @@ class HDF5Format(Formatter):
             dat_arr = data_set._h5_base_group['Data Arrays'][array_id]
 
             # write ensures these attributes always exist
-            name = dat_arr.attrs['name'].decode()
-            label = dat_arr.attrs['label'].decode()
+            name = decode_bytes_if_needed(dat_arr.attrs['name'])
+            label = decode_bytes_if_needed(dat_arr.attrs['label'])
 
             # get unit from units if no unit field, for backward compatibility
             if 'unit' in dat_arr.attrs:
-                unit = dat_arr.attrs['unit'].decode()
+                unit = decode_bytes_if_needed(dat_arr.attrs['unit'])
             else:
-                unit = dat_arr.attrs['units'].decode()
+                unit = decode_bytes_if_needed(dat_arr.attrs['units'])
 
-            is_setpoint = str_to_bool(dat_arr.attrs['is_setpoint'].decode())
+            is_setpoint_str = decode_bytes_if_needed(dat_arr.attrs['is_setpoint'])
+            is_setpoint = str_to_bool(is_setpoint_str)
             # if not is_setpoint:
             set_arrays = dat_arr.attrs['set_arrays']
-            set_arrays = [s.decode() for s in set_arrays]
+            set_arrays = [decode_bytes_if_needed(s) for s in set_arrays]
             # else:
             #     set_arrays = ()
             vals = dat_arr[:, 0]
@@ -132,7 +149,7 @@ class HDF5Format(Formatter):
     def _filepath_from_location(self, location, io_manager):
         filename = os.path.split(location)[-1]
         filepath = io_manager.to_path(location +
-                                      '/{}.hdf5'.format(filename))
+                                      f'/{filename}.hdf5')
         return filepath
 
     def _create_data_object(self, data_set, io_manager=None,
@@ -235,13 +252,13 @@ class HDF5Format(Formatter):
             data_set._h5_base_group.file.flush()
 
     def _create_dataarray_dset(self, array, group):
-        '''
+        """
         input arguments
         array:  Dataset data array
         group:  group in the hdf5 file where the dset will be created
 
         creates a hdf5 datasaset that represents the data array.
-        '''
+        """
         # Check for empty meta attributes, use array_id if name and/or label
         # is not specified
         if array.label is not None:
@@ -272,7 +289,7 @@ class HDF5Format(Formatter):
 
         return dset
 
-    def write_metadata(self, data_set, io_manager=None, location=None, read_first=True):
+    def write_metadata(self, data_set, io_manager=None, location=None, read_first=True, **kwargs):
         """
         Writes metadata of dataset to file using write_dict_to_hdf5 method
 
@@ -290,6 +307,10 @@ class HDF5Format(Formatter):
         metadata_group = data_set._h5_base_group.create_group('metadata')
         self.write_dict_to_hdf5(data_set.metadata, metadata_group)
 
+        # flush ensures buffers are written to disk
+        # (useful for ensuring openable by other files)
+        data_set._h5_base_group.file.flush()
+
     def _read_list_group(self, entry_point, list_type):
         d = {}
         self.read_dict_from_hdf5(data_dict=d,
@@ -300,7 +321,7 @@ class HDF5Format(Formatter):
         elif list_type == 'list':
             item = [d[k] for k in sorted(d.keys())]
         else:
-            raise Exception('type %s not supported' % type(item))
+            raise Exception('type %s not supported' % list_type)
 
         return item
 
@@ -310,7 +331,7 @@ class HDF5Format(Formatter):
         group_attrs['list_type'] = list_type
 
         if list_type == 'tuple' or list_type == 'list':
-            item = dict((str(v[0]), v[1]) for v in enumerate(item))
+            item = {str(v[0]): v[1] for v in enumerate(item)}
         else:
             raise Exception('type %s not supported' % type(item))
 
@@ -320,7 +341,7 @@ class HDF5Format(Formatter):
             entry_point=entry_point[key][list_type])
 
     def write_dict_to_hdf5(self, data_dict, entry_point):
-        """ Write a (nested) dictionary to HDF5 
+        """ Write a (nested) dictionary to HDF5
 
         Args:
             data_dict (dict): Dicionary to be written
@@ -395,13 +416,13 @@ class HDF5Format(Formatter):
                     'storing as string'.format(type(item), key, item))
                 entry_point.attrs[key] = str(item)
 
-    def read_metadata(self, data_set):
+    def read_metadata(self, data_set: 'DataSet'):
         """
         Reads in the metadata, this is also called at the end of a read
         statement so there should be no need to call this explicitly.
 
         Args:
-            data_set (DataSet): Dataset object to read the metadata into
+            data_set: Dataset object to read the metadata into
         """
         # checks if there is an open file in the dataset as load_data does
         # reading of metadata before reading the complete dataset
@@ -413,7 +434,7 @@ class HDF5Format(Formatter):
         return data_set
 
     def read_dict_from_hdf5(self, data_dict, h5_group):
-        """ Read a dictionary from HDF5 
+        """ Read a dictionary from HDF5
 
         Args:
             data_dict (dict): Dataset to read from
@@ -480,7 +501,7 @@ def str_to_bool(s):
     elif s == 'False':
         return False
     else:
-        raise ValueError("Cannot covert {} to a bool".format(s))
+        raise ValueError(f"Cannot covert {s} to a bool")
 
 
 from qcodes.utils.helpers import deep_update, NumpyJSONEncoder
@@ -491,23 +512,28 @@ class HDF5FormatMetadata(HDF5Format):
     _format_tag = 'hdf5-json'
     metadata_file = 'snapshot.json'
 
-    def write_metadata(self, data_set, io_manager=None, location=None, read_first=False):
+    def write_metadata(self, data_set: 'DataSet', io_manager=None, location=None, read_first=False, **kwargs):
         """
         Write all metadata in this DataSet to storage.
 
         Args:
-            data_set (DataSet): the data we're storing
+            data_set: the data we're storing
 
             io_manager (io_manager): the base location to write to
 
             location (str): the file location within io_manager
 
-            read_first (bool, optional): read previously saved metadata before
+            read_first (Optional[bool]): read previously saved metadata before
                 writing? The current metadata will still be the used if
                 there are changes, but if the saved metadata has information
                 not present in the current metadata, it will be retained.
                 Default True.
+            kwargs (dict): From the dicionary the key sort_keys is extracted (default value: False). If True, then the
+                        keys of the metadata will be stored sorted in the json file. Note: sorting is only possible if
+                        the keys of the metadata dictionary can be compared.
+
         """
+        sort_keys = kwargs.get('sort_keys', False)
 
         # this statement is here to make the linter happy
         if io_manager is None or location is None:
@@ -524,7 +550,7 @@ class HDF5FormatMetadata(HDF5Format):
 
         fn = io_manager.join(location, self.metadata_file)
         with io_manager.open(fn, 'w', encoding='utf8') as snap_file:
-            json.dump(data_set.metadata, snap_file, sort_keys=True,
+            json.dump(data_set.metadata, snap_file, sort_keys=sort_keys,
                       indent=4, ensure_ascii=False, cls=NumpyJSONEncoder)
 
     def read_metadata(self, data_set):
@@ -533,5 +559,5 @@ class HDF5FormatMetadata(HDF5Format):
         fn = io_manager.join(location, self.metadata_file)
         if io_manager.list(fn):
             with io_manager.open(fn, 'r') as snap_file:
-                metadata = json.load(snap_file, encoding='utf8')
+                metadata = json.load(snap_file)
             data_set.metadata.update(metadata)

@@ -14,6 +14,16 @@ Basic examples
     *
 
 
+Parameters
+---------------
+
+.. include:: Parameters/readme.txt
+
+.. toctree::
+    :glob:
+
+    Parameters/*
+
 DataSet
 -------
 
@@ -22,6 +32,7 @@ DataSet
 
     DataSet/*
     DataSet/Real_instruments/*
+    DataSet/Cache/*
 
 Plotting
 --------

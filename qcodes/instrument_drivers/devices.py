@@ -1,4 +1,4 @@
-from typing import Union, cast
+from typing import Union, Optional
 
 from qcodes import Parameter, Instrument
 
@@ -46,24 +46,23 @@ class VoltageDivider(Parameter):
     def __init__(self,
                  v1: Parameter,
                  division_value: Union[int, float],
-                 name: str=None,
-                 label: str=None,
-                 instrument: Union[None, Instrument]=None) -> None:
+                 name: Optional[str] = None,
+                 label: Optional[str] = None,
+                 instrument: Union[None, Instrument] = None) -> None:
         self.v1 = v1
         self.division_value = division_value
         if label:
             self.label = label
         else:
-            self.label = "{}_attenuated".format(self.v1.label)
+            self.label = f"{self.v1.label}_attenuated"
 
-        if name:
-            self.name = name
-        else:
-            self.name = "{}_attenuated".format(self.v1.name)
+        if not name:
+            name = f"{self.v1.name}_attenuated"
+
         if not instrument:
             instrument = getattr(self.v1, "_instrument", None)
         super().__init__(
-            name=self.name,
+            name=name,
             instrument=instrument,
             label=self.label,
             unit=self.v1.unit,
@@ -74,23 +73,20 @@ class VoltageDivider(Parameter):
 
     def set_raw(self, value: Union[int, float]) -> None:
         instrument_value = value * self.division_value
-
-        self._save_val(value)
         self.v1.set(instrument_value)
 
     def get_raw(self) -> Union[int, float]:
         """
         Returns:
-            number: value at which was set at the sample
+            value at which was set at the sample
         """
         value = self.v1.get() / self.division_value
-        self._save_val(value)
         return value
 
     def get_instrument_value(self) -> Union[int, float]:
         """
         Returns:
-            number: value at which the attached paraemter is (i.e. does
+            value at which the attached parameter is (i.e. does
             not account for the scaling)
         """
         return self.v1.get()

@@ -1,5 +1,5 @@
 # Test some subscription scenarios
-from typing import List, Tuple, Dict, Union
+from typing import List, Tuple, Dict, Union, Any
 from numbers import Number
 
 import pytest
@@ -7,31 +7,27 @@ from numpy import ndarray
 import logging
 
 import qcodes
-from qcodes.dataset.param_spec import ParamSpec
-# pylint: disable=unused-import
-from qcodes.dataset.sqlite_base import atomic_transaction
-from qcodes.tests.dataset.temporary_databases import (
-    empty_temp_db, experiment, dataset)
-# pylint: enable=unused-import
-from qcodes.tests.dataset.test_dataset_basic import make_shadow_dataset
+from qcodes.dataset.descriptions.param_spec import ParamSpecBase
+from qcodes.dataset.descriptions.dependencies import InterDependencies_
+from qcodes.dataset.sqlite.connection import atomic_transaction
 
-from qcodes.tests.test_config import default_config
+from qcodes.tests.common import default_config
 from qcodes.tests.common import retry_until_does_not_throw
 
 
 log = logging.getLogger(__name__)
 
-VALUE = Union[str, Number, List, ndarray, bool]
+VALUE = Union[str, Number, List[Any], ndarray, bool]
 
 
 class MockSubscriber():
     """
-    A basic subscriber factory that create a subscriber, that
+    A basic subscriber factory that creates a subscriber, that
     just puts results and length into state.
     *Important*
     This class is extremely dangerous! Within the callback,
     you cannot read or write to the database/dataset because it
-    is called from another thread as the connection of the
+    is called from another thread than the one holding the connection of the
     dataset!
     """
     def __init__(self, ds, lg):
@@ -39,7 +35,7 @@ class MockSubscriber():
         self.ds = ds
 
     def __call__(self, results: List[Tuple[VALUE]],
-                 length: int, state: Dict) -> None:
+                 length: int, state: Dict[Any, Any]) -> None:
         log.debug(f'got log {self.lg} and dataset {self.ds.completed}.')
         state[length] = results
 
@@ -65,13 +61,20 @@ def basic_subscriber():
     return subscriber
 
 
+@pytest.mark.flaky(reruns=5)
+@pytest.mark.serial
 def test_basic_subscription(dataset, basic_subscriber):
-    xparam = ParamSpec(name='x', paramtype='numeric', label='x parameter',
-                       unit='V')
-    yparam = ParamSpec(name='y', paramtype='numeric', label='y parameter',
-                       unit='Hz', depends_on=[xparam])
-    dataset.add_parameter(xparam)
-    dataset.add_parameter(yparam)
+    xparam = ParamSpecBase(name='x',
+                           paramtype='numeric',
+                           label='x parameter',
+                           unit='V')
+    yparam = ParamSpecBase(name='y',
+                           paramtype='numeric',
+                           label='y parameter',
+                           unit='Hz')
+    idps = InterDependencies_(dependencies={yparam: (xparam,)})
+    dataset.set_interdependencies(idps)
+    dataset.mark_started()
 
     sub_id = dataset.subscribe(basic_subscriber, min_wait=0, min_count=1,
                                state={})
@@ -83,11 +86,11 @@ def test_basic_subscription(dataset, basic_subscriber):
 
     for x in range(10):
         y = -x**2
-        dataset.add_result({'x': x, 'y': y})
+        dataset.add_results([{'x': x, 'y': y}])
         expected_state[x+1] = [(x, y)]
 
         @retry_until_does_not_throw(
-            exception_class_to_expect=AssertionError, delay=0, tries=10)
+            exception_class_to_expect=AssertionError, delay=0.5, tries=10)
         def assert_expected_state():
             assert dataset.subscribers[sub_id].state == expected_state
 
@@ -98,7 +101,7 @@ def test_basic_subscription(dataset, basic_subscriber):
     assert len(dataset.subscribers) == 0
     assert list(dataset.subscribers.keys()) == []
 
-    # Ensure the trigger for the subscriber have been removed from the database
+    # Ensure the trigger for the subscriber has been removed from the database
     get_triggers_sql = "SELECT * FROM sqlite_master WHERE TYPE = 'trigger';"
     triggers = atomic_transaction(
         dataset.conn, get_triggers_sql).fetchall()
@@ -140,12 +143,18 @@ def test_subscription_from_config(dataset, basic_subscriber):
 
         assert 'test_subscriber' in qcodes.config.subscription.subscribers
 
-        xparam = ParamSpec(name='x', paramtype='numeric', label='x parameter',
+        xparam = ParamSpecBase(name='x',
+                           paramtype='numeric',
+                           label='x parameter',
                            unit='V')
-        yparam = ParamSpec(name='y', paramtype='numeric', label='y parameter',
-                           unit='Hz', depends_on=[xparam])
-        dataset.add_parameter(xparam)
-        dataset.add_parameter(yparam)
+        yparam = ParamSpecBase(name='y',
+                              paramtype='numeric',
+                              label='y parameter',
+                              unit='Hz')
+        idps = InterDependencies_(dependencies={yparam: (xparam,)})
+        dataset.set_interdependencies(idps)
+
+        dataset.mark_started()
 
         sub_id = dataset.subscribe(basic_subscriber, min_wait=0, min_count=1,
                                    state={})
@@ -158,11 +167,11 @@ def test_subscription_from_config(dataset, basic_subscriber):
         # Here we are only testing 2 to reduce the CI time
         for x in range(2):
             y = -x**2
-            dataset.add_result({'x': x, 'y': y})
+            dataset.add_results([{'x': x, 'y': y}])
             expected_state[x+1] = [(x, y)]
 
             @retry_until_does_not_throw(
-                exception_class_to_expect=AssertionError, delay=0, tries=10)
+                exception_class_to_expect=AssertionError, tries=10)
             def assert_expected_state():
                 assert dataset.subscribers[sub_id].state == expected_state
                 assert dataset.subscribers[sub_id_c].state == expected_state
