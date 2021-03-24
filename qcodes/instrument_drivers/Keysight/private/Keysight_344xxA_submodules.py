@@ -208,56 +208,56 @@ class Sample(InstrumentChannel):
                                docstring=('Determines sampling time, '
                                           'immediate or using `sample.timer`'))
 
-        self.add_parameter('timer',
-                           label='Sample Timer',
-                           set_cmd='SAMPle:TIMer {}',
-                           get_cmd='SAMPle:TIMer?',
-                           unit='s',
-                           vals=vals.MultiType(vals.Numbers(0, 3600),
-                                               vals.Enum('MIN', 'MAX', 'DEF')),
-                           get_parser=float,
-                           docstring=textwrap.dedent("""\
-            The value is rounded by the instrument to the nearest step. For DC
-            measurements, the step size is 1 µs. For AC measurements,
-            it is AC bandwidth dependent.
+            self.add_parameter('timer',
+			                   label='Sample Timer',
+                               set_cmd='SAMPle:TIMer {}',
+                               get_cmd='SAMPle:TIMer?',
+                               unit='s',
+                               vals=vals.MultiType(vals.Numbers(0, 3600),
+                                          vals.Enum('MIN', 'MAX', 'DEF')),
+                               get_parser=float,
+                               docstring=textwrap.dedent("""\
+                The value is rounded by the instrument to the nearest step. For DC
+                measurements, the step size is 1 µs. For AC measurements,
+                it is AC bandwidth dependent.
 
-            Special values are: MIN - recommended minimum, MAX - maximum,
-            DEF - default. In order to obtain the actual value of the
-            parameter that gets set when setting it to one of these special
-            values, just call the get method of the parameter, or use
-            corresponding parameters in this driver,
-            like `sample.timer_minimum`.
+                Special values are: MIN - recommended minimum, MAX - maximum,
+                DEF - default. In order to obtain the actual value of the
+                parameter that gets set when setting it to one of these special
+                values, just call the get method of the parameter, or use
+                corresponding parameters in this driver,
+                like `sample.timer_minimum`.
 
-            Specifying a value that is between the absolute minimum (assumes
-            no range changes) and the recommended minimum value,
-            may generate a timing violation error when making measurements.
+                Specifying a value that is between the absolute minimum (assumes
+                no range changes) and the recommended minimum value,
+                may generate a timing violation error when making measurements.
 
-            Applying a value less than the absolute minimum will generate an
-            error."""))
+                Applying a value less than the absolute minimum will generate an
+                error."""))
 
-        self.add_parameter('timer_minimum',
-                           label='Minimal recommended sample time',
-                           get_cmd='SAMPle:TIMer? MIN',
-                           get_parser=float,
-                           unit='s',
-                           docstring=textwrap.dedent("""\
-            This value is measurement dependent. It depends on such things
-            as the integration time, autozero on or off, autorange on or
-            off, and the measurement range. Basically, the minimum is
-            automatically determined by the instrument so that the sample
-            interval is always greater than the sampling time.
+            self.add_parameter('timer_minimum',
+                               label='Minimal recommended sample time',
+                               get_cmd='SAMPle:TIMer? MIN',
+                               get_parser=float,
+                               unit='s',
+                               docstring=textwrap.dedent("""\
+                This value is measurement dependent. It depends on such things
+                as the integration time, autozero on or off, autorange on or
+                off, and the measurement range. Basically, the minimum is
+                automatically determined by the instrument so that the sample
+                interval is always greater than the sampling time.
 
-            Since the minimum value changes depending on configuration, a
-            command order dependency exists. You must completely configure
-            the measurement before setting the sample timer to minimum,
-            or you may generate an error. A complete configuration includes
-            such things as math statistics or scaling.
+                Since the minimum value changes depending on configuration, a
+                command order dependency exists. You must completely configure
+                the measurement before setting the sample timer to minimum,
+                or you may generate an error. A complete configuration includes
+                such things as math statistics or scaling.
 
-            When using autorange, the minimum value is the recommended value,
-            not the absolute minimum value. With autorange enabled, minimum
-            value is calculated assuming a single range change will occur
-            for every measurement (not multiple ranges, just one range up or
-            down per measurement)."""))
+                When using autorange, the minimum value is the recommended value,
+                not the absolute minimum value. With autorange enabled, minimum
+                value is calculated assuming a single range change will occur
+                for every measurement (not multiple ranges, just one range up or
+                down per measurement)."""))
 
 
 class Display(InstrumentChannel):
