@@ -3,10 +3,11 @@ import re
 import time
 import warnings
 from collections import namedtuple
-from distutils.version import LooseVersion
 from typing import Any
 
 import numpy as np
+from packaging import version
+
 from qcodes import VisaInstrument
 from qcodes import validators as vals
 from qcodes.instrument.channel import ChannelList, InstrumentChannel
@@ -21,21 +22,24 @@ class TraceNotReady(Exception):
 
 class ScopeArray(ArrayParameter):
     def __init__(
-            self,
-            name: str,
-            instrument: "RigolDS4000Channel",
-            channel: int,
-            raw: bool = False):
-        super().__init__(name=name,
-                         shape=(1400,),
-                         label='Voltage',
-                         unit='V',
-                         setpoint_names=('Time', ),
-                         setpoint_labels=('Time', ),
-                         setpoint_units=('s',),
-                         docstring='holds an array from scope')
+        self,
+        name: str,
+        instrument: "RigolDS4000Channel",
+        channel: int,
+        raw: bool = False,
+    ):
+        super().__init__(
+            name=name,
+            shape=(1400,),
+            label="Voltage",
+            unit="V",
+            setpoint_names=("Time",),
+            setpoint_labels=("Time",),
+            setpoint_units=("s",),
+            docstring="holds an array from scope",
+            instrument=instrument,
+        )
         self.channel = channel
-        self._instrument = instrument
         self.raw = raw
         self.max_read_step = 50
         self.trace_ready = False
@@ -287,14 +291,18 @@ class DS4000(VisaInstrument):
             channel = RigolDS4000Channel(self, f"ch{channel_number}", channel_number)
             channels.append(channel)
 
-        channels.lock()
-        self.add_submodule('channels', channels)
+        self.add_submodule("channels", channels.to_channel_tuple())
 
     def _check_firmware_version(self) -> None:
         #Require version 00.02.03
 
         idn = self.get_idn()
-        ver = LooseVersion(idn['firmware'])
-        if ver < LooseVersion('00.02.03'):
-            warnings.warn('Firmware version should be at least 00.02.03,'
-                          'data transfer may not work correctly')
+        verstr = idn["firmware"]
+        if verstr is None:
+            raise RuntimeError("Could not determine firmware version of DS4000.")
+        ver = version.parse(verstr)
+        if ver < version.parse("00.02.03"):
+            warnings.warn(
+                "Firmware version should be at least 00.02.03,"
+                "data transfer may not work correctly"
+            )

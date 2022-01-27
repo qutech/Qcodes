@@ -1,8 +1,8 @@
 from typing import Dict, Optional
 
 from qcodes import IPInstrument
+from qcodes.instrument.channel import ChannelList, InstrumentChannel
 from qcodes.utils import validators as vals
-from qcodes.instrument.channel import InstrumentChannel, ChannelList
 
 
 class MC_channel(InstrumentChannel):
@@ -27,7 +27,7 @@ class MC_channel(InstrumentChannel):
                            )
 
     def _set_switch(self, switch: int) -> None:
-        self.write('SET{}={}'.format(self.channel_letter, switch-1))
+        self.write(f"SET{self.channel_letter}={switch-1}")
 
     def _get_switch(self) -> int:
         val = int(self.ask('SWPORT?'))
@@ -61,9 +61,8 @@ class RC_SPDT(IPInstrument):
         for c in _chanlist:
             channel = MC_channel(self, f'channel_{c}', c)
             channels.append(channel)
-            self.add_submodule(f'channel_{c}', channel)
-        channels.lock()
-        self.add_submodule('channels', channels)
+            self.add_submodule(f"channel_{c}", channel)
+        self.add_submodule("channels", channels.to_channel_tuple())
 
         self.connect_message()
 

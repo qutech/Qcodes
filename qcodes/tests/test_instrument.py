@@ -1,17 +1,23 @@
 """
 Test suite for instument.base.*
 """
-import pytest
-import weakref
-import io
 import contextlib
+import io
 import re
+import weakref
+
+import pytest
 
 from qcodes.instrument.base import Instrument, InstrumentBase, find_or_create_instrument
-from qcodes.instrument.parameter import Parameter
 from qcodes.instrument.function import Function
+from qcodes.instrument.parameter import Parameter
 
-from .instrument_mocks import DummyInstrument, MockParabola, MockMetaParabola
+from .instrument_mocks import (
+    DummyFailingInstrument,
+    DummyInstrument,
+    MockMetaParabola,
+    MockParabola,
+)
 
 
 @pytest.fixture(name='testdummy', scope='function')
@@ -60,6 +66,28 @@ def test_check_instances(testdummy):
     assert testdummy.instances() == [testdummy]
 
 
+def test_instrument_fail(close_before_and_after):
+    with pytest.raises(RuntimeError, match="Failed to create instrument"):
+        DummyFailingInstrument(name="failinginstrument")
+
+    assert Instrument.instances() == []
+    assert DummyFailingInstrument.instances() == []
+    assert Instrument._all_instruments == {}
+
+
+def test_instrument_retry_with_same_name(close_before_and_after):
+    with pytest.raises(RuntimeError, match="Failed to create instrument"):
+        DummyFailingInstrument(name="failinginstrument")
+    instr = DummyFailingInstrument(name="failinginstrument", fail=False)
+
+    # Check that the instrument is successfully registered after failing first
+    assert Instrument.instances() == []
+    assert DummyFailingInstrument.instances() == [instr]
+    expected_dict = weakref.WeakValueDictionary()
+    expected_dict["failinginstrument"] = instr
+    assert Instrument._all_instruments == expected_dict
+
+
 def test_attr_access(testdummy):
 
     # test the instrument works
@@ -93,8 +121,8 @@ def test_repr(testdummy):
 
 
 def test_add_remove_f_p(testdummy):
-    with pytest.raises(KeyError, match='Duplicate parameter name dac1'):
-        testdummy.add_parameter('dac1', get_cmd='foo')
+    with pytest.raises(KeyError, match="Duplicate parameter name dac1"):
+        testdummy.add_parameter("dac1", get_cmd="foo")
 
     testdummy.add_function('function', call_cmd='foo')
 
@@ -243,7 +271,6 @@ def test_recreate(close_before_and_after, request):
     instr = DummyInstrument(
         name='instr', gates=['dac1', 'dac2', 'dac3'])
     request.addfinalizer(instr.close)
-    instr_ref = weakref.ref(instr)
 
     assert ['instr'] == list(Instrument._all_instruments.keys())
 
@@ -252,12 +279,11 @@ def test_recreate(close_before_and_after, request):
         recreate=True
     )
     request.addfinalizer(instr_2.close)
-    instr_2_ref = weakref.ref(instr_2)
 
     assert ['instr'] == list(Instrument._all_instruments.keys())
 
-    assert instr_2_ref in Instrument._all_instruments.values()
-    assert instr_ref not in Instrument._all_instruments.values()
+    assert instr_2 in Instrument._all_instruments.values()
+    assert instr not in Instrument._all_instruments.values()
 
 
 def test_instrument_metadata(request):

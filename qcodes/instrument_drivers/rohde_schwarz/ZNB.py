@@ -1,20 +1,19 @@
 import logging
-import numpy as np
 from functools import partial
-from typing import Optional, Any, Tuple
+from typing import Any, Optional, Tuple
 
-from qcodes import VisaInstrument, Instrument
-from qcodes import ChannelList, InstrumentChannel
-from qcodes.utils import validators as vals
+import numpy as np
+
+from qcodes import ChannelList, Instrument, InstrumentChannel, VisaInstrument
 from qcodes.instrument.parameter import (
-    MultiParameter,
-    ManualParameter,
     ArrayParameter,
+    ManualParameter,
+    MultiParameter,
     ParamRawDataType,
 )
-from qcodes.utils.helpers import create_on_off_val_mapping
+from qcodes.utils import validators as vals
 from qcodes.utils.deprecate import deprecate
-
+from qcodes.utils.helpers import create_on_off_val_mapping
 
 log = logging.getLogger(__name__)
 
@@ -654,8 +653,10 @@ class ZNBChannel(InstrumentChannel):
     def _set_npts(self, val: int) -> None:
         channel = self._instrument_channel
         self.write(f"SENS{channel}:SWE:POIN {val:.7f}")
-        self.update_lin_traces()
-        self.update_cw_traces()
+        if self.sweep_type().startswith("CW"):
+            self.update_cw_traces()
+        else:
+            self.update_lin_traces()
 
     def _set_bandwidth(self, val: int) -> None:
         channel = self._instrument_channel
@@ -961,7 +962,6 @@ class ZNB(VisaInstrument):
                 for j in range(1, num_ports + 1):
                     ch_name = "S" + str(i) + str(j)
                     self.add_channel(ch_name)
-            self.channels.lock()
             self.display_sij_split()
             self.channels.autoscale()
 
@@ -1000,6 +1000,4 @@ class ZNB(VisaInstrument):
         self.write("CALCulate:PARameter:DELete:ALL")
         for submodule in self.submodules.values():
             if isinstance(submodule, ChannelList):
-                submodule._channels = []
-                submodule._channel_mapping = {}
-                submodule._locked = False
+                submodule.clear()

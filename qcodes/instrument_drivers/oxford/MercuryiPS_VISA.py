@@ -1,10 +1,10 @@
+import logging
 import time
 from functools import partial
-from typing import Dict, Union, Optional, Callable, List, cast, Any
-import logging
-from distutils.version import LooseVersion
+from typing import Any, Callable, Dict, List, Optional, Union, cast
 
 import numpy as np
+from packaging import version
 
 from qcodes.instrument.channel import InstrumentChannel
 from qcodes.instrument.visa import VisaInstrument
@@ -39,9 +39,9 @@ def _signal_parser(our_scaling: float, response: str) -> float:
     numchars = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '-']
 
     response = _response_preparser(response)
-    digits = ''.join([d for d in response if d in numchars])
-    scale_and_unit = response[len(digits):]
-    if scale_and_unit == '':
+    digits = "".join(d for d in response if d in numchars)
+    scale_and_unit = response[len(digits) :]
+    if scale_and_unit == "":
         their_scaling: float = 1
     elif scale_and_unit[0] in scale_to_factor.keys():
         their_scaling = scale_to_factor[scale_and_unit[0]]
@@ -73,7 +73,7 @@ class MercuryWorkerPS(InstrumentChannel):
 
         # The firmware update from 2.5 -> 2.6 changed the command
         # syntax slightly
-        if LooseVersion(self.root_instrument.firmware) >= LooseVersion('2.6'):
+        if version.parse(self.root_instrument.firmware) >= version.parse("2.6"):
             self.psu_string = "SPSU"
         else:
             self.psu_string = "PSU"

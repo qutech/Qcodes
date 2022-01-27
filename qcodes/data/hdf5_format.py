@@ -1,11 +1,13 @@
-import numpy as np
-import logging
-import h5py
-import os
 import json
+import logging
+import os
 from typing import TYPE_CHECKING
 
-from ..version import __version__ as _qcodes_version
+import h5py
+import numpy as np
+
+import qcodes as qc
+
 from .data_array import DataArray
 from .format import Formatter
 
@@ -164,8 +166,8 @@ class HDF5Format(Formatter):
         # name. This is useful for saving e.g. images in the same folder
         # I think this is a sane default (MAR).
         data_set._h5_base_group = self._create_file(filepath)
-        data_set._h5_base_group.attrs['__qcodes_version'] = _qcodes_version
-        data_set._h5_base_group.attrs['__format_tag'] = self._format_tag
+        data_set._h5_base_group.attrs["__qcodes_version"] = qc.__version__
+        data_set._h5_base_group.attrs["__format_tag"] = self._format_tag
 
         return data_set._h5_base_group
 
@@ -317,7 +319,7 @@ class HDF5Format(Formatter):
                                  h5_group=entry_point[list_type])
 
         if list_type == 'tuple':
-            item = tuple([d[k] for k in sorted(d.keys())])
+            item = tuple(d[k] for k in sorted(d.keys()))
         elif list_type == 'list':
             item = [d[k] for k in sorted(d.keys())]
         else:
@@ -504,7 +506,7 @@ def str_to_bool(s):
         raise ValueError(f"Cannot covert {s} to a bool")
 
 
-from qcodes.utils.helpers import deep_update, NumpyJSONEncoder
+from qcodes.utils.helpers import NumpyJSONEncoder, deep_update
 
 
 class HDF5FormatMetadata(HDF5Format):
