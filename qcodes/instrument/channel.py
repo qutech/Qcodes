@@ -1,26 +1,47 @@
 """ Base class for the channel of an instrument """
+import sys
 from typing import (
-    List, Union, Optional, Dict, Sequence,
-    cast, Any, Tuple, Callable,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    MutableSequence,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union,
+    cast,
+    overload,
 )
 
-from .base import InstrumentBase, Instrument
-from .parameter import (MultiParameter, ArrayParameter, Parameter,
-    ParamRawDataType, Iterator)
-from ..utils.validators import Validator
-from ..utils.metadata import Metadatable
 from ..utils.helpers import full_class
+from ..utils.metadata import Metadatable
+from ..utils.validators import Validator
+from .base import Instrument, InstrumentBase
+from .parameter import (
+    ArrayParameter,
+    Iterator,
+    MultiParameter,
+    Parameter,
+    ParamRawDataType,
+)
 
 
-class InstrumentChannel(InstrumentBase):
+class InstrumentModule(InstrumentBase):
     """
-    Base class for a channel in an instrument
+    Base class for a module in an instrument.
+    This could be in the form of a channel (e.g. something that
+    the instrument has multiple instances of) or another logical grouping
+    of parameters that you wish to group together separate from the rest of the
+    instrument.
 
     Args:
-        parent: The instrument to which this channel should be
+        parent: The instrument to which this module should be
           attached.
 
-        name: The name of this channel.
+        name: The name of this module.
 
     """
 
@@ -39,7 +60,7 @@ class InstrumentChannel(InstrumentBase):
         # (see https://github.com/QCoDeS/Qcodes/issues/1140 for a nice table)
         # this has been a confusion about names. don't use name but
         # full_name, or short_name.
-        self._name = "{}_{}".format(parent.name, str(name))
+        self._name = f"{parent.name}_{str(name)}"
 
     def __repr__(self) -> str:
         """Custom repr to give parent information"""
@@ -74,6 +95,10 @@ class InstrumentChannel(InstrumentBase):
         name_parts = self._parent.name_parts
         name_parts.append(self.short_name)
         return name_parts
+
+
+class InstrumentChannel(InstrumentModule):
+    pass
 
 
 class MultiChannelInstrumentParameter(MultiParameter):
@@ -126,32 +151,37 @@ class MultiChannelInstrumentParameter(MultiParameter):
         return self.names
 
 
-class ChannelList(Metadatable):
+T = TypeVar("T", bound="ChannelTuple")
+
+
+class ChannelTuple(Metadatable, Sequence[InstrumentChannel]):
     """
     Container for channelized parameters that allows for sweeps over
     all channels, as well as addressing of individual channels.
 
+    This behaves like a python tuple i.e. it implements the
+    ``collections.abc.Sequence`` interface.
+
     Args:
-        parent: The instrument to which this channel
+        parent: The instrument to which this ChannelTuple
             should be attached.
 
-        name: The name of the channel list.
+        name: The name of the ChannelTuple.
 
         chan_type: The type of channel contained
-            within this list.
+            within this tuple.
 
         chan_list: An optional iterable of
-            channels of type ``chan_type``.  This will create a list and
-            immediately lock the :class:`ChannelList`.
+            channels of type ``chan_type``.
 
         snapshotable: Optionally disables taking of snapshots
-            for a given channel list.  This is used when objects
-            stored inside a channel list are accessible in multiple
+            for a given ChannelTuple. This is used when objects
+            stored inside a ChannelTuple are accessible in multiple
             ways and should not be repeated in an instrument snapshot.
 
         multichan_paramclass: The class of
             the object to be returned by the ``__getattr__``
-            method of :class:`ChannelList`.
+            method of :class:`ChannelTuple`.
             Should be a subclass of :class:`MultiChannelInstrumentParameter`.
 
     Raises:
@@ -163,25 +193,32 @@ class ChannelList(Metadatable):
 
     """
 
-    def __init__(self, parent: InstrumentBase,
-                 name: str,
-                 chan_type: type,
-                 chan_list: Optional[Sequence[InstrumentChannel]] = None,
-                 snapshotable: bool = True,
-                 multichan_paramclass: type = MultiChannelInstrumentParameter):
+    def __init__(
+        self,
+        parent: InstrumentBase,
+        name: str,
+        chan_type: type,
+        chan_list: Optional[Sequence[InstrumentChannel]] = None,
+        snapshotable: bool = True,
+        multichan_paramclass: type = MultiChannelInstrumentParameter,
+    ):
         super().__init__()
 
         self._parent = parent
         self._name = name
-        if (not isinstance(chan_type, type) or
-                not issubclass(chan_type, InstrumentChannel)):
-            raise ValueError("Channel Lists can only hold instances of type"
-                             " InstrumentChannel")
-        if (not isinstance(multichan_paramclass, type) or
-                not issubclass(multichan_paramclass,
-                               MultiChannelInstrumentParameter)):
-            raise ValueError("multichan_paramclass must be a (subclass of) "
-                             "MultiChannelInstrumentParameter")
+        if not isinstance(chan_type, type) or not issubclass(
+            chan_type, InstrumentChannel
+        ):
+            raise ValueError(
+                "ChannelTuple can only hold instances of type InstrumentChannel"
+            )
+        if not isinstance(multichan_paramclass, type) or not issubclass(
+            multichan_paramclass, MultiChannelInstrumentParameter
+        ):
+            raise ValueError(
+                "multichan_paramclass must be a (subclass of) "
+                "MultiChannelInstrumentParameter"
+            )
 
         self._chan_type = chan_type
         self._snapshotable = snapshotable
@@ -191,25 +228,32 @@ class ChannelList(Metadatable):
         # provide lookup of channels by name
         # If a list of channels is not provided, define a list to store
         # channels. This will eventually become a locked tuple.
-        self._channels: Sequence[InstrumentChannel]
+        self._channels: List[InstrumentChannel]
         if chan_list is None:
-            self._locked = False
             self._channels = []
         else:
-            self._locked = True
-            self._channels = tuple(chan_list)
-            if self._channels is None:
-                raise RuntimeError("Empty channel list")
+            self._channels = list(chan_list)
             self._channel_mapping = {channel.short_name: channel
                                      for channel in self._channels}
             if not all(isinstance(chan, chan_type) for chan in self._channels):
-                raise TypeError("All items in this channel list must be of "
-                                "type {}.".format(chan_type.__name__))
+                raise TypeError(
+                    f"All items in this ChannelTuple must be of "
+                    f"type {chan_type.__name__}."
+                )
 
-    def __getitem__(self, i: Union[int, slice, Tuple[int, ...]]) -> \
-            Union['InstrumentChannel', 'ChannelList']:
+    @overload
+    def __getitem__(self, i: int) -> "InstrumentChannel":
+        ...
+
+    @overload
+    def __getitem__(self: T, i: Union[slice, Tuple[int, ...]]) -> T:
+        ...
+
+    def __getitem__(
+        self: T, i: Union[int, slice, Tuple[int, ...]]
+    ) -> Union[InstrumentChannel, T]:
         """
-        Return either a single channel, or a new :class:`ChannelList`
+        Return either a single channel, or a new :class:`ChannelTuple`
         containing only the specified channels
 
         Args:
@@ -217,41 +261,57 @@ class ChannelList(Metadatable):
               to get
         """
         if isinstance(i, slice):
-            return ChannelList(self._parent, self._name, self._chan_type,
-                               self._channels[i],
-                               multichan_paramclass=self._paramclass)
+            return type(self)(
+                self._parent,
+                self._name,
+                self._chan_type,
+                self._channels[i],
+                multichan_paramclass=self._paramclass,
+                snapshotable=self._snapshotable,
+            )
         elif isinstance(i, tuple):
-            return ChannelList(self._parent, self._name, self._chan_type,
-                               [self._channels[j] for j in i],
-                               multichan_paramclass=self._paramclass)
+            return type(self)(
+                self._parent,
+                self._name,
+                self._chan_type,
+                [self._channels[j] for j in i],
+                multichan_paramclass=self._paramclass,
+                snapshotable=self._snapshotable,
+            )
         return self._channels[i]
 
     def __iter__(self) -> Iterator['InstrumentChannel']:
         return iter(self._channels)
 
+    def __reversed__(self) -> Iterator["InstrumentChannel"]:
+        return reversed(self._channels)
+
     def __len__(self) -> int:
         return len(self._channels)
+
+    def __contains__(self, item: object) -> bool:
+        return item in self._channels
 
     def __repr__(self) -> str:
         return "ChannelList({!r}, {}, {!r})".format(self._parent,
                                                     self._chan_type.__name__,
                                                     self._channels)
 
-    def __add__(self, other: 'ChannelList') -> 'ChannelList':
+    def __add__(self: T, other: "ChannelTuple") -> T:
         """
-        Return a new channel list containing the channels from both
-        :class:`ChannelList` self and r.
+        Return a new ChannelTuple containing the channels from both
+        :class:`ChannelTuple` self and r.
 
-        Both channel lists must hold the same type and have the same parent.
+        Both ChannelTuple must hold the same type and have the same parent.
 
         Args:
             other: Right argument to add.
         """
-        if not isinstance(self, ChannelList) or not isinstance(other,
-                                                               ChannelList):
-            raise TypeError("Can't add objects of type"
-                            " {} and {} together".format(type(self).__name__,
-                                                         type(other).__name__))
+        if not isinstance(self, ChannelTuple) or not isinstance(other, ChannelTuple):
+            raise TypeError(
+                "Can't add objects of type"
+                " {} and {} together".format(type(self).__name__, type(other).__name__)
+            )
         if self._chan_type != other._chan_type:
             raise TypeError("Both l and r arguments to add must contain "
                             "channels of the same type."
@@ -262,125 +322,62 @@ class ChannelList(Metadatable):
             raise ValueError("Can only add channels from the same parent "
                              "together.")
 
-        return ChannelList(self._parent, self._name, self._chan_type,
-                           list(self._channels) + list(other._channels))
+        return type(self)(
+            self._parent,
+            self._name,
+            self._chan_type,
+            list(self._channels) + list(other._channels),
+            snapshotable=self._snapshotable,
+        )
 
-    def append(self, obj: InstrumentChannel) -> None:
-        """
-        Append a Channel to this list. Requires that the ChannelList is not
-        locked and that the channel is of the same type as the ones in the list.
-
-        Args:
-            obj: New channel to add to the list.
-        """
-        if isinstance(self._channels, tuple) or self._locked:
-            raise AttributeError("Cannot append to a locked channel list")
-        if not isinstance(obj, self._chan_type):
-            raise TypeError("All items in a channel list must be of the same "
-                            "type. Adding {} to a list of {}"
-                            ".".format(type(obj).__name__,
-                                       self._chan_type.__name__))
-        self._channel_mapping[obj.short_name] = obj
-        self._channels = cast(List[InstrumentChannel], self._channels)
-        self._channels.append(obj)
-
-    def clear(self) -> None:
-        """
-        Clear all items from the channel list.
-        """
-        if self._locked:
-            raise AttributeError("Cannot clear a locked channel list")
-        # when not locked the _channels seq is a list
-        channels = cast(List['InstrumentChannel'], self._channels)
-        channels.clear()
-        self._channel_mapping.clear()
-
-    def remove(self, obj: InstrumentChannel) -> None:
-        """
-        Removes obj from channellist if not locked.
-
-        Args:
-            obj: Channel to remove from the list.
-        """
-        if self._locked:
-            raise AttributeError("Cannot remove from a locked channel list")
-        else:
-            self._channels = cast(List[InstrumentChannel], self._channels)
-            self._channels.remove(obj)
-            self._channel_mapping.pop(obj.short_name)
-
-    def extend(self, objects: Union[Sequence[InstrumentChannel],
-                                    'ChannelList']) -> None:
-        """
-        Insert an iterable of objects into the list of channels.
-
-        Args:
-            objects: A list of objects to add into the
-              :class:`ChannelList`.
-        """
-        # objects may be a generator but we need to iterate over it twice
-        # below so copy it into a tuple just in case.
-        objects_tuple = tuple(objects)
-        if self._locked:
-            raise AttributeError("Cannot extend a locked channel list")
-        if not all(isinstance(obj, self._chan_type) for obj in objects_tuple):
-            raise TypeError("All items in a channel list must be of the same "
-                            "type.")
-        channels = cast(List[InstrumentChannel], self._channels)
-        channels.extend(objects_tuple)
-        self._channel_mapping.update({
-            obj.short_name: obj for obj in objects
-        })
-        self._channels = channels
-
-    def index(self, obj: InstrumentChannel) -> int:
+    def index(
+        self, obj: InstrumentChannel, start: int = 0, stop: int = sys.maxsize
+    ) -> int:
         """
         Return the index of the given object
 
         Args:
             obj: The object to find in the channel list.
+            start: Index to start searching from.
+            stop: Index to stop searching at.
         """
-        return self._channels.index(obj)
+        return self._channels.index(obj, start, stop)
 
-    def insert(self, index: int, obj: InstrumentChannel) -> None:
-        """
-        Insert an object into the channel list at a specific index.
+    def count(self, obj: InstrumentChannel) -> int:
+        """Returns number of instances of the given object in the list
 
         Args:
-            index: Index to insert object.
-
-            obj: Object of type chan_type to insert.
+            obj: The object to find in the ChannelTuple.
         """
-        if isinstance(self._channels, tuple) or self._locked:
-            raise AttributeError("Cannot insert into a locked channel list")
-        if not isinstance(obj, self._chan_type):
-            raise TypeError("All items in a channel list must be of the same "
-                            "type. Adding {} to a list of {}"
-                            ".".format(type(obj).__name__,
-                                       self._chan_type.__name__))
-        self._channels = cast(List[InstrumentChannel], self._channels)
-        self._channels.insert(index, obj)
+        return self._channels.count(obj)
 
-    def get_validator(self) -> 'ChannelListValidator':
+    def get_channel_by_name(self: T, *names: str) -> Union[InstrumentChannel, T]:
+        """
+        Get a channel by name, or a ChannelTuple if multiple names are given.
+
+        Args:
+            *names: channel names
+        """
+        if len(names) == 0:
+            raise Exception("one or more names must be given")
+        if len(names) == 1:
+            return self._channel_mapping[names[0]]
+        selected_channels = tuple(self._channel_mapping[name] for name in names)
+        return type(self)(
+            self._parent,
+            self._name,
+            self._chan_type,
+            selected_channels,
+            self._snapshotable,
+            self._paramclass,
+        )
+
+    def get_validator(self) -> "ChannelTupleValidator":
         """
         Returns a validator that checks that the returned object is a channel
-        in this channel list
+        in this ChannelTuple
         """
-        if not self._locked:
-            raise AttributeError("Cannot create a validator for an unlocked "
-                                 "channel list")
-        return ChannelListValidator(self)
-
-    def lock(self) -> None:
-        """
-        Lock the channel list. Once this is done, the channel list is
-        converted to a tuple and any future changes to the list are prevented.
-        """
-        if self._locked:
-            return
-
-        self._channels = tuple(self._channels)
-        self._locked = True
+        return ChannelTupleValidator(self)
 
     def snapshot_base(self, update: Optional[bool] = True,
                       params_to_skip_update: Optional[Sequence[str]] = None
@@ -421,76 +418,31 @@ class ChannelList(Metadatable):
                                               Callable[..., None],
                                               InstrumentChannel]:
         """
-        Return a multi-channel function or parameter that we can use to get or
-        set all items in a channel list simultaneously.
+        Look up an attribute by name. If this is the name of a parameter or
+        a function on the channel type contained in this container return a
+        multi-channel function or parameter that can be used to get or
+        set all items in a channel list simultaneously. If this is the
+        name of a channel, return that channel.
 
         Params:
-            name: The name of the parameter or function that we want to
+            name: The name of the parameter, function or channel that we want to
             operate on.
         """
         # Check if this is a valid parameter
-        if name in self._channels[0].parameters:
-            setpoints = None
-            setpoint_names = None
-            setpoint_labels = None
-            setpoint_units = None
-            # We need to construct a MultiParameter object to get each of the
-            # values our of each parameter in our list, we don't currently try
-            # to construct a multiparameter from a list of multi parameters
-            if isinstance(self._channels[0].parameters[name], MultiParameter):
-                raise NotImplementedError("Slicing is currently not "
-                                          "supported for MultiParameters")
-            parameters = cast(List[Union[Parameter, ArrayParameter]],
-                              [chan.parameters[name] for chan in self._channels])
-            names = tuple(f"{chan.name}_{name}"
-                          for chan in self._channels)
-            labels = tuple(parameter.label
-                           for parameter in parameters)
-            units = tuple(parameter.unit
-                          for parameter in parameters)
+        if len(self) > 0:
+            if name in self._channels[0].parameters:
+                param = self._construct_multiparam(name)
+                return param
 
-            if isinstance(parameters[0], ArrayParameter):
-                arrayparameters = cast(List[ArrayParameter], parameters)
-                shapes = tuple(parameter.shape for
-                               parameter in arrayparameters)
-                if arrayparameters[0].setpoints:
-                    setpoints = tuple(parameter.setpoints for
-                                      parameter in arrayparameters)
-                if arrayparameters[0].setpoint_names:
-                    setpoint_names = tuple(parameter.setpoint_names for
-                                           parameter in arrayparameters)
-                if arrayparameters[0].setpoint_labels:
-                    setpoint_labels = tuple(
-                        parameter.setpoint_labels
-                        for parameter in arrayparameters)
-                if arrayparameters[0].setpoint_units:
-                    setpoint_units = tuple(parameter.setpoint_units
-                                           for parameter in arrayparameters)
-            else:
-                shapes = tuple(() for _ in self._channels)
+            # Check if this is a valid function
+            if name in self._channels[0].functions:
+                # We want to return a reference to a function that would call the
+                # function for each of the channels in turn.
+                def multi_func(*args: Any) -> None:
+                    for chan in self._channels:
+                        chan.functions[name](*args)
 
-            param = self._paramclass(self._channels,
-                                     param_name=name,
-                                     name=f"Multi_{name}",
-                                     names=names,
-                                     shapes=shapes,
-                                     instrument=self._parent,
-                                     labels=labels,
-                                     units=units,
-                                     setpoints=setpoints,
-                                     setpoint_names=setpoint_names,
-                                     setpoint_units=setpoint_units,
-                                     setpoint_labels=setpoint_labels)
-            return param
-
-        # Check if this is a valid function
-        if name in self._channels[0].functions:
-            # We want to return a reference to a function that would call the
-            # function for each of the channels in turn.
-            def multi_func(*args: Any) -> None:
-                for chan in self._channels:
-                    chan.functions[name](*args)
-            return multi_func
+                return multi_func
 
         try:
             return self._channel_mapping[name]
@@ -499,6 +451,61 @@ class ChannelList(Metadatable):
 
         raise AttributeError('\'{}\' object has no attribute \'{}\''
                              ''.format(self.__class__.__name__, name))
+
+    def _construct_multiparam(self, name: str) -> MultiChannelInstrumentParameter:
+        setpoints = None
+        setpoint_names = None
+        setpoint_labels = None
+        setpoint_units = None
+        # We need to construct a MultiParameter object to get each of the
+        # values our of each parameter in our list, we don't currently try
+        # to construct a multiparameter from a list of multi parameters
+        if isinstance(self._channels[0].parameters[name], MultiParameter):
+            raise NotImplementedError(
+                "Slicing is currently not " "supported for MultiParameters"
+            )
+        parameters = cast(
+            List[Union[Parameter, ArrayParameter]],
+            [chan.parameters[name] for chan in self._channels],
+        )
+        names = tuple(f"{chan.name}_{name}" for chan in self._channels)
+        labels = tuple(parameter.label for parameter in parameters)
+        units = tuple(parameter.unit for parameter in parameters)
+        if isinstance(parameters[0], ArrayParameter):
+            arrayparameters = cast(List[ArrayParameter], parameters)
+            shapes = tuple(parameter.shape for parameter in arrayparameters)
+            if arrayparameters[0].setpoints:
+                setpoints = tuple(parameter.setpoints for parameter in arrayparameters)
+            if arrayparameters[0].setpoint_names:
+                setpoint_names = tuple(
+                    parameter.setpoint_names for parameter in arrayparameters
+                )
+            if arrayparameters[0].setpoint_labels:
+                setpoint_labels = tuple(
+                    parameter.setpoint_labels for parameter in arrayparameters
+                )
+            if arrayparameters[0].setpoint_units:
+                setpoint_units = tuple(
+                    parameter.setpoint_units for parameter in arrayparameters
+                )
+        else:
+            shapes = tuple(() for _ in self._channels)
+        param = self._paramclass(
+            self._channels,
+            param_name=name,
+            name=f"Multi_{name}",
+            names=names,
+            shapes=shapes,
+            instrument=self._parent,
+            labels=labels,
+            units=units,
+            setpoints=setpoints,
+            setpoint_names=setpoint_names,
+            setpoint_units=setpoint_units,
+            setpoint_labels=setpoint_labels,
+            bind_to_instrument=False,
+        )
+        return param
 
     def __dir__(self) -> List[Any]:
         names = list(super().__dir__())
@@ -515,34 +522,266 @@ class ChannelList(Metadatable):
                 channel.print_readable_snapshot(update=update,
                                                 max_chars=max_chars)
 
-
-class ChannelListValidator(Validator[InstrumentChannel]):
+# we ignore a mypy error here since the __getitem__ signature above
+# taking a tuple is not compatible with MutableSequence
+# for some reason this does not happen with Sequence
+class ChannelList(ChannelTuple, MutableSequence[InstrumentChannel]):  # type: ignore[misc]
     """
-    A validator that checks that the returned object is a member of the
-    channel list with which the validator was constructed.
+    Mutable Container for channelized parameters that allows for sweeps over
+    all channels, as well as addressing of individual channels.
 
-    This class will not normally be created directly, but created from a channel
-    list using the ``ChannelList.get_validator`` method.
+    This behaves like a python list i.e. it implements the
+    ``collections.abc.MutableSequence`` interface.
+
+    Note it may be useful to use the mutable ChannelList while constructing it.
+    E.g. adding channels as they are created, but in most use cases it is recommended
+    to convert this to a ``ChannelTuple`` before adding it to an instrument.
+    This can be done using the ``to_channel_tuple`` method.
 
     Args:
-        channel_list (ChannelList): the channel list that should be checked
+        parent: The instrument to which this ChannelList
+            should be attached.
+
+        name: The name of the ChannelList.
+
+        chan_type: The type of channel contained
+            within this list.
+
+        chan_list: An optional iterable of
+            channels of type ``chan_type``.  This will create a list and
+            immediately lock the :class:`ChannelList`.
+
+        snapshotable: Optionally disables taking of snapshots
+            for a given ChannelList. This is used when objects
+            stored inside a ChannelList are accessible in multiple
+            ways and should not be repeated in an instrument snapshot.
+
+        multichan_paramclass: The class of
+            the object to be returned by the ``__getattr__``
+            method of :class:`ChannelList`.
+            Should be a subclass of :class:`MultiChannelInstrumentParameter`.
+
+    Raises:
+        ValueError: If ``chan_type`` is not a subclass of
+            :class:`InstrumentChannel`
+        ValueError: If ``multichan_paramclass`` is not a subclass of
+            :class:`MultiChannelInstrumentParameter` (note that a class is a
+            subclass of itself).
+
+    """
+
+    def __init__(
+        self,
+        parent: InstrumentBase,
+        name: str,
+        chan_type: type,
+        chan_list: Optional[Sequence[InstrumentChannel]] = None,
+        snapshotable: bool = True,
+        multichan_paramclass: type = MultiChannelInstrumentParameter,
+    ):
+        super().__init__(
+            parent, name, chan_type, chan_list, snapshotable, multichan_paramclass
+        )
+        if len(self._channels) > 0:
+            self._locked = True
+        else:
+            self._locked = False
+
+    @overload
+    def __delitem__(self, key: int) -> None:
+        ...
+
+    @overload
+    def __delitem__(self, key: slice) -> None:
+        ...
+
+    def __delitem__(self, key: Union[int, slice]) -> None:
+        if self._locked:
+            raise AttributeError("Cannot delete from a locked channel list")
+        self._channels.__delitem__(key)
+        self._channel_mapping = {
+            channel.short_name: channel for channel in self._channels
+        }
+
+    @overload
+    def __setitem__(self, index: int, value: InstrumentChannel) -> None:
+        ...
+
+    @overload
+    def __setitem__(self, index: slice, value: Iterable[InstrumentChannel]) -> None:
+        ...
+
+    def __setitem__(
+        self,
+        index: Union[int, slice],
+        value: Union[InstrumentChannel, Iterable[InstrumentChannel]],
+    ) -> None:
+        if self._locked:
+            raise AttributeError("Cannot set item in a locked channel list")
+        # update mapping
+        # asserts added to work around https://github.com/python/mypy/issues/7858
+        if isinstance(index, int):
+            assert isinstance(value, InstrumentChannel)
+            self._channels[index] = value
+        else:
+            assert not isinstance(value, InstrumentChannel)
+            self._channels[index] = value
+        self._channel_mapping = {
+            channel.short_name: channel for channel in self._channels
+        }
+
+    def append(self, obj: InstrumentChannel) -> None:
+        """
+        Append a Channel to this list. Requires that the ChannelList is not
+        locked and that the channel is of the same type as the ones in the list.
+
+        Args:
+            obj: New channel to add to the list.
+        """
+        if self._locked:
+            raise AttributeError("Cannot append to a locked channel list")
+        if not isinstance(obj, self._chan_type):
+            raise TypeError(
+                "All items in a channel list must be of the same "
+                "type. Adding {} to a list of {}"
+                ".".format(type(obj).__name__, self._chan_type.__name__)
+            )
+        self._channel_mapping[obj.short_name] = obj
+        self._channels.append(obj)
+
+    def clear(self) -> None:
+        """
+        Clear all items from the ChannelList.
+        """
+        if self._locked:
+            raise AttributeError("Cannot clear a locked ChannelList")
+        # when not locked the _channels seq is a list
+        self._channels.clear()
+        self._channel_mapping.clear()
+
+    def remove(self, obj: InstrumentChannel) -> None:
+        """
+        Removes obj from ChannelList if not locked.
+
+        Args:
+            obj: Channel to remove from the list.
+        """
+        if self._locked:
+            raise AttributeError("Cannot remove from a locked channel list")
+        else:
+            self._channels.remove(obj)
+            self._channel_mapping.pop(obj.short_name)
+
+    def extend(self, objects: Iterable[InstrumentChannel]) -> None:
+        """
+        Insert an iterable of objects into the list of channels.
+
+        Args:
+            objects: A list of objects to add into the
+              :class:`ChannelList`.
+        """
+        # objects may be a generator but we need to iterate over it twice
+        # below so copy it into a tuple just in case.
+        if self._locked:
+            raise AttributeError("Cannot extend a locked channel list")
+        objects_tuple = tuple(objects)
+        if not all(isinstance(obj, self._chan_type) for obj in objects_tuple):
+            raise TypeError("All items in a channel list must be of the same type.")
+        self._channels.extend(objects_tuple)
+        self._channel_mapping.update({obj.short_name: obj for obj in objects_tuple})
+
+    def insert(self, index: int, obj: InstrumentChannel) -> None:
+        """
+        Insert an object into the ChannelList at a specific index.
+
+        Args:
+            index: Index to insert object.
+            obj: Object of type chan_type to insert.
+        """
+        if self._locked:
+            raise AttributeError("Cannot insert into a locked channel list")
+        if not isinstance(obj, self._chan_type):
+            raise TypeError(
+                "All items in a channel list must be of the same "
+                "type. Adding {} to a list of {}"
+                ".".format(type(obj).__name__, self._chan_type.__name__)
+            )
+        self._channels.insert(index, obj)
+        self._channel_mapping[obj.short_name] = obj
+
+    def get_validator(self) -> "ChannelTupleValidator":
+        """
+        Returns a validator that checks that the returned object is a channel
+        in this ChannelList.
+
+        Raises:
+            AttributeError: If the ChannelList is not locked.
+        """
+        if not self._locked:
+            raise AttributeError(
+                "Cannot create a validator for an unlocked ChannelList"
+            )
+        return super().get_validator()
+
+    def lock(self) -> None:
+        """
+        Lock the channel list. Once this is done, the ChannelList is
+        locked and any future changes to the list are prevented.
+        Note this is not recommended and may be deprecated in the future.
+        Use ``to_channel_tuple`` to convert this into a tuple instead.
+        """
+        if self._locked:
+            return
+        self._locked = True
+
+    def to_channel_tuple(self) -> ChannelTuple:
+        """
+        Returns a ChannelTuple build from this ChannelList containing the
+        same channels but without the ability to be modified.
+        """
+        return ChannelTuple(
+            self._parent,
+            self._name,
+            self._chan_type,
+            self._channels,
+            multichan_paramclass=self._paramclass,
+            snapshotable=self._snapshotable,
+        )
+
+
+
+class ChannelTupleValidator(Validator[InstrumentChannel]):
+    """
+    A validator that checks that the returned object is a member of the
+    ChannelTuple with which the validator was constructed.
+
+    This class will not normally be created directly, but created from a channel
+    list using the ``ChannelTuple.get_validator`` method.
+
+    Args:
+        channel_list: the ChannelTuple that should be checked
             against. The channel list must be locked and populated before it
             can be used to construct a validator.
     """
-    def __init__(self, channel_list: ChannelList) -> None:
+
+    def __init__(self, channel_list: ChannelTuple) -> None:
         # Save the base parameter list
-        if not isinstance(channel_list, ChannelList):
-            raise ValueError("channel_list must be a ChannelList "
-                             "object containing the "
-                             "channels that should be validated")
-        if not channel_list._locked:
-            raise AttributeError("Channel list must be locked before it can "
-                                 "be used to create a validator")
+        if not isinstance(channel_list, ChannelTuple):
+            raise ValueError(
+                "channel_list must be a ChannelTuple "
+                "object containing the "
+                "channels that should be validated"
+            )
+        if isinstance(channel_list, ChannelList) and not channel_list._locked:
+            raise AttributeError(
+                "channel_list must be locked before it can "
+                "be used to create a validator"
+            )
         self._channel_list = channel_list
 
     def validate(self, value: InstrumentChannel, context: str = '') -> None:
         """
-        Checks to see that value is a member of the channel list referenced by
+        Checks to see that value is a member of the ChannelTuple referenced by
         this validator
 
         Args:
@@ -553,8 +792,13 @@ class ChannelListValidator(Validator[InstrumentChannel]):
         """
         if value not in self._channel_list:
             raise ValueError(
-                '{} is not part of the expected channel list; {}'.format(
-                    repr(value), context))
+                f"{repr(value)} is not part of the expected channel list; {context}"
+            )
+
+
+class ChannelListValidator(ChannelTupleValidator):
+    """Alias for backwards compatibility. Do not use"""
+    pass
 
 
 class AutoLoadableInstrumentChannel(InstrumentChannel):

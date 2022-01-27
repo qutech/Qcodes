@@ -311,7 +311,7 @@ class DG1062Channel(InstrumentChannel):
                              f"{param_names}")
 
         string = f":SOUR{self.channel}:APPL:{waveform} "
-        values = ["{:7e}".format(params_dict[param]) for param in param_names]
+        values = [f"{params_dict[param]:7e}" for param in param_names]
         string += ",".join(values)
         self.parent.write_raw(string)
 
@@ -362,6 +362,5 @@ class DG1062(VisaInstrument):
             channels.append(channel)
             self.add_submodule(ch_name, channel)
 
-        channels.lock()
-        self.add_submodule("channels", channels)
+        self.add_submodule("channels", channels.to_channel_tuple())
         self.connect_message()

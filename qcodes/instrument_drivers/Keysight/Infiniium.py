@@ -1,15 +1,19 @@
 import logging
-from typing import Dict, Callable, Optional, Sequence, Any
 from functools import partial
+from typing import Any, Callable, Dict, Optional, Sequence
 
 import numpy as np
 
-from qcodes import VisaInstrument, validators as vals
-from qcodes import InstrumentChannel, ChannelList, Instrument
-from qcodes import ArrayParameter
-from qcodes.utils.validators import Enum, Numbers
+from qcodes import (
+    ArrayParameter,
+    ChannelList,
+    Instrument,
+    InstrumentChannel,
+    VisaInstrument,
+)
+from qcodes import validators as vals
 from qcodes.instrument.parameter import ParamRawDataType
-
+from qcodes.utils.validators import Enum, Numbers
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +54,7 @@ class RawTrace(ArrayParameter):
         # in question must be displayed
 
         # shorthand
-        instr = self._instrument
+        instr = self.instrument
         assert isinstance(instr, InfiniiumChannel)
 
         # number of set points
@@ -67,6 +71,9 @@ class RawTrace(ArrayParameter):
         self.setpoints = (tuple(xdata), )
         self.shape = (self.npts, )
 
+        # set up the instrument
+        # ---------------------------------------------------------------------
+
         # make this on a per channel basis?
         root_instrument = instr.root_instrument
         assert isinstance(root_instrument, Infiniium)
@@ -77,14 +84,14 @@ class RawTrace(ArrayParameter):
         # (saving data issue). Therefor create additional prepare function that
         # queries for the size.
         # check if already prepared
-        assert isinstance(self._instrument, InfiniiumChannel)
+        instr = self.instrument
+        assert isinstance(instr, InfiniiumChannel)
 
-        if not self._instrument.root_instrument.trace_ready:
+        if not instr.root_instrument.trace_ready:
             raise TraceNotReady('Please run prepare_curvedata to prepare '
                                 'the scope for acquiring a trace.')
 
         # shorthand
-        instr = self._instrument
 
         # set up the instrument
         # ---------------------------------------------------------------------
@@ -94,8 +101,6 @@ class RawTrace(ArrayParameter):
 
         # get intrument state
         state = instr.ask(':RSTate?')
-        # realtime mode: only one trigger is used
-        instr._parent.acquire_mode('RTIMe')
 
         # acquire the data
         # ---------------------------------------------------------------------
@@ -487,24 +492,28 @@ class Infiniium(VisaInstrument):
 
         # this parameter gets used internally for data aquisition. For now it
         # should not be used manually
-        self.add_parameter('data_source',
-                           label='Waveform Data source',
-                           get_cmd=':WAVeform:SOURce?',
-                           set_cmd=':WAVeform:SOURce {}',
-                           vals = Enum( *(\
-                                [f'CHANnel{i}' for i in range(1, 4+1)]+\
-                                [f'CHAN{i}' for i in range(1, 4+1)]+\
-                                [f'DIFF{i}' for i in range(1, 2+1)]+\
-                                [f'COMMonmode{i}' for i in range(3, 4+1)]+\
-                                [f'COMM{i}' for i in range(3, 4+1)]+\
-                                [f'FUNCtion{i}' for i in range(1, 16+1)]+\
-                                [f'FUNC{i}' for i in range(1, 16+1)]+\
-                                [f'WMEMory{i}' for i in range(1, 4+1)]+\
-                                [f'WMEM{i}' for i in range(1, 4+1)]+\
-                                [f'BUS{i}' for i in range(1, 4+1)]+\
-                                ['HISTogram', 'HIST', 'CLOCK']+\
-                                ['MTRend', 'MTR']))
-                           )
+        self.add_parameter(
+            "data_source",
+            label="Waveform Data source",
+            get_cmd=":WAVeform:SOURce?",
+            set_cmd=":WAVeform:SOURce {}",
+            vals=Enum(
+                *(
+                    [f"CHANnel{i}" for i in range(1, 4 + 1)]
+                    + [f"CHAN{i}" for i in range(1, 4 + 1)]
+                    + [f"DIFF{i}" for i in range(1, 2 + 1)]
+                    + [f"COMMonmode{i}" for i in range(3, 4 + 1)]
+                    + [f"COMM{i}" for i in range(3, 4 + 1)]
+                    + [f"FUNCtion{i}" for i in range(1, 16 + 1)]
+                    + [f"FUNC{i}" for i in range(1, 16 + 1)]
+                    + [f"WMEMory{i}" for i in range(1, 4 + 1)]
+                    + [f"WMEM{i}" for i in range(1, 4 + 1)]
+                    + [f"BUS{i}" for i in range(1, 4 + 1)]
+                    + ["HISTogram", "HIST", "CLOCK"]
+                    + ["MTRend", "MTR"]
+                )
+            ),
+        )
 
         # TODO: implement as array parameter to allow for setting the other filter
         # ratios
@@ -552,9 +561,8 @@ class Infiniium(VisaInstrument):
         for i in range(1,5):
             channel = InfiniiumChannel(self, f'chan{i}', i)
             channels.append(channel)
-            self.add_submodule(f'ch{i}', channel)
-        channels.lock()
-        self.add_submodule('channels', channels)
+            self.add_submodule(f"ch{i}", channel)
+        self.add_submodule("channels", channels.to_channel_tuple())
 
         # Submodules
         meassubsys = MeasurementSubsystem(self, 'measure')

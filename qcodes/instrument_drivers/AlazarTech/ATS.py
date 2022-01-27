@@ -1,19 +1,31 @@
 import ctypes
 import logging
+import sys
 import time
 import warnings
-import sys
-from typing import List, Dict, Union, Sequence, Optional, Any, Iterator, cast, TypeVar, Type, Generic
 from contextlib import contextmanager
+from typing import (
+    Any,
+    Dict,
+    Generic,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Type,
+    TypeVar,
+    Union,
+    cast,
+)
 
 import numpy as np
 
 from qcodes.instrument.base import Instrument
-from .ats_api import AlazarATSAPI
-from .utils import TraceParameter
-from .helpers import CapabilityHelper
-from .constants import NUMBER_OF_CHANNELS_FROM_BYTE_REPR, max_buffer_size
 
+from .ats_api import AlazarATSAPI
+from .constants import NUMBER_OF_CHANNELS_FROM_BYTE_REPR, max_buffer_size
+from .helpers import CapabilityHelper
+from .utils import TraceParameter
 
 logger = logging.getLogger(__name__)
 
@@ -386,6 +398,10 @@ class AlazarTech_ATS(Instrument):
         internal_buffer_size_requested = (bits_per_sample * samples_per_record *
                                           records_per_buffer) // 8
 
+        if mode == 'TS':
+            transfer_buffer_size //= buffers_per_acquisition
+            internal_buffer_size_requested //= buffers_per_acquisition
+
         if internal_buffer_size_requested > max_buffer_size:
             raise RuntimeError(f"Requested a buffer of size: "
                                f"{internal_buffer_size_requested / 1024 ** 2}"
@@ -719,14 +735,6 @@ class Buffer:
         self.size_bytes = size_bytes
         self.buffer: np.ndarray
 
-        npSampleType = {
-            ctypes.c_uint8: np.uint8,
-            ctypes.c_uint16: np.uint16,
-            ctypes.c_uint32: np.uint32,
-            ctypes.c_int32: np.int32,
-            ctypes.c_float: np.float32
-        }.get(c_sample_type, 0)
-
         bytes_per_sample = {
             ctypes.c_uint8:  1,
             ctypes.c_uint16: 2,
@@ -749,7 +757,7 @@ class Buffer:
 
         ctypes_array = (c_sample_type *
                         (size_bytes // bytes_per_sample)).from_address(self.addr)
-        self.buffer = np.frombuffer(ctypes_array, dtype=npSampleType)
+        self.buffer = np.ctypeslib.as_array(ctypes_array)
         self.ctypes_buffer = ctypes_array
 
     def free_mem(self) -> None:
@@ -865,11 +873,8 @@ class AcquisitionController(Instrument, AcquisitionInterface[Any], Generic[Outpu
             alazar_name: The name of the alazar instrument.
         """
         super().__init__(name, **kwargs)
-        self._alazar: AlazarTech_ATS = cast(
-            AlazarTech_ATS,
-            self.find_instrument(
-                alazar_name,
-                instrument_class=AlazarTech_ATS)
+        self._alazar: AlazarTech_ATS = self.find_instrument(
+            alazar_name, instrument_class=AlazarTech_ATS
         )
 
     def _get_alazar(self) -> AlazarTech_ATS:
