@@ -312,8 +312,12 @@ class DacChannel(InstrumentChannel, DacReader):
 
         # Block until the ramp is complete is block is True
         if block:
-            while self.slope.get() != 0:
-                pass
+            try:
+                while self.slope.get() != 0:
+                    pass
+            except KeyboardInterrupt:
+                # Interrupt ramp
+                self.ask_raw("S0;")
 
     def _set_dac(self, code):
         """
