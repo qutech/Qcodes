@@ -27,18 +27,18 @@ class DacReader:
 
     def _dac_v_to_code(self, volt):
         """
-        Convert a voltage to the internal dac code (number between 0-65536)
+        Convert a voltage to the internal dac code (number between 0-65535)
         based on the minimum/maximum values of a given channel.
         Midrange is 32768.
         """
-        if volt < self.min_val or volt >= self.max_val:
+        if volt < self.min_val or volt > self.max_val:
             raise ValueError(f'Cannot convert voltage {volt} V ' +
                              'to a voltage code, value out of range '
                              '({} V - {} V).'.format(self.min_val,
                                                      self.max_val))
 
         frac = (volt - self.min_val) / (self.max_val - self.min_val)
-        val = int(round(frac * 65536))
+        val = int(round(frac * 65535))
         # extra check to be absolutely sure that the instrument does nothing
         # receive an out-of-bounds value
         if val > 65535 or val < 0:
@@ -49,11 +49,11 @@ class DacReader:
 
     def _dac_code_to_v(self, code):
         """
-        Convert a voltage to the internal dac code (number between 0-65536)
+        Convert a voltage to the internal dac code (number between 0-65535)
         based on the minimum/maximum values of a given channel.
         Midrange is 32768.
         """
-        frac = code/65536.0
+        frac = code/65535.0
         return (frac * (self.max_val - self.min_val)) + self.min_val
 
     def _set_slot(self):
@@ -297,7 +297,7 @@ class DacChannel(InstrumentChannel, DacReader):
         # the number of time steps in the ramp multiplied by 65536
         slope = int(((e_val - c_val)/(t_rate*secs))*65536)
 
-        # Now let's set up our limits and ramo slope
+        # Now let's set up our limits and ramp slope
         if slope > 0:
             self.upper_ramp_limit.set(val)
         else:
@@ -444,7 +444,7 @@ class Decadac(VisaInstrument, DacReader):
                 This value should correspond to the DAC code 0.
 
             max_val: The maximum value in volts that can be output by the DAC.
-                This value should correspond to the DAC code 65536.
+                This value should correspond to the DAC code 65535.
 
         """
 
@@ -457,7 +457,7 @@ class Decadac(VisaInstrument, DacReader):
         channels = ChannelList(self, "Channels", self.DAC_CHANNEL_CLASS,
                                snapshotable=False)
         slots = ChannelList(self, "Slots", self.DAC_SLOT_CLASS)
-        for i in range(5):  # Create the 6 DAC slots
+        for i in range(5):  # Create the 5 DAC slots
             slots.append(self.DAC_SLOT_CLASS(self, f"Slot{i}", i,
                                              min_val, max_val))
             slot_channels = slots[i].channels
