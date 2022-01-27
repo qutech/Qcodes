@@ -1,9 +1,10 @@
 from functools import partial
 from time import time
-from typing import Union, cast
+from typing import Sequence, Union, cast
 
 from qcodes import ChannelList, InstrumentChannel, VisaInstrument
 from qcodes.utils import validators as vals
+from qcodes.instrument.parameter import ScaledParameter
 
 number = Union[float, int]
 
@@ -173,11 +174,12 @@ class DacChannel(InstrumentChannel, DacReader):
     A single DAC channel of the DECADAC
     """
     _CHANNEL_VAL = vals.Ints(0, 3)
+    _DIVISION_VAL = vals.Numbers(min_value=1)
     _MIN_VAL_VAL = vals.Enum(-10, 0)
     _MAX_VAL_VAL = vals.Enum(0, 10)
 
     def __init__(self, parent, name, channel, min_val: number = -10,
-                 max_val: number = 10):
+                 max_val: number = 10, division: number = 1):
         super().__init__(parent, name)
 
         # Validate slot and channel values
@@ -207,15 +209,26 @@ class DacChannel(InstrumentChannel, DacReader):
         # rather than the newer 'd' command for backwards compatibility
         self._volt_val = vals.Numbers(self.min_val, self.max_val)
         self.add_parameter(
-            "volt",
+            "volt_unscaled",
             get_cmd=partial(self._query_address, self._base_addr + 9, 1),
             get_parser=self._dac_code_to_v,
             set_cmd=self._set_dac,
             set_parser=self._dac_v_to_code,
             vals=self._volt_val,
-            label=f"channel {channel+self._slot*4}",
+            label=f"channel {channel+self._slot*4} unscaled",
             unit="V",
         )
+
+        # Voltage division factor
+        self._DIVISION_VAL.validate(division)
+        self.volt = ScaledParameter(
+            self.volt_unscaled,
+            division=division,
+            name='volt',
+            label=f"channel {channel+self._slot*4}",
+            unit="V"
+        )
+
         # The limit commands are used to sweep dac voltages. They are not
         # safety features.
         self.add_parameter("lower_ramp_limit",
@@ -285,10 +298,15 @@ class DacChannel(InstrumentChannel, DacReader):
 
             block (bool): Should the call block until the ramp is complete?
         """
+        # Multiply rate with division factor to get hardware ramp rate. Need to
+        # do this manually instead of making self.ramp_rate a ScaledParameter
+        # since rate can also be supplied by the user. val has already been
+        # converted by ScaledParameter.
+        rate *= self.volt.division
 
         # We need to know the current dac value (in raw units), as well as the
         # update rate
-        c_volt = self.volt.get()  # Current Voltage
+        c_volt = self.volt_unscaled.get()  # Actual current voltage (unscaled)
         if c_volt == val:
             # If we are already at the right voltage, we don't need to ramp
             return
@@ -358,7 +376,8 @@ class DacSlot(InstrumentChannel, DacReader):
     _SLOT_VAL = vals.Ints(0, 4)
     SLOT_MODE_DEFAULT = "Coarse"
 
-    def __init__(self, parent, name, slot, min_val=-10, max_val=10):
+    def __init__(self, parent, name, slot, min_val=-10, max_val=10,
+                 division=1):
         super().__init__(parent, name)
 
         # Validate slot and channel values
@@ -368,12 +387,15 @@ class DacSlot(InstrumentChannel, DacReader):
         # Store whether we have access to the VERSADAC EEPROM
         self._VERSA_EEPROM_available = self.parent._VERSA_EEPROM_available
 
+        division = _parse_division_arg(division, 4)
+
         # Create a list of channels in the slot
         channels = ChannelList(self, "Slot_Channels", parent.DAC_CHANNEL_CLASS)
         for i in range(4):
             channels.append(parent.DAC_CHANNEL_CLASS(self, f"Chan{i}",
                                                      i, min_val=min_val,
-                                                     max_val=max_val))
+                                                     max_val=max_val,
+                                                     division=division[i]))
         self.add_submodule("channels", channels)
         # Set the slot mode. Valid modes are:
         #   Off: Channel outputs are disconnected from the input, grounded
@@ -437,6 +459,7 @@ class Decadac(VisaInstrument, DacReader):
 
     def __init__(self, name: str, address: str,
                  min_val: number=-10, max_val: number=10,
+                 division: Union[number, Sequence[number]] = 1,
                  **kwargs) -> None:
         """
 
@@ -456,12 +479,18 @@ class Decadac(VisaInstrument, DacReader):
             max_val: The maximum value in volts that can be output by the DAC.
                 This value should correspond to the DAC code 65535.
 
+            division: number
+                A hardware voltage division factor for each channel that will
+                be compensated in software. The default is 1 (no voltage
+                divider). See also
+                :class:`qcodes.instrument.parameter.ScaledParameter`.
         """
-
         super().__init__(name, address, **kwargs)
 
         # Do feature detection
         self._feature_detect()
+
+        division = _parse_division_arg(division, 4*5)
 
         # Create channels
         channels = ChannelList(self, "Channels", self.DAC_CHANNEL_CLASS,
@@ -469,7 +498,8 @@ class Decadac(VisaInstrument, DacReader):
         slots = ChannelList(self, "Slots", self.DAC_SLOT_CLASS)
         for i in range(5):  # Create the 5 DAC slots
             slots.append(self.DAC_SLOT_CLASS(self, f"Slot{i}", i,
-                                             min_val, max_val))
+                                             min_val, max_val,
+                                             division[4*i:4*(i+1)]))
             slot_channels = slots[i].channels
             slot_channels = cast(ChannelList, slot_channels)
             channels.extend(slot_channels)
@@ -599,3 +629,12 @@ class Decadac(VisaInstrument, DacReader):
         all writes must also read a response.
         """
         return self.ask(cmd)
+
+
+def _parse_division_arg(division, nchan):
+    if not isinstance(division, Sequence):
+        division = [division]*nchan
+    elif len(division) != nchan:
+        raise ValueError('division should be scalar or sequence of len '
+                         f'{nchan}')
+    return division
