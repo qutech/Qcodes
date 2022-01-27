@@ -173,8 +173,11 @@ class DacChannel(InstrumentChannel, DacReader):
     A single DAC channel of the DECADAC
     """
     _CHANNEL_VAL = vals.Ints(0, 3)
+    _MIN_VAL_VAL = vals.Enum(-10, 0)
+    _MAX_VAL_VAL = vals.Enum(0, 10)
 
-    def __init__(self, parent, name, channel, min_val=-5, max_val=5):
+    def __init__(self, parent, name, channel, min_val: number = -10,
+                 max_val: number = 10):
         super().__init__(parent, name)
 
         # Validate slot and channel values
@@ -191,7 +194,10 @@ class DacChannel(InstrumentChannel, DacReader):
         # 8: DAC Value (double)
         self._base_addr = 1536 + (16*4)*self._slot + 16*self._channel
 
-        # Store min/max voltages
+        # Store min/max voltages. Possible ranges are [-10, 0], [-10, 10], and
+        # [0, 10].
+        self._MIN_VAL_VAL.validate(min_val)
+        self._MAX_VAL_VAL.validate(max_val)
         assert(min_val < max_val)
         self.min_val = min_val
         self.max_val = max_val
@@ -348,7 +354,7 @@ class DacSlot(InstrumentChannel, DacReader):
     _SLOT_VAL = vals.Ints(0, 4)
     SLOT_MODE_DEFAULT = "Coarse"
 
-    def __init__(self, parent, name, slot, min_val=-5, max_val=5):
+    def __init__(self, parent, name, slot, min_val=-10, max_val=10):
         super().__init__(parent, name)
 
         # Validate slot and channel values
@@ -426,7 +432,7 @@ class Decadac(VisaInstrument, DacReader):
     DAC_SLOT_CLASS = DacSlot
 
     def __init__(self, name: str, address: str,
-                 min_val: number=-5, max_val: number=5,
+                 min_val: number=-10, max_val: number=10,
                  **kwargs) -> None:
         """
 
