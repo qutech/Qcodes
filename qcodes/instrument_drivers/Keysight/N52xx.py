@@ -37,8 +37,7 @@ class PNAAxisParameter(Parameter):
         """
         Return the axis values, with values retrieved from the parent instrument
         """
-        # pylint: disable=line-too-long
-        return np.linspace(self._startparam(), self._stopparam(), self._pointsparam())  # type: ignore
+        return np.linspace(self._startparam(), self._stopparam(), self._pointsparam())
 
 
 class PNALogAxisParamter(PNAAxisParameter):
@@ -47,8 +46,7 @@ class PNALogAxisParamter(PNAAxisParameter):
         Return the axis values on a log scale, with values retrieved from
         the parent instrument
         """
-        # pylint: disable=line-too-long
-        return np.geomspace(self._startparam(), self._stopparam(), self._pointsparam())  # type: ignore
+        return np.geomspace(self._startparam(), self._stopparam(), self._pointsparam())
 
 
 class PNATimeAxisParameter(PNAAxisParameter):
@@ -57,7 +55,7 @@ class PNATimeAxisParameter(PNAAxisParameter):
         Return the axis values on a time scale, with values retrieved from
         the parent instrument
         """
-        return np.linspace(0, self._stopparam(), self._pointsparam())  # type: ignore
+        return np.linspace(0, self._stopparam(), self._pointsparam())
 
 
 class FormattedSweep(ParameterWithSetpoints):
@@ -89,7 +87,7 @@ class FormattedSweep(ParameterWithSetpoints):
             raise RuntimeError(
                 "Cannot return setpoints if not attached " "to instrument"
             )
-        root_instrument: "PNABase" = self.root_instrument  # type: ignore
+        root_instrument: "PNABase" = self.root_instrument  # type: ignore[assignment]
         sweep_type = root_instrument.sweep_type()
         if sweep_type == "LIN":
             return (root_instrument.frequency_axis,)

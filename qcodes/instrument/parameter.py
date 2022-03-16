@@ -73,6 +73,7 @@ more specialized ones:
 # if everyone is happy to use these classes.
 
 import collections
+import collections.abc
 import enum
 import logging
 import os
@@ -99,10 +100,11 @@ from typing import (
     Type,
     Union,
     cast,
+    overload,
 )
 
 import numpy
-from typing_extensions import Protocol
+from typing_extensions import Literal, Protocol
 
 from qcodes.data.data_array import DataArray
 from qcodes.instrument.sweep_values import SweepFixedValues
@@ -147,7 +149,7 @@ class _SetParamContext:
     """
     def __init__(self, parameter: "_BaseParameter", value: ParamDataType,
                  allow_changes: bool = False):
-        self._parameter = parameter
+        self._parameter: "_BaseParameter" = parameter
         self._value = value
         self._allow_changes = allow_changes
         self._original_value = None
@@ -161,16 +163,15 @@ class _SetParamContext:
 
         if not self._allow_changes:
             self._original_settable = self._parameter.settable
-            self._parameter._settable = False  # type: ignore[has-type]
+            self._parameter._settable = False
 
     def __exit__(self,
                  typ: Optional[Type[BaseException]],
                  value: Optional[BaseException],
                  traceback: Optional[TracebackType]) -> None:
         if not self._allow_changes:
-            self._parameter._settable = (  # type: ignore[has-type]
-                self._original_settable
-            )
+            assert self._original_settable is not None
+            self._parameter._settable = self._original_settable
 
         if self._parameter.cache() != self._original_value:
             self._parameter.set(self._original_value)
@@ -359,7 +360,7 @@ class _BaseParameter(Metadatable):
             and not getattr(self.set_raw,
                             '__qcodes_is_abstract_method__', False)
         )
-        self._settable = False
+        self._settable: bool = False
         if implements_set_raw:
             self.set = self._wrap_set(self.set_raw)
             self._settable = True
@@ -441,6 +442,14 @@ class _BaseParameter(Metadatable):
     def __repr__(self) -> str:
         return named_repr(self)
 
+    @overload
+    def __call__(self) -> ParamDataType:
+        pass
+
+    @overload
+    def __call__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
     def __call__(self, *args: Any, **kwargs: Any) -> Optional[ParamDataType]:
         if len(args) == 0 and len(kwargs) == 0:
             if self.gettable:
@@ -481,8 +490,10 @@ class _BaseParameter(Metadatable):
         """
         if self.snapshot_exclude:
             warnings.warn(
-                f"Parameter ({self.name}) is used in the snapshot while it "
-                f"should be excluded from the snapshot")
+                f"Parameter ({self.full_name}) is used in the snapshot while it "
+                f"should be excluded from the snapshot",
+                stacklevel=2,
+            )
 
         state: Dict[str, Any] = {'__class__': full_class(self),
                                  'full_name': str(self)}
@@ -1168,8 +1179,8 @@ class Parameter(_BaseParameter):
         instrument: Optional["InstrumentBase"] = None,
         label: Optional[str] = None,
         unit: Optional[str] = None,
-        get_cmd: Optional[Union[str, Callable[..., Any], bool]] = None,
-        set_cmd: Optional[Union[str, Callable[..., Any], bool]] = False,
+        get_cmd: Optional[Union[str, Callable[..., Any], Literal[False]]] = None,
+        set_cmd: Optional[Union[str, Callable[..., Any], Literal[False]]] = False,
         initial_value: Optional[Union[float, str]] = None,
         max_val_age: Optional[float] = None,
         vals: Optional[Validator[Any]] = None,
@@ -1236,8 +1247,15 @@ class Parameter(_BaseParameter):
                 self.get_raw = (  # type: ignore[assignment]
                     lambda: self.cache.raw_value)
             else:
-                exec_str_ask = getattr(instrument, "ask", None) \
-                    if instrument else None
+                if isinstance(get_cmd, str) and instrument is None:
+                    raise TypeError(
+                        f"Cannot use a str get_cmd without "
+                        f"binding to an instrument. "
+                        f"Got: get_cmd {get_cmd} for parameter {name}"
+                    )
+
+                exec_str_ask = getattr(instrument, "ask", None) if instrument else None
+
                 self.get_raw = Command(arg_count=0,  # type: ignore[assignment]
                                        cmd=get_cmd,
                                        exec_str=exec_str_ask)
@@ -1252,10 +1270,19 @@ class Parameter(_BaseParameter):
             if set_cmd is None:
                 self.set_raw: Callable[..., Any] = lambda x: x
             else:
-                exec_str_write = getattr(instrument, "write", None) \
-                    if instrument else None
-                self.set_raw = Command(arg_count=1, cmd=set_cmd,
-                                       exec_str=exec_str_write)
+                if isinstance(set_cmd, str) and instrument is None:
+                    raise TypeError(
+                        f"Cannot use a str set_cmd without "
+                        f"binding to an instrument. "
+                        f"Got: set_cmd {set_cmd} for parameter {name}"
+                    )
+
+                exec_str_write = (
+                    getattr(instrument, "write", None) if instrument else None
+                )
+                self.set_raw = Command(
+                    arg_count=1, cmd=set_cmd, exec_str=exec_str_write
+                )
             self._settable = True
             self.set = self._wrap_set(self.set_raw)
 
@@ -1263,8 +1290,9 @@ class Parameter(_BaseParameter):
 
         #: Label of the data used for plots etc.
         self.label: str = name if label is None else label
-        #: The unit of measure. Use ``''`` for unitless.
+
         self.unit = unit if unit is not None else ''
+        self._unitval: str
 
         if initial_value is not None and initial_cache_value is not None:
             raise SyntaxError('It is not possible to specify both of the '
@@ -1291,6 +1319,18 @@ class Parameter(_BaseParameter):
                 docstring,
                 '',
                 self.__doc__))
+
+    @property
+    def unit(self) -> str:
+        """
+        The unit of measure. Use ``''`` (the empty string)
+        for unitless.
+        """
+        return self._unitval
+
+    @unit.setter
+    def unit(self, unit: str) -> None:
+        self._unitval = unit
 
     def __getitem__(self, keys: Any) -> 'SweepFixedValues':
         """
@@ -2630,17 +2670,20 @@ class InstrumentRefParameter(Parameter):
         **kwargs: Passed to InstrumentRefParameter parent class
     """
 
-    def __init__(self, name: str,
-                 instrument: Optional['InstrumentBase'] = None,
-                 label: Optional[str] = None,
-                 unit: Optional[str] = None,
-                 get_cmd: Optional[Union[str, Callable[..., Any], bool]] = None,
-                 set_cmd: Optional[Union[str, Callable[..., Any], bool]] = None,
-                 initial_value: Optional[Union[float, str]] = None,
-                 max_val_age: Optional[float] = None,
-                 vals: Optional[Validator[Any]] = None,
-                 docstring: Optional[str] = None,
-                 **kwargs: Any) -> None:
+    def __init__(
+        self,
+        name: str,
+        instrument: Optional["InstrumentBase"] = None,
+        label: Optional[str] = None,
+        unit: Optional[str] = None,
+        get_cmd: Optional[Union[str, Callable[..., Any], Literal[False]]] = None,
+        set_cmd: Optional[Union[str, Callable[..., Any], Literal[False]]] = None,
+        initial_value: Optional[Union[float, str]] = None,
+        max_val_age: Optional[float] = None,
+        vals: Optional[Validator[Any]] = None,
+        docstring: Optional[str] = None,
+        **kwargs: Any,
+    ) -> None:
         if vals is None:
             vals = Strings()
         if set_cmd is not None:
