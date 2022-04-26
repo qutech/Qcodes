@@ -346,8 +346,10 @@ class DacChannel(InstrumentChannel, DacReader):
                 while self.slope.get() != 0:
                     pass
             except KeyboardInterrupt:
-                # Interrupt ramp
-                self.ask_raw("S0;")
+                self.abort_ramp()
+
+            # Update monitor, doesn't make sense if not blocking
+            self.volt.get()
 
     def _set_dac(self, code):
         """
@@ -379,6 +381,10 @@ class DacChannel(InstrumentChannel, DacReader):
         """
         self._set_channel()
         return self.ask_raw(cmd)
+
+    def abort_ramp(self):
+        """Interrupts the programmed ramp."""
+        self.ask_raw("S0;")
 
     def ramp(self, val, rate: number = None, block: bool = True):
         """
@@ -548,10 +554,18 @@ class Decadac(VisaInstrument, DacReader):
         Args:
             volt(float): The voltage to set all gates to.
         """
-        for chan in self.channels:
-            chan.volt.set(volt)
+        self.set_channels(range(len(self.channels)), volt)
 
-    def ramp_all(self, volt, ramp_rate):
+    def set_channels(self, channels, voltages):
+        channels = [self.channels[channel] for channel in (
+            [channels] if not isinstance(channels, Sequence) else channels
+        )]
+        voltages = _parse_channel_arg(voltages, len(channels), 'voltages')
+
+        for channel, voltage in zip(channels, voltages):
+            channel.volt.set(voltage)
+
+    def ramp_all(self, volt, ramp_rate, block=True):
         """
         Ramp all dac channels to a specific voltage at the given rate
         simultaneously. Note that the ramps are not synchronized due to
@@ -563,15 +577,30 @@ class Decadac(VisaInstrument, DacReader):
 
             ramp_rate(float): The rate in volts per second to ramp
         """
-        # Start all channels ramping
-        for chan in self.channels:
-            chan._ramp(volt, ramp_rate, block=False)
+        self.ramp_channels(range(len(self.channels)), volt, ramp_rate, block)
 
-        # Wait for all channels to complete ramping.
-        # The slope is reset to 0 once ramping is complete.
-        for chan in self.channels:
-            while chan.slope.get():
-                pass
+    def ramp_channels(self, channels, voltages, ramp_rates, block=True):
+        channels = [self.channels[channel] for channel in (
+            [channels] if not isinstance(channels, Sequence) else channels
+        )]
+        voltages = _parse_channel_arg(voltages, len(channels), 'voltages')
+        ramp_rates = _parse_channel_arg(ramp_rates, len(channels), 'ramp_rate')
+
+        # Program ramps
+        for channel, voltage, ramp_rate in zip(channels, voltages, ramp_rates):
+            channel.ramp(voltage, ramp_rate, block=False)
+
+        if block:
+            # Catch keyboard interrupts while the ramps are running.
+            try:
+                while any(channel.slope.get() for channel in channels):
+                    pass
+            except KeyboardInterrupt:
+                for channel in channels:
+                    channel.abort_ramp()
+            finally:
+                for channel in channels:
+                    channel.volt.get()
 
     def get_idn(self):
         """
@@ -663,10 +692,10 @@ class Decadac(VisaInstrument, DacReader):
         return self.ask(cmd)
 
 
-def _parse_division_arg(division, nchan):
-    if not isinstance(division, Sequence):
-        division = [division]*nchan
-    elif len(division) != nchan:
-        raise ValueError('division should be scalar or sequence of len '
+def _parse_channel_arg(val, nchan, arg):
+    if not hasattr(val, '__len__'):
+        val = [val]*nchan
+    elif len(val) != nchan:
+        raise ValueError(f'{arg} should be scalar or sequence of len '
                          f'{nchan}')
-    return division
+    return val
