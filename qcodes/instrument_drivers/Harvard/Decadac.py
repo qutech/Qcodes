@@ -424,14 +424,16 @@ class DacSlot(InstrumentChannel, DacReader):
         # Store whether we have access to the VERSADAC EEPROM
         self._VERSA_EEPROM_available = self.parent._VERSA_EEPROM_available
 
-        division = _parse_division_arg(division, 4)
+        min_val = _parse_channel_arg(min_val, 4, 'min_val')
+        max_val = _parse_channel_arg(max_val, 4, 'min_val')
+        division = _parse_channel_arg(division, 4, 'division')
 
         # Create a list of channels in the slot
         channels = ChannelList(self, "Slot_Channels", parent.DAC_CHANNEL_CLASS)
         for i in range(4):
             channels.append(parent.DAC_CHANNEL_CLASS(self, f"Chan{i}",
-                                                     i, min_val=min_val,
-                                                     max_val=max_val,
+                                                     i, min_val=min_val[i],
+                                                     max_val=max_val[i],
                                                      division=division[i]))
         self.add_submodule("channels", channels)
         # Set the slot mode. Valid modes are:
@@ -528,7 +530,9 @@ class Decadac(VisaInstrument, DacReader):
         # Do feature detection
         self._feature_detect()
 
-        division = _parse_division_arg(division, 4*5)
+        min_val = _parse_channel_arg(min_val, 4*5, 'min_val')
+        max_val = _parse_channel_arg(max_val, 4*5, 'max_val')
+        division = _parse_channel_arg(division, 4*5, 'division')
 
         # Create channels
         channels = ChannelList(self, "Channels", self.DAC_CHANNEL_CLASS,
