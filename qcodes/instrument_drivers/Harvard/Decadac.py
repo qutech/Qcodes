@@ -259,7 +259,7 @@ class DacChannel(InstrumentChannel, DacReader):
 
         # Manual parameters to control whether DAC channels should ramp to
         # voltages or jump
-        self._ramp_val = vals.Numbers(0, 10)
+        self._ramp_val = vals.Numbers(0, 10*division)
         self.add_parameter("enable_ramp", get_cmd=None, set_cmd=None,
                            initial_value=False,
                            vals=vals.Bool())
