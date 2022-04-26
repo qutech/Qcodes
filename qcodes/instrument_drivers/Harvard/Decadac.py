@@ -207,7 +207,6 @@ class DacChannel(InstrumentChannel, DacReader):
         # Add channel parameters
         # Note we will use the older addresses to read the value from the dac
         # rather than the newer 'd' command for backwards compatibility
-        self._volt_val = vals.Numbers(self.min_val, self.max_val)
         self.add_parameter(
             "volt_unscaled",
             get_cmd=partial(self._query_address, self._base_addr + 9, 1),
@@ -221,10 +220,11 @@ class DacChannel(InstrumentChannel, DacReader):
 
         # Voltage division factor
         self._DIVISION_VAL.validate(division)
-        self.volt = ScaledParameter(
-            self.volt_unscaled,
+        self.add_parameter(
+            'volt',
+            ScaledParameter,
+            output=self.volt_unscaled,
             division=division,
-            name='volt',
             label=f"channel {channel+self._slot*4}",
             unit="V"
         )
@@ -283,22 +283,38 @@ class DacChannel(InstrumentChannel, DacReader):
                                set_parser=self._dac_v_to_code,
                                vals=vals.Numbers(self.min_val, self.max_val))
 
+    @property
+    def _volt_val(self):
+        """Dynamic validator that allow for changing channel ranges."""
+        return vals.Numbers(self.min_val, self.max_val)
+
+    def _validate_division_aware(self, value, validator):
+        try:
+            validator.validate(value)
+        except ValueError as ve:
+            raise ValueError('Did you take into account the voltage '
+                             f'division of {self.volt.division}?') from ve
+
     def _ramp(self, val, rate, block=True):
         """
         Ramp the DAC to a given voltage.
 
         Params:
-            val (float): The voltage to ramp to in volts
+            val (float): The voltage to ramp to in volts.
 
-            rate (float): The ramp rate in units of volts/s
+                .. warning::
+                    Does not take into account a voltage division factor!
 
+            rate (float): The ramp rate in units of volts/s. Takes into account division factor
             block (bool): Should the call block until the ramp is complete?
         """
         # Multiply rate with division factor to get hardware ramp rate. Need to
         # do this manually instead of making self.ramp_rate a ScaledParameter
         # since rate can also be supplied by the user. val has already been
-        # converted by ScaledParameter.
+        # converted by ScaledParameter if this function was called from _set_dac,
+        # or manually in self.ramp() if called from there.
         rate *= self.volt.division
+        self._validate_division_aware(rate, self._ramp_val)
 
         # We need to know the current dac value (in raw units), as well as the
         # update rate
@@ -473,7 +489,8 @@ class Decadac(VisaInstrument, DacReader):
     DAC_SLOT_CLASS = DacSlot
 
     def __init__(self, name: str, address: str,
-                 min_val: number=-10, max_val: number=10,
+                 min_val: Union[number, Sequence[number]] = -10,
+                 max_val: Union[number, Sequence[number]] = +10,
                  division: Union[number, Sequence[number]] = 1,
                  **kwargs) -> None:
         """
@@ -513,7 +530,7 @@ class Decadac(VisaInstrument, DacReader):
         slots = ChannelList(self, "Slots", self.DAC_SLOT_CLASS)
         for i in range(5):  # Create the 5 DAC slots
             slots.append(self.DAC_SLOT_CLASS(self, f"Slot{i}", i,
-                                             min_val, max_val,
+                                             min_val[4*i:4*(i+1)], max_val[4*i:4*(i+1)],
                                              division[4*i:4*(i+1)]))
             slot_channels = slots[i].channels
             slot_channels = cast(ChannelList, slot_channels)
