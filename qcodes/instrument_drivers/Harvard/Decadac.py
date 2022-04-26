@@ -267,10 +267,6 @@ class DacChannel(InstrumentChannel, DacReader):
                            initial_value=0.1,
                            vals=self._ramp_val, unit="V/s")
 
-        # Add ramp function to the list of functions
-        self.add_function("ramp", call_cmd=self._ramp, args=(self._volt_val,
-                                                             self._ramp_val))
-
         # If we have access to the VERSADAC (slot) EEPROM, we can set the
         # initial value of the channel.
         # NOTE: these values will be overwritten by a K3 calibration
@@ -367,6 +363,25 @@ class DacChannel(InstrumentChannel, DacReader):
         """
         self._set_channel()
         return self.ask_raw(cmd)
+
+    def ramp(self, val, rate: number = None, block: bool = True):
+        """
+        Ramp the DAC to a given voltage.
+
+        Params:
+            val (float): The voltage to ramp to in volts.
+                Takes into account voltage division factor.
+            rate (float): The ramp rate in units of volts/s.
+                Defaults to self.ramp_rate().
+                Takes into account voltage division factor.
+            block (bool): Should the call block until the ramp is complete?
+                Defaults to True.
+        """
+        # Modify the set value by the voltage division factor.
+        # The ramp rate is taken care of by _ramp.
+        val *= self.volt.division
+        self._validate_division_aware(val, self._volt_val)
+        self._ramp(val, rate or self.ramp_rate.get(), block)
 
 
 class DacSlot(InstrumentChannel, DacReader):
