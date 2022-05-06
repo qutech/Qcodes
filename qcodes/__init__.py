@@ -25,6 +25,7 @@ add_to_spyder_UMR_excludelist('qcodes')
 import atexit
 
 from qcodes.dataset.data_set import (
+    get_guids_by_run_spec,
     load_by_counter,
     load_by_guid,
     load_by_id,
@@ -44,6 +45,7 @@ from qcodes.dataset.measurements import Measurement
 from qcodes.dataset.sqlite.database import (
     initialise_database,
     initialise_or_create_database_at,
+    initialised_database_at,
 )
 from qcodes.dataset.sqlite.settings import SQLiteSettings
 from qcodes.instrument.base import Instrument, find_or_create_instrument

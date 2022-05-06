@@ -1,23 +1,24 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.1.0
+    rev: v4.2.0
     hooks:
     - id: trailing-whitespace
     - id: end-of-file-fixer
-    - id: check-yaml
+    - id: check-ast
     - id: check-json
       exclude: asv.conf.json
+    - id: check-toml
+    - id: check-yaml
     - id: debug-statements
-    - id: check-ast
     - id: mixed-line-ending
       args: ['--fix=no']
   - repo: https://github.com/asottile/pyupgrade
-    rev: v2.31.0
+    rev: v2.32.0
     hooks:
     - id: pyupgrade
       args: ['--py37-plus', '--keep-runtime-typing']
   - repo: https://github.com/akaihola/darker
-    rev: github-action-v1.3.2-2
+    rev: 1.5.0
     hooks:
       -   id: darker
           args: [-i]
