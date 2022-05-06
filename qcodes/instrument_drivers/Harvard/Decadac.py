@@ -1,12 +1,11 @@
 from functools import partial
+from numbers import Number, Integral
 from time import time
 from typing import Sequence, Union, cast
 
 from qcodes import ChannelList, InstrumentChannel, VisaInstrument
 from qcodes.utils import validators as vals
 from qcodes.instrument.parameter import ScaledParameter
-
-number = Union[float, int]
 
 
 class DACException(Exception):
@@ -178,8 +177,8 @@ class DacChannel(InstrumentChannel, DacReader):
     _MIN_VAL_VAL = vals.Enum(-10, 0)
     _MAX_VAL_VAL = vals.Enum(0, 10)
 
-    def __init__(self, parent, name, channel, min_val: number = -10,
-                 max_val: number = 10, division: number = 1):
+    def __init__(self, parent, name, channel, min_val: Number = -10,
+                 max_val: Number = 10, division: Number = 1):
         super().__init__(parent, name)
 
         # Validate slot and channel values
@@ -386,7 +385,7 @@ class DacChannel(InstrumentChannel, DacReader):
         """Interrupts the programmed ramp."""
         self.ask_raw("S0;")
 
-    def ramp(self, val, rate: number = None, block: bool = True):
+    def ramp(self, val, rate: Number = None, block: bool = True):
         """
         Ramp the DAC to a given voltage.
 
@@ -497,9 +496,9 @@ class Decadac(VisaInstrument, DacReader):
     DAC_SLOT_CLASS = DacSlot
 
     def __init__(self, name: str, address: str,
-                 min_val: Union[number, Sequence[number]] = -10,
-                 max_val: Union[number, Sequence[number]] = +10,
-                 division: Union[number, Sequence[number]] = 1,
+                 min_val: Union[Number, Sequence[Number]] = -10,
+                 max_val: Union[Number, Sequence[Number]] = +10,
+                 division: Union[Number, Sequence[Number]] = 1,
                  **kwargs) -> None:
         """
 
@@ -561,7 +560,7 @@ class Decadac(VisaInstrument, DacReader):
         self.set_channels(range(len(self.channels)), volt)
 
     def set_channels(self, channels, voltages):
-        channels = [self.channels[channel] for channel in (
+        channels = [self.channels[_channel_to_index(channel)] for channel in (
             [channels] if not isinstance(channels, Sequence) else channels
         )]
         voltages = _parse_channel_arg(voltages, len(channels), 'voltages')
@@ -584,7 +583,7 @@ class Decadac(VisaInstrument, DacReader):
         self.ramp_channels(range(len(self.channels)), volt, ramp_rate, block)
 
     def ramp_channels(self, channels, voltages, ramp_rates, block=True):
-        channels = [self.channels[channel] for channel in (
+        channels = [self.channels[_channel_to_index(channel)] for channel in (
             [channels] if not isinstance(channels, Sequence) else channels
         )]
         voltages = _parse_channel_arg(voltages, len(channels), 'voltages')
@@ -703,3 +702,13 @@ def _parse_channel_arg(val, nchan, arg):
         raise ValueError(f'{arg} should be scalar or sequence of len '
                          f'{nchan}')
     return val
+
+
+def _channel_to_index(channel):
+    def idx(slot, chan):
+        return 4*slot + chan
+    if isinstance(channel, Integral):
+        return channel
+    elif isinstance(channel, DacChannel):
+        return idx(*[int(part[-1]) for part in channel.name_parts[1:]])
+    raise TypeError(f'Channel should be int or DacChannel, not {type(channel)}')
