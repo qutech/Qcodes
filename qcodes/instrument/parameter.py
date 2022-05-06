@@ -2773,7 +2773,9 @@ class ScaledParameter(Parameter):
                  gain: Optional[Union[float, Parameter]] = None,
                  name: Optional[str] = None,
                  label: Optional[str] = None,
-                 unit: Optional[str] = None) -> None:
+                 unit: Optional[str] = None,
+                 instrument: Optional["InstrumentBase"] = None,
+                 **kwargs) -> None:
 
         # Set label
         if label:
@@ -2795,6 +2797,7 @@ class ScaledParameter(Parameter):
 
         super().__init__(
             name=name,
+            instrument=instrument,
             label=self.label,
             unit=self.unit
             )
