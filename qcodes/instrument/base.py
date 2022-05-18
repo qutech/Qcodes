@@ -4,7 +4,7 @@ import logging
 import time
 import warnings
 import weakref
-from abc import ABC, ABCMeta, abstractmethod
+from abc import ABCMeta
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -21,6 +21,7 @@ from typing import (
 )
 
 import numpy as np
+from typing_extensions import Protocol
 
 from qcodes.logger.instrument_logger import get_instrument_logger
 from qcodes.utils.helpers import DelegateAttributes, full_class, strip_attrs
@@ -51,7 +52,6 @@ class InstrumentBase(Metadatable, DelegateAttributes):
     """
 
     def __init__(self, name: str, metadata: Optional[Mapping[Any, Any]] = None) -> None:
-        self._name = str(name)
         self._short_name = str(name)
 
         self.parameters: Dict[str, _BaseParameter] = {}
@@ -89,16 +89,6 @@ class InstrumentBase(Metadatable, DelegateAttributes):
         self._meta_attrs = ['name']
 
         self.log = get_instrument_logger(self, __name__)
-
-    @property
-    def name(self) -> str:
-        """Name of the instrument"""
-        return self._name
-
-    @property
-    def short_name(self) -> str:
-        """Short name of the instrument"""
-        return self._short_name
 
     def add_parameter(
         self, name: str, parameter_class: type = Parameter, **kwargs: Any
@@ -377,6 +367,26 @@ class InstrumentBase(Metadatable, DelegateAttributes):
     def full_name(self) -> str:
         return "_".join(self.name_parts)
 
+    @property
+    def name(self) -> str:
+        """Name of the instrument
+        This is equivalent to full_name for backwards compatibility.
+        """
+        return self.full_name
+
+    @property
+    def _name(self) -> str:
+        """
+        Private alias kept here for backwards compatibility
+        see https://github.com/zhinst/zhinst-qcodes/issues/27
+        """
+        return self.full_name
+
+    @property
+    def short_name(self) -> str:
+        """Short name of the instrument"""
+        return self._short_name
+
     def _is_abstract(self) -> bool:
         """
         This method is run after the initialization of an instrument but
@@ -480,7 +490,7 @@ class InstrumentBase(Metadatable, DelegateAttributes):
                 p.validate(value)
 
 
-class AbstractInstrumentMeta(ABCMeta):
+class InstrumentMeta(ABCMeta):
     """
     Metaclass used to customize Instrument creation. We want to register the
     instance iff __init__ successfully runs, however we can only do this if
@@ -496,8 +506,12 @@ class AbstractInstrumentMeta(ABCMeta):
     complete. Note this is part of the spec and will work in alternate python
     implementations like pypy too.
 
-    Note: Because we want AbstractInstrument to subclass ABC, we subclass
-    `ABCMeta` instead of `type`.
+    We inherit from ABCMeta rather than type for backwards compatibility
+    reasons. There may be instrument interfaces that are defined in
+    terms of an ABC. Inheriting directly from type here would then give
+    `TypeError: metaclass conflict: the metaclass of a derived class must
+    be a (non-strict) subclass of the metaclasses of all its bases`
+    for a class that inherits from ABC
     """
 
     def __call__(cls, *args: Any, **kwargs: Any) -> Any:
@@ -518,19 +532,22 @@ class AbstractInstrumentMeta(ABCMeta):
         return new_inst
 
 
-class AbstractInstrument(ABC, metaclass=AbstractInstrumentMeta):
-    """ABC that is useful for defining mixin classes for Instrument class"""
-    log: 'InstrumentLoggerAdapter'  # instrument logging
+class InstrumentProtocol(Protocol):
+    """Protocol that is useful for defining mixin classes for Instrument class"""
 
-    @abstractmethod
+    log: "InstrumentLoggerAdapter"  # instrument logging
+
     def ask(self, cmd: str) -> str:
-        pass
+        ...
+
+    def write(self, cmd: str) -> None:
+        ...
 
 
 T = TypeVar("T", bound="Instrument")
 
 
-class Instrument(InstrumentBase, AbstractInstrument):
+class Instrument(InstrumentBase, metaclass=InstrumentMeta):
 
     """
     Base class for all QCodes instruments.
@@ -651,7 +668,18 @@ class Instrument(InstrumentBase, AbstractInstrument):
         if hasattr(self, 'connection') and hasattr(self.connection, 'close'):
             self.connection.close()
 
-        strip_attrs(self, whitelist=['_name'])
+        # check for the existense first since this may already
+        # have been striped e.g. if the instrument has been closed once before
+        if hasattr(self, "instrument_modules"):
+            for module in self.instrument_modules.values():
+                strip_attrs(module, whitelist=["_short_name", "_parent"])
+
+        if hasattr(self, "_channel_lists"):
+            for channellist in self._channel_lists.values():
+                for channel in channellist:
+                    strip_attrs(channel, whitelist=["_short_name", "_parent"])
+
+        strip_attrs(self, whitelist=["_short_name"])
         self.remove_instance(self)
 
     @classmethod
