@@ -1,11 +1,11 @@
 from functools import partial
+from numbers import Number, Integral
 from time import time
-from typing import Union, cast
+from typing import Sequence, Union, cast
 
 from qcodes import ChannelList, InstrumentChannel, VisaInstrument
 from qcodes.utils import validators as vals
-
-number = Union[float, int]
+from qcodes.instrument.parameter import ScaledParameter
 
 
 class DACException(Exception):
@@ -27,18 +27,18 @@ class DacReader:
 
     def _dac_v_to_code(self, volt):
         """
-        Convert a voltage to the internal dac code (number between 0-65536)
+        Convert a voltage to the internal dac code (number between 0-65535)
         based on the minimum/maximum values of a given channel.
         Midrange is 32768.
         """
-        if volt < self.min_val or volt >= self.max_val:
+        if volt < self.min_val or volt > self.max_val:
             raise ValueError(f'Cannot convert voltage {volt} V ' +
                              'to a voltage code, value out of range '
                              '({} V - {} V).'.format(self.min_val,
                                                      self.max_val))
 
         frac = (volt - self.min_val) / (self.max_val - self.min_val)
-        val = int(round(frac * 65536))
+        val = int(round(frac * 65535))
         # extra check to be absolutely sure that the instrument does nothing
         # receive an out-of-bounds value
         if val > 65535 or val < 0:
@@ -49,11 +49,11 @@ class DacReader:
 
     def _dac_code_to_v(self, code):
         """
-        Convert a voltage to the internal dac code (number between 0-65536)
+        Convert a voltage to the internal dac code (number between 0-65535)
         based on the minimum/maximum values of a given channel.
         Midrange is 32768.
         """
-        frac = code/65536.0
+        frac = code/65535.0
         return (frac * (self.max_val - self.min_val)) + self.min_val
 
     def _set_slot(self):
@@ -173,8 +173,12 @@ class DacChannel(InstrumentChannel, DacReader):
     A single DAC channel of the DECADAC
     """
     _CHANNEL_VAL = vals.Ints(0, 3)
+    _DIVISION_VAL = vals.Numbers(min_value=1)
+    _MIN_VAL_VAL = vals.Enum(-10, 0)
+    _MAX_VAL_VAL = vals.Enum(0, 10)
 
-    def __init__(self, parent, name, channel, min_val=-5, max_val=5):
+    def __init__(self, parent, name, channel, min_val: Number = -10,
+                 max_val: Number = 10, division: Number = 1):
         super().__init__(parent, name)
 
         # Validate slot and channel values
@@ -191,7 +195,10 @@ class DacChannel(InstrumentChannel, DacReader):
         # 8: DAC Value (double)
         self._base_addr = 1536 + (16*4)*self._slot + 16*self._channel
 
-        # Store min/max voltages
+        # Store min/max voltages. Possible ranges are [-10, 0], [-10, 10], and
+        # [0, 10].
+        self._MIN_VAL_VAL.validate(min_val)
+        self._MAX_VAL_VAL.validate(max_val)
         assert(min_val < max_val)
         self.min_val = min_val
         self.max_val = max_val
@@ -199,17 +206,28 @@ class DacChannel(InstrumentChannel, DacReader):
         # Add channel parameters
         # Note we will use the older addresses to read the value from the dac
         # rather than the newer 'd' command for backwards compatibility
-        self._volt_val = vals.Numbers(self.min_val, self.max_val)
         self.add_parameter(
-            "volt",
+            "volt_unscaled",
             get_cmd=partial(self._query_address, self._base_addr + 9, 1),
             get_parser=self._dac_code_to_v,
             set_cmd=self._set_dac,
             set_parser=self._dac_v_to_code,
             vals=self._volt_val,
-            label=f"channel {channel+self._slot*4}",
+            label=f"channel {channel+self._slot*4} unscaled",
             unit="V",
         )
+
+        # Voltage division factor
+        self._DIVISION_VAL.validate(division)
+        self.add_parameter(
+            'volt',
+            ScaledParameter,
+            output=self.volt_unscaled,
+            division=division,
+            label=f"channel {channel+self._slot*4}",
+            unit="V"
+        )
+
         # The limit commands are used to sweep dac voltages. They are not
         # safety features.
         self.add_parameter("lower_ramp_limit",
@@ -240,17 +258,13 @@ class DacChannel(InstrumentChannel, DacReader):
 
         # Manual parameters to control whether DAC channels should ramp to
         # voltages or jump
-        self._ramp_val = vals.Numbers(0, 10)
+        self._ramp_val = vals.Numbers(0, 10*division)
         self.add_parameter("enable_ramp", get_cmd=None, set_cmd=None,
                            initial_value=False,
                            vals=vals.Bool())
         self.add_parameter("ramp_rate", get_cmd=None, set_cmd=None,
                            initial_value=0.1,
                            vals=self._ramp_val, unit="V/s")
-
-        # Add ramp function to the list of functions
-        self.add_function("ramp", call_cmd=self._ramp, args=(self._volt_val,
-                                                             self._ramp_val))
 
         # If we have access to the VERSADAC (slot) EEPROM, we can set the
         # initial value of the channel.
@@ -268,21 +282,42 @@ class DacChannel(InstrumentChannel, DacReader):
                                set_parser=self._dac_v_to_code,
                                vals=vals.Numbers(self.min_val, self.max_val))
 
+    @property
+    def _volt_val(self):
+        """Dynamic validator that allow for changing channel ranges."""
+        return vals.Numbers(self.min_val, self.max_val)
+
+    def _validate_division_aware(self, value, validator):
+        try:
+            validator.validate(value)
+        except ValueError as ve:
+            raise ValueError('Did you take into account the voltage '
+                             f'division of {self.volt.division}?') from ve
+
     def _ramp(self, val, rate, block=True):
         """
         Ramp the DAC to a given voltage.
 
         Params:
-            val (float): The voltage to ramp to in volts
+            val (float): The voltage to ramp to in volts.
 
-            rate (float): The ramp rate in units of volts/s
+                .. warning::
+                    Does not take into account a voltage division factor!
 
+            rate (float): The ramp rate in units of volts/s. Takes into account division factor
             block (bool): Should the call block until the ramp is complete?
         """
+        # Multiply rate with division factor to get hardware ramp rate. Need to
+        # do this manually instead of making self.ramp_rate a ScaledParameter
+        # since rate can also be supplied by the user. val has already been
+        # converted by ScaledParameter if this function was called from _set_dac,
+        # or manually in self.ramp() if called from there.
+        rate *= self.volt.division
+        self._validate_division_aware(rate, self._ramp_val)
 
         # We need to know the current dac value (in raw units), as well as the
         # update rate
-        c_volt = self.volt.get()  # Current Voltage
+        c_volt = self.volt_unscaled.get()  # Actual current voltage (unscaled)
         if c_volt == val:
             # If we are already at the right voltage, we don't need to ramp
             return
@@ -297,7 +332,7 @@ class DacChannel(InstrumentChannel, DacReader):
         # the number of time steps in the ramp multiplied by 65536
         slope = int(((e_val - c_val)/(t_rate*secs))*65536)
 
-        # Now let's set up our limits and ramo slope
+        # Now let's set up our limits and ramp slope
         if slope > 0:
             self.upper_ramp_limit.set(val)
         else:
@@ -306,8 +341,14 @@ class DacChannel(InstrumentChannel, DacReader):
 
         # Block until the ramp is complete is block is True
         if block:
-            while self.slope.get() != 0:
-                pass
+            try:
+                while self.slope.get() != 0:
+                    pass
+            except KeyboardInterrupt:
+                self.abort_ramp()
+
+            # Update monitor, doesn't make sense if not blocking
+            self.volt.get()
 
     def _set_dac(self, code):
         """
@@ -340,6 +381,29 @@ class DacChannel(InstrumentChannel, DacReader):
         self._set_channel()
         return self.ask_raw(cmd)
 
+    def abort_ramp(self):
+        """Interrupts the programmed ramp."""
+        self.ask_raw("S0;")
+
+    def ramp(self, val, rate: Number = None, block: bool = True):
+        """
+        Ramp the DAC to a given voltage.
+
+        Params:
+            val (float): The voltage to ramp to in volts.
+                Takes into account voltage division factor.
+            rate (float): The ramp rate in units of volts/s.
+                Defaults to self.ramp_rate().
+                Takes into account voltage division factor.
+            block (bool): Should the call block until the ramp is complete?
+                Defaults to True.
+        """
+        # Modify the set value by the voltage division factor.
+        # The ramp rate is taken care of by _ramp.
+        val *= self.volt.division
+        self._validate_division_aware(val, self._volt_val)
+        self._ramp(val, rate or self.ramp_rate.get(), block)
+
 
 class DacSlot(InstrumentChannel, DacReader):
     """
@@ -348,7 +412,8 @@ class DacSlot(InstrumentChannel, DacReader):
     _SLOT_VAL = vals.Ints(0, 4)
     SLOT_MODE_DEFAULT = "Coarse"
 
-    def __init__(self, parent, name, slot, min_val=-5, max_val=5):
+    def __init__(self, parent, name, slot, min_val=-10, max_val=10,
+                 division=1):
         super().__init__(parent, name)
 
         # Validate slot and channel values
@@ -358,12 +423,17 @@ class DacSlot(InstrumentChannel, DacReader):
         # Store whether we have access to the VERSADAC EEPROM
         self._VERSA_EEPROM_available = self.parent._VERSA_EEPROM_available
 
+        min_val = _parse_channel_arg(min_val, 4, 'min_val')
+        max_val = _parse_channel_arg(max_val, 4, 'min_val')
+        division = _parse_channel_arg(division, 4, 'division')
+
         # Create a list of channels in the slot
         channels = ChannelList(self, "Slot_Channels", parent.DAC_CHANNEL_CLASS)
         for i in range(4):
             channels.append(parent.DAC_CHANNEL_CLASS(self, f"Chan{i}",
-                                                     i, min_val=min_val,
-                                                     max_val=max_val))
+                                                     i, min_val=min_val[i],
+                                                     max_val=max_val[i],
+                                                     division=division[i]))
         self.add_submodule("channels", channels)
         # Set the slot mode. Valid modes are:
         #   Off: Channel outputs are disconnected from the input, grounded
@@ -426,7 +496,9 @@ class Decadac(VisaInstrument, DacReader):
     DAC_SLOT_CLASS = DacSlot
 
     def __init__(self, name: str, address: str,
-                 min_val: number=-5, max_val: number=5,
+                 min_val: Union[Number, Sequence[Number]] = -10,
+                 max_val: Union[Number, Sequence[Number]] = +10,
+                 division: Union[Number, Sequence[Number]] = 1,
                  **kwargs) -> None:
         """
 
@@ -444,22 +516,31 @@ class Decadac(VisaInstrument, DacReader):
                 This value should correspond to the DAC code 0.
 
             max_val: The maximum value in volts that can be output by the DAC.
-                This value should correspond to the DAC code 65536.
+                This value should correspond to the DAC code 65535.
 
+            division: number
+                A hardware voltage division factor for each channel that will
+                be compensated in software. The default is 1 (no voltage
+                divider). See also
+                :class:`qcodes.instrument.parameter.ScaledParameter`.
         """
-
         super().__init__(name, address, **kwargs)
 
         # Do feature detection
         self._feature_detect()
 
+        min_val = _parse_channel_arg(min_val, 4*5, 'min_val')
+        max_val = _parse_channel_arg(max_val, 4*5, 'max_val')
+        division = _parse_channel_arg(division, 4*5, 'division')
+
         # Create channels
         channels = ChannelList(self, "Channels", self.DAC_CHANNEL_CLASS,
                                snapshotable=False)
         slots = ChannelList(self, "Slots", self.DAC_SLOT_CLASS)
-        for i in range(5):  # Create the 6 DAC slots
+        for i in range(5):  # Create the 5 DAC slots
             slots.append(self.DAC_SLOT_CLASS(self, f"Slot{i}", i,
-                                             min_val, max_val))
+                                             min_val[4*i:4*(i+1)], max_val[4*i:4*(i+1)],
+                                             division[4*i:4*(i+1)]))
             slot_channels = slots[i].channels
             slot_channels = cast(ChannelList, slot_channels)
             channels.extend(slot_channels)
@@ -476,10 +557,18 @@ class Decadac(VisaInstrument, DacReader):
         Args:
             volt(float): The voltage to set all gates to.
         """
-        for chan in self.channels:
-            chan.volt.set(volt)
+        self.set_channels(range(len(self.channels)), volt)
 
-    def ramp_all(self, volt, ramp_rate):
+    def set_channels(self, channels, voltages):
+        channels = [self.channels[_channel_to_index(channel)] for channel in (
+            [channels] if not isinstance(channels, Sequence) else channels
+        )]
+        voltages = _parse_channel_arg(voltages, len(channels), 'voltages')
+
+        for channel, voltage in zip(channels, voltages):
+            channel.volt.set(voltage)
+
+    def ramp_all(self, volt, ramp_rate, block=True):
         """
         Ramp all dac channels to a specific voltage at the given rate
         simultaneously. Note that the ramps are not synchronized due to
@@ -491,15 +580,30 @@ class Decadac(VisaInstrument, DacReader):
 
             ramp_rate(float): The rate in volts per second to ramp
         """
-        # Start all channels ramping
-        for chan in self.channels:
-            chan._ramp(volt, ramp_rate, block=False)
+        self.ramp_channels(range(len(self.channels)), volt, ramp_rate, block)
 
-        # Wait for all channels to complete ramping.
-        # The slope is reset to 0 once ramping is complete.
-        for chan in self.channels:
-            while chan.slope.get():
-                pass
+    def ramp_channels(self, channels, voltages, ramp_rates, block=True):
+        channels = [self.channels[_channel_to_index(channel)] for channel in (
+            [channels] if not isinstance(channels, Sequence) else channels
+        )]
+        voltages = _parse_channel_arg(voltages, len(channels), 'voltages')
+        ramp_rates = _parse_channel_arg(ramp_rates, len(channels), 'ramp_rate')
+
+        # Program ramps
+        for channel, voltage, ramp_rate in zip(channels, voltages, ramp_rates):
+            channel.ramp(voltage, ramp_rate, block=False)
+
+        if block:
+            # Catch keyboard interrupts while the ramps are running.
+            try:
+                while any(channel.slope.get() for channel in channels):
+                    pass
+            except KeyboardInterrupt:
+                for channel in channels:
+                    channel.abort_ramp()
+            finally:
+                for channel in channels:
+                    channel.volt.get()
 
     def get_idn(self):
         """
@@ -589,3 +693,22 @@ class Decadac(VisaInstrument, DacReader):
         all writes must also read a response.
         """
         return self.ask(cmd)
+
+
+def _parse_channel_arg(val, nchan, arg):
+    if not hasattr(val, '__len__'):
+        val = [val]*nchan
+    elif len(val) != nchan:
+        raise ValueError(f'{arg} should be scalar or sequence of len '
+                         f'{nchan}')
+    return val
+
+
+def _channel_to_index(channel):
+    def idx(slot, chan):
+        return 4*slot + chan
+    if isinstance(channel, Integral):
+        return channel
+    elif isinstance(channel, DacChannel):
+        return idx(*[int(part[-1]) for part in channel.name_parts[1:]])
+    raise TypeError(f'Channel should be int or DacChannel, not {type(channel)}')
