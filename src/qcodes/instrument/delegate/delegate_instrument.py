@@ -107,19 +107,28 @@ class DelegateInstrument(InstrumentBase):
         self,
         name: str,
         station: Station,
-        parameters: None | (Mapping[str, Sequence[str]] | Mapping[str, str]) = None,
-        channels: None | (Mapping[str, Mapping[str, Any]] | Mapping[str, str]) = None,
+        parameters: Mapping[str, Sequence[str] | str] | None = None,
+        channels: Mapping[str, Mapping[str, Any] | str] | None = None,
+        grouped_parameter_names: Mapping[str, Sequence[str] | str | None] | None = None,
+        grouped_parameter_class: type[ParameterBase] | None = GroupedParameter,
+        grouped_parameter_kwargs: Mapping[str, Any] | None = None,
         initial_values: Mapping[str, Any] | None = None,
         set_initial_values_on_load: bool = False,
         setters: Mapping[str, MutableMapping[str, Any]] | None = None,
         units: Mapping[str, str] | None = None,
         metadata: Mapping[Any, Any] | None = None,
+        **kwargs
     ):
-        super().__init__(name=name, metadata=metadata)
+        super().__init__(name=name, metadata=metadata, **kwargs)
         if parameters is not None:
+            if grouped_parameter_names is None:
+                grouped_parameter_names = {param_name: None for param_name in parameters}
             self._create_and_add_parameters(
                 station=station,
                 parameters=parameters,
+                grouped_parameter_names=grouped_parameter_names,
+                grouped_parameter_class=grouped_parameter_class,
+                grouped_parameter_kwargs=grouped_parameter_kwargs or {},
                 setters=setters or {},
                 units=units or {},
             )
@@ -188,30 +197,41 @@ class DelegateInstrument(InstrumentBase):
     def _create_and_add_parameters(
         self,
         station: Station,
-        parameters: Mapping[str, Sequence[str]] | Mapping[str, str],
+        parameters: Mapping[str, Sequence[str] | str],
+        grouped_parameter_names: Mapping[str, Sequence[str] | str | None],
+        grouped_parameter_class: type[ParameterBase] | None,
+        grouped_parameter_kwargs: Mapping[str, Any],
         setters: Mapping[str, MutableMapping[str, Any]],
         units: Mapping[str, str],
     ) -> None:
         """Add parameters to delegate instrument based on specified aliases,
         endpoints and setter methods"""
-        for param_name, paths in parameters.items():
+        for (param_name, paths), (_, names) in zip(parameters.items(),
+                                                   grouped_parameter_names.items()):
             if isinstance(paths, str):
                 path_list: Sequence[str] = [paths]
-
             elif isinstance(paths, abc.Sequence):
                 path_list = paths
             else:
-                raise ValueError(
-                    "Parameter paths should be either a string or Sequence of \
-                        strings."
-                )
+                raise ValueError("Parameter paths should be either a string "
+                                 "or Sequence of strings.")
+            if isinstance(names, str):
+                name_list: Sequence[str] = [names]
+            elif isinstance(names, (Sequence, type(None))):
+                name_list = names
+            else:
+                raise ValueError("Parameter names should be either a string "
+                                 "or Sequence of strings.")
 
             self._create_and_add_parameter(
                 group_name=param_name,
                 station=station,
                 paths=path_list,
+                names=name_list,
+                grouped_parameter_class=grouped_parameter_class,
                 setter=setters.get(param_name),
                 unit=units.get(param_name),
+                **grouped_parameter_kwargs
             )
 
     @staticmethod
@@ -249,6 +269,8 @@ class DelegateInstrument(InstrumentBase):
         group_name: str,
         station: Station,
         paths: Sequence[str],
+        names: Sequence[str] | None,
+        grouped_parameter_class: type[ParameterBase] | None = GroupedParameter,
         setter: MutableMapping[str, Any] | None = None,
         getter: Callable[..., Any] | None = None,
         formatter: Callable[..., Any] | None = None,
@@ -260,7 +282,8 @@ class DelegateInstrument(InstrumentBase):
         source_parameters = [
             self.parse_instrument_path(station, path) for path in paths
         ]
-        parameter_names = self._parameter_names(source_parameters)
+        if parameter_names is None:
+            parameter_names = self._parameter_names(source_parameters)
 
         setter_fn = None
         if setter is not None:
@@ -269,27 +292,36 @@ class DelegateInstrument(InstrumentBase):
             )
             setter_fn = partial(setter_method, **setter)
 
-        params = [
-            self._add_parameter(group_name, name, source)
-            for name, source in zip(parameter_names, source_parameters)
-        ]
+        if len(source_parameters) > 1 or setter is not None:
+            params = [
+                self._add_parameter(group_name, name, source)
+                for name, source in zip(parameter_names, source_parameters)
+            ]
 
-        group = DelegateGroup(
-            name=group_name,
-            parameters=params,
-            parameter_names=parameter_names,
-            setter=setter_fn,
-            getter=getter,
-            formatter=formatter
-        )
+            group = DelegateGroup(
+                name=group_name,
+                parameters=params,
+                parameter_names=parameter_names,
+                setter=setter_fn,
+                getter=getter,
+                formatter=formatter
+            )
 
-        self.add_parameter(
-            name=group_name,
-            parameter_class=GroupedParameter,
-            group=group,
-            unit=unit,
-            **kwargs
-        )
+            self.add_parameter(
+                name=group_name,
+                parameter_class=grouped_parameter_class,
+                group=group,
+                unit=unit,
+                **kwargs
+            )
+        else:
+            self.add_parameter(
+                name=group_name,
+                source=source_parameters[0],
+                parameter_class=DelegateParameter,
+                unit=unit,
+                **kwargs
+            )
 
     def _create_and_add_channels(
         self,
@@ -301,7 +333,7 @@ class DelegateInstrument(InstrumentBase):
         chnnls_dict: dict[str, str | Mapping[str, Any]] = dict(channels)
         channel_type_global = chnnls_dict.pop("type", None)
         if channel_type_global is not None and \
-           not isinstance(channel_type_global, str):
+                not isinstance(channel_type_global, str):
             raise ValueError("Wrong channel type.")
         channel_wrapper_global = _get_channel_wrapper_class(
             channel_type_global
