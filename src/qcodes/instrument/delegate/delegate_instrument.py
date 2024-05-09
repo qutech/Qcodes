@@ -13,7 +13,7 @@ from qcodes.parameters import (
     DelegateParameter,
     GroupedParameter,
     Parameter,
-    ParameterBase,
+    ParameterBase
 )
 
 from ..instrument_base import InstrumentBase
