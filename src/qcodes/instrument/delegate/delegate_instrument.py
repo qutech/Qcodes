@@ -27,87 +27,12 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 
-class DelegateInstrument(InstrumentBase):
-    """DelegateInstrument is an instrument driver with one or more
-    parameters that connect to instrument parameters.
-
-    Example usage in instrument YAML:
-
-    .. code-block:: yaml
-
-        field:
-            type: qcodes.instrument.delegate.DelegateInstrument
-            init:
-            parameters:
-                X:
-                    - field_X.field
-                ramp_rate:
-                    - field_X.ramp_rate
-            channels:
-                gate_1: dac.ch01
-            set_initial_values_on_load: true
-            initial_values:
-                ramp_rate: 0.02
-            setters:
-                X:
-                    method: field_X.set_field
-                    block: false
-            units:
-                X: T
-                ramp_rate: T/min
-
-    this will generate an instrument named "field" with methods:
-
-    .. code-block:: python
-
-        field.X()
-        field.ramp_rate()
-
-    that are delegate parameters for:
-
-    .. code-block:: python
-
-        field_X.field()
-        field_X.ramp_rate()
-
-    Additionally, this will set ``field_X.ramp_rate(0.02)``` on load and
-    override the ``field.X.set()`` method with
-
-    .. code-block:: python
-
-        field_X.set_field(value, block=False),
-
-    as opposed to ``field.X.field.set()`` which ramps with ``block=True``.
-
-
-    Args:
-        name: Instrument name
-        station: Station containing the real instrument that is used to get
-            the endpoint parameters.
-        parameters: A mapping from the name of a parameter to the sequence
-            of source parameters that it points to.
-        channels: A mapping from the name of an instrument channel to either
-            the channel it emulates or a mapping of keyworded input parameters
-            of a custom channel wrapper class. This custom channel wrapper
-            class needs to be specified under the `type` keyword. Each
-            channel can have its own `type` if required. A single type for all
-            channels can also be specified.
-        initial_values: Default values to set on the delegate instrument's
-            parameters. Defaults to None (no initial values are specified or
-            set).
-        set_initial_values_on_load: Flag to set initial values when the
-            instrument is loaded. Defaults to False.
-        setters: Optional setter methods to use instead of calling the
-            ``.set()`` method on the endpoint parameters. Defaults to None.
-        units: Optional units to set for parameters.
-        metadata: Optional metadata to pass to instrument. Defaults to None.
-    """
-
+class _DelegateMixin:
     param_cls = DelegateGroupParameter
 
     def __init__(
         self,
-        name: str,
+        *args,
         station: Station,
         parameters: Mapping[str, Sequence[str] | str] | None = None,
         channels: Mapping[str, Mapping[str, Any] | str] | None = None,
@@ -121,7 +46,7 @@ class DelegateInstrument(InstrumentBase):
         metadata: Mapping[Any, Any] | None = None,
         **kwargs
     ):
-        super().__init__(name=name, metadata=metadata, **kwargs)
+        super().__init__(*args, metadata=metadata, **kwargs)
         if parameters is not None:
             if grouped_parameter_names is None:
                 grouped_parameter_names = {param_name: None for param_name in parameters}
@@ -399,9 +324,94 @@ class DelegateInstrument(InstrumentBase):
 
         self.add_submodule(channel_name, channel)
 
+
+class DelegateInstrument(_DelegateMixin, InstrumentBase):
+    """DelegateInstrument is an instrument driver with one or more
+    parameters that connect to instrument parameters.
+
+    Example usage in instrument YAML:
+
+    .. code-block:: yaml
+
+        field:
+            type: qcodes.instrument.delegate.DelegateInstrument
+            init:
+            parameters:
+                X:
+                    - field_X.field
+                ramp_rate:
+                    - field_X.ramp_rate
+            channels:
+                gate_1: dac.ch01
+            set_initial_values_on_load: true
+            initial_values:
+                ramp_rate: 0.02
+            setters:
+                X:
+                    method: field_X.set_field
+                    block: false
+            units:
+                X: T
+                ramp_rate: T/min
+
+    this will generate an instrument named "field" with methods:
+
+    .. code-block:: python
+
+        field.X()
+        field.ramp_rate()
+
+    that are delegate parameters for:
+
+    .. code-block:: python
+
+        field_X.field()
+        field_X.ramp_rate()
+
+    Additionally, this will set ``field_X.ramp_rate(0.02)``` on load and
+    override the ``field.X.set()`` method with
+
+    .. code-block:: python
+
+        field_X.set_field(value, block=False),
+
+    as opposed to ``field.X.field.set()`` which ramps with ``block=True``.
+
+
+    Args:
+        name: Instrument name
+        station: Station containing the real instrument that is used to get
+            the endpoint parameters.
+        parameters: A mapping from the name of a parameter to the sequence
+            of source parameters that it points to.
+        channels: A mapping from the name of an instrument channel to either
+            the channel it emulates or a mapping of keyworded input parameters
+            of a custom channel wrapper class. This custom channel wrapper
+            class needs to be specified under the `type` keyword. Each
+            channel can have its own `type` if required. A single type for all
+            channels can also be specified.
+        initial_values: Default values to set on the delegate instrument's
+            parameters. Defaults to None (no initial values are specified or
+            set).
+        set_initial_values_on_load: Flag to set initial values when the
+            instrument is loaded. Defaults to False.
+        setters: Optional setter methods to use instead of calling the
+            ``.set()`` method on the endpoint parameters. Defaults to None.
+        units: Optional units to set for parameters.
+        metadata: Optional metadata to pass to instrument. Defaults to None.
+    """
+
     def __repr__(self) -> str:
         params = ", ".join(self.parameters.keys())
-        return f"DelegateInstrument(name={self.name}, parameters={params})"
+        return f"{self.__class__.__name__}(name={self.name}, parameters={params})"
+
+
+class DelegateInstrumentChannel(_DelegateMixin, InstrumentChannel):
+
+    def __repr__(self) -> str:
+        params = ", ".join(self.parameters.keys())
+        return (f"{self.__class__.__name__}(name={self.name}, parent={self.parent}, "
+                f"parameters={params})")
 
 
 def _get_channel_wrapper_class(
