@@ -10,8 +10,10 @@ from typing import TYPE_CHECKING, Any
 from qcodes.parameters import (
     DelegateGroup,
     DelegateGroupParameter,
+    DelegateParameter,
     GroupedParameter,
     Parameter,
+    ParameterBase,
 )
 
 from ..instrument_base import InstrumentBase
@@ -282,8 +284,8 @@ class DelegateInstrument(InstrumentBase):
         source_parameters = [
             self.parse_instrument_path(station, path) for path in paths
         ]
-        if parameter_names is None:
-            parameter_names = self._parameter_names(source_parameters)
+        if names is None:
+            names = self._parameter_names(source_parameters)
 
         setter_fn = None
         if setter is not None:
@@ -295,13 +297,13 @@ class DelegateInstrument(InstrumentBase):
         if len(source_parameters) > 1 or setter is not None:
             params = [
                 self._add_parameter(group_name, name, source)
-                for name, source in zip(parameter_names, source_parameters)
+                for name, source in zip(names, source_parameters)
             ]
 
             group = DelegateGroup(
                 name=group_name,
                 parameters=params,
-                parameter_names=parameter_names,
+                parameter_names=names,
                 setter=setter_fn,
                 getter=getter,
                 formatter=formatter
