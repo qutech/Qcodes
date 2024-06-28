@@ -13,16 +13,14 @@ from qcodes.parameters import (
     DelegateParameter,
     GroupedParameter,
     Parameter,
-    ParameterBase
+    ParameterBase,
 )
 
+from ..channel import InstrumentChannel
 from ..instrument_base import InstrumentBase
 
 if TYPE_CHECKING:
     from qcodes.station import Station
-
-    from ..channel import InstrumentChannel
-
 
 _log = logging.getLogger(__name__)
 
@@ -34,11 +32,11 @@ class _DelegateMixin:
         self,
         *args,
         station: Station,
-        parameters: Mapping[str, Sequence[str] | str] | None = None,
-        channels: Mapping[str, Mapping[str, Any] | str] | None = None,
-        grouped_parameter_names: Mapping[str, Sequence[str] | str | None] | None = None,
-        grouped_parameter_class: type[ParameterBase] | None = GroupedParameter,
-        grouped_parameter_kwargs: Mapping[str, Any] | None = None,
+        parameters: None | (Mapping[str, Sequence[str]] | Mapping[str, str]) = None,
+        channels: None | (Mapping[str, Mapping[str, Any]] | Mapping[str, str]) = None,
+        grouped_parameter_names: None | Mapping[str, Sequence[str] | str | None] = None,
+        grouped_parameter_class: None | type[ParameterBase] = GroupedParameter,
+        grouped_parameter_kwargs: None | Mapping[str, Any] = None,
         initial_values: Mapping[str, Any] | None = None,
         set_initial_values_on_load: bool = False,
         setters: Mapping[str, MutableMapping[str, Any]] | None = None,
@@ -124,7 +122,7 @@ class _DelegateMixin:
     def _create_and_add_parameters(
         self,
         station: Station,
-        parameters: Mapping[str, Sequence[str] | str],
+        parameters: Mapping[str, Sequence[str]] | Mapping[str, str],
         grouped_parameter_names: Mapping[str, Sequence[str] | str | None],
         grouped_parameter_class: type[ParameterBase] | None,
         grouped_parameter_kwargs: Mapping[str, Any],
