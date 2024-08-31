@@ -1,4 +1,5 @@
 """Instrument base class."""
+
 from __future__ import annotations
 
 import logging
@@ -9,14 +10,13 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeVar, overload
 from qcodes.utils import strip_attrs
 from qcodes.validators import Anything
 
-from .instrument_base import InstrumentBase
+from .instrument_base import InstrumentBase, InstrumentBaseKWArgs
 from .instrument_meta import InstrumentMeta
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from typing_extensions import Unpack
 
     from qcodes.logger.instrument_logger import InstrumentLoggerAdapter
-
 
 log = logging.getLogger(__name__)
 
@@ -26,18 +26,26 @@ class InstrumentProtocol(Protocol):
 
     log: InstrumentLoggerAdapter  # instrument logging
 
-    def ask(self, cmd: str) -> str:
-        ...
+    def ask(self, cmd: str) -> str: ...
 
-    def write(self, cmd: str) -> None:
-        ...
+    def write(self, cmd: str) -> None: ...
 
 
 T = TypeVar("T", bound="Instrument")
 
+# a metaclass that overrides __call__ means that we lose
+# both the args and return type hints.
+# Since our metaclass does not modify the signature
+# is is safe simply not to use that metaclass in typechecking context.
+# See https://github.com/microsoft/pyright/discussions/5561 and
+# https://github.com/microsoft/pyright/issues/5488
+if TYPE_CHECKING:
+    instrument_meta_class = type
+else:
+    instrument_meta_class = InstrumentMeta
 
-class Instrument(InstrumentBase, metaclass=InstrumentMeta):
 
+class Instrument(InstrumentBase, metaclass=instrument_meta_class):
     """
     Base class for all QCodes instruments.
 
@@ -50,22 +58,16 @@ class Instrument(InstrumentBase, metaclass=InstrumentMeta):
             ``name`` is used.
     """
 
-    _all_instruments: weakref.WeakValueDictionary[
-        str, Instrument
-    ] = weakref.WeakValueDictionary()
+    _all_instruments: weakref.WeakValueDictionary[str, Instrument] = (
+        weakref.WeakValueDictionary()
+    )
     _type: type[Instrument] | None = None
     _instances: weakref.WeakSet[Instrument] = weakref.WeakSet()
 
-    def __init__(
-        self,
-        name: str,
-        metadata: Mapping[Any, Any] | None = None,
-        label: str | None = None,
-    ) -> None:
-
+    def __init__(self, name: str, **kwargs: Unpack[InstrumentBaseKWArgs]) -> None:
         self._t0 = time.time()
 
-        super().__init__(name=name, metadata=metadata, label=label)
+        super().__init__(name=name, **kwargs)
 
         self.add_parameter("IDN", get_cmd=self.get_idn, vals=Anything())
 
@@ -262,13 +264,13 @@ class Instrument(InstrumentBase, metaclass=InstrumentMeta):
 
     @overload
     @classmethod
-    def find_instrument(cls, name: str, instrument_class: None = None) -> Instrument:
-        ...
+    def find_instrument(
+        cls, name: str, instrument_class: None = None
+    ) -> Instrument: ...
 
     @overload
     @classmethod
-    def find_instrument(cls, name: str, instrument_class: type[T]) -> T:
-        ...
+    def find_instrument(cls, name: str, instrument_class: type[T]) -> T: ...
 
     @classmethod
     def find_instrument(

@@ -1,14 +1,20 @@
-from typing import TYPE_CHECKING, Any, Union, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from packaging import version
 from pyvisa.errors import VisaIOError
 
-from qcodes.instrument import InstrumentChannel, VisaInstrument
+from qcodes.instrument import (
+    InstrumentBaseKWArgs,
+    InstrumentChannel,
+    VisaInstrument,
+    VisaInstrumentKWArgs,
+)
 from qcodes.parameters import (
     Group,
     GroupParameter,
     ManualParameter,
     MultiParameter,
+    Parameter,
     ParamRawDataType,
     create_on_off_val_mapping,
 )
@@ -17,6 +23,8 @@ from qcodes.validators import Bool, Enum, Ints, Numbers
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from typing_extensions import Unpack
 
 
 class KeysightE4980AMeasurementPair(MultiParameter):
@@ -90,7 +98,7 @@ class KeysightE4980AMeasurements:
         "CSD", ("capacitance", "dissipation_factor"), ("F", "")
     )
     CSQ = KeysightE4980AMeasurementPair(
-        'CSQ', ("capacitance", "quality_factor"), ("F", "")
+        "CSQ", ("capacitance", "quality_factor"), ("F", "")
     )
     CSRS = KeysightE4980AMeasurementPair(
         "CSRS", ("capacitance", "resistance"), ("F", "Ohm")
@@ -144,40 +152,46 @@ class KeysightE4980ACorrection(InstrumentChannel):
     """
     Module for correction settings.
     """
-    def __init__(
-            self,
-            parent: VisaInstrument,
-            name: str,
-    ) -> None:
-        super().__init__(parent, name)
 
-        self.add_parameter(
+    def __init__(
+        self,
+        parent: VisaInstrument,
+        name: str,
+        **kwargs: "Unpack[InstrumentBaseKWArgs]",
+    ) -> None:
+        super().__init__(parent, name, **kwargs)
+
+        self.open: Parameter = self.add_parameter(
             "open",
             set_cmd=":CORRection:OPEN",
-            docstring="Executes OPEN correction based on all frequency points."
+            docstring="Executes OPEN correction based on all frequency points.",
         )
+        """Executes OPEN correction based on all frequency points."""
 
-        self.add_parameter(
+        self.open_state: Parameter = self.add_parameter(
             "open_state",
             get_cmd=":CORRection:OPEN:STATe?",
             set_cmd=":CORRection:OPEN:STATe {}",
             val_mapping=create_on_off_val_mapping(on_val="1", off_val="0"),
-            docstring="Enables or disable OPEN correction"
+            docstring="Enables or disable OPEN correction",
         )
+        """Enables or disable OPEN correction"""
 
-        self.add_parameter(
+        self.short: Parameter = self.add_parameter(
             "short",
             set_cmd=":CORRection:SHORt",
-            docstring="Executes SHORT correction based on all frequency points."
+            docstring="Executes SHORT correction based on all frequency points.",
         )
+        """Executes SHORT correction based on all frequency points."""
 
-        self.add_parameter(
+        self.short_state: Parameter = self.add_parameter(
             "short_state",
             get_cmd=":CORRection:SHORt:STATe?",
             set_cmd=":CORRection:SHORt:STATe {}",
             val_mapping=create_on_off_val_mapping(on_val="1", off_val="0"),
-            docstring="Enables or disable SHORT correction."
+            docstring="Enables or disable SHORT correction.",
         )
+        """Enables or disable SHORT correction."""
 
 
 Correction4980A = KeysightE4980ACorrection
@@ -188,11 +202,12 @@ class KeysightE4980A(VisaInstrument):
     """
     QCodes driver for E4980A Precision LCR Meter
     """
-    def __init__(self,
-                 name: str,
-                 address: str,
-                 terminator: str = '\n',
-                 **kwargs: Any):
+
+    default_terminator = "\n"
+
+    def __init__(
+        self, name: str, address: str, **kwargs: "Unpack[VisaInstrumentKWArgs]"
+    ):
         """
         Create an instance of the instrument.
 
@@ -202,7 +217,7 @@ class KeysightE4980A(VisaInstrument):
             terminator: Character to terminate messages with.
             **kwargs: kwargs are forwarded to base class.
         """
-        super().__init__(name, address, terminator=terminator, **kwargs)
+        super().__init__(name, address, **kwargs)
 
         idn = self.IDN.get()
 
@@ -210,93 +225,96 @@ class KeysightE4980A(VisaInstrument):
             convert_legacy_version_to_supported_version(idn["firmware"])
         ) >= version.parse(convert_legacy_version_to_supported_version("A.02.10"))
 
-        self.has_option_001 = '001' in self._options()
-        self._dc_bias_v_level_range: Union[Numbers, Enum]
+        self.has_option_001 = "001" in self._options()
+        self._dc_bias_v_level_range: Numbers | Enum
         if self.has_option_001:
             self._v_level_range = Numbers(0, 20)
             self._i_level_range = Numbers(0, 0.1)
-            self._imp_range = Enum(0.1, 1, 10, 100, 300, 1000, 3000, 10000,
-                                   30000, 100000)
+            self._imp_range = Enum(
+                0.1, 1, 10, 100, 300, 1000, 3000, 10000, 30000, 100000
+            )
             self._dc_bias_v_level_range = Numbers(-40, 40)
         else:
             self._v_level_range = Numbers(0, 2)
             self._i_level_range = Numbers(0, 0.02)
-            self._imp_range = Enum(1, 10, 100, 300, 1000, 3000, 10000, 30000,
-                                   100000)
+            self._imp_range = Enum(1, 10, 100, 300, 1000, 3000, 10000, 30000, 100000)
             self._dc_bias_v_level_range = Enum(0, 1.5, 2)
 
         self._measurement_pair = KeysightE4980AMeasurementPair(
-            "CPD",
-            ("capacitance", "dissipation_factor"),
-            ("F", "")
+            "CPD", ("capacitance", "dissipation_factor"), ("F", "")
         )
 
-        self.add_parameter(
+        self.frequency: Parameter = self.add_parameter(
             "frequency",
             get_cmd=":FREQuency?",
             set_cmd=":FREQuency {}",
             get_parser=float,
             unit="Hz",
-            vals=Numbers(20, 2E6),
-            docstring="Gets and sets the frequency for normal measurement."
+            vals=Numbers(20, 2e6),
+            docstring="Gets and sets the frequency for normal measurement.",
         )
+        """Gets and sets the frequency for normal measurement."""
 
-        self.add_parameter(
+        self.current_level: Parameter = self.add_parameter(
             "current_level",
             get_cmd=self._get_current_level,
             set_cmd=self._set_current_level,
             unit="A",
             vals=self._i_level_range,
-            docstring="Gets and sets the current level for measurement signal."
+            docstring="Gets and sets the current level for measurement signal.",
         )
+        """Gets and sets the current level for measurement signal."""
 
-        self.add_parameter(
+        self.voltage_level: Parameter = self.add_parameter(
             "voltage_level",
             get_cmd=self._get_voltage_level,
             set_cmd=self._set_voltage_level,
             unit="V",
             vals=self._v_level_range,
             docstring="Gets and sets the AC bias voltage level for measurement "
-                      "signal."
+            "signal.",
         )
+        """Gets and sets the AC bias voltage level for measurement signal."""
 
-        self.add_parameter(
+        self.measurement_function: Parameter = self.add_parameter(
             "measurement_function",
             get_cmd=":FUNCtion:IMPedance?",
-            set_cmd=self._set_measurement
+            set_cmd=self._set_measurement,
         )
+        """Parameter measurement_function"""
 
-        self.add_parameter(
+        self.range: Parameter = self.add_parameter(
             "range",
             get_cmd=":FUNCtion:IMPedance:RANGe?",
             set_cmd=self._set_range,
-            unit='Ohm',
+            unit="Ohm",
             vals=self._imp_range,
             docstring="Selects the impedance measurement range, also turns "
-                      "the auto range function OFF."
+            "the auto range function OFF.",
         )
+        """Selects the impedance measurement range, also turns the auto range function OFF."""
 
-        self.add_parameter(
+        self.imp_autorange_enabled: Parameter = self.add_parameter(
             "imp_autorange_enabled",
             get_cmd=":FUNCtion:IMPedance:RANGe:AUTO?",
             set_cmd=":FUNCtion:IMPedance:RANGe:AUTO {}",
-            val_mapping=create_on_off_val_mapping(on_val="1",
-                                                  off_val="0"),
-            docstring="Enables the auto-range for impedance measurement."
+            val_mapping=create_on_off_val_mapping(on_val="1", off_val="0"),
+            docstring="Enables the auto-range for impedance measurement.",
         )
+        """Enables the auto-range for impedance measurement."""
 
-        self.add_parameter(
+        self.dc_bias_enabled: Parameter = self.add_parameter(
             "dc_bias_enabled",
             get_cmd=":BIAS:STATe?",
             set_cmd=":BIAS:STATe {}",
             vals=Bool(),
-            val_mapping=create_on_off_val_mapping(on_val="1",
-                                                  off_val="0"),
+            val_mapping=create_on_off_val_mapping(on_val="1", off_val="0"),
             docstring="Enables DC bias. DC bias is automatically turned "
-                      "off after recalling the state from memory."
+            "off after recalling the state from memory.",
         )
+        """Enables DC bias. DC bias is automatically turned off after recalling the state from memory."""
 
-        self.add_parameter(
+        self.dc_bias_voltage_level: Parameter = self.add_parameter(
             "dc_bias_voltage_level",
             get_cmd=":BIAS:VOLTage:LEVel?",
             set_cmd=":BIAS:VOLTage:LEVel {}",
@@ -304,51 +322,53 @@ class KeysightE4980A(VisaInstrument):
             unit="V",
             vals=self._dc_bias_v_level_range,
             docstring="Sets the DC bias voltage. Setting does not "
-                      "implicitly turn the DC bias ON."
+            "implicitly turn the DC bias ON.",
         )
+        """Sets the DC bias voltage. Setting does not implicitly turn the DC bias ON."""
 
-        self.add_parameter(
+        self.meas_time_mode: GroupParameter = self.add_parameter(
             "meas_time_mode",
             val_mapping={"short": "SHOR", "medium": "MED", "long": "LONG"},
-            parameter_class=GroupParameter
+            parameter_class=GroupParameter,
         )
+        """Parameter meas_time_mode"""
 
-        self.add_parameter(
+        self.averaging_rate: GroupParameter = self.add_parameter(
             "averaging_rate",
             vals=Ints(1, 256),
             parameter_class=GroupParameter,
             get_parser=int,
-            docstring="Averaging rate for the measurement."
+            docstring="Averaging rate for the measurement.",
         )
+        """Averaging rate for the measurement."""
 
         self._aperture_group = Group(
-            [self.meas_time_mode,
-             self.averaging_rate],
+            [self.meas_time_mode, self.averaging_rate],
             set_cmd=":APERture {meas_time_mode},{averaging_rate}",
-            get_cmd=":APERture?"
+            get_cmd=":APERture?",
         )
 
         if self.has_firmware_a_02_10_or_above:
-            self.add_parameter(
+            self.dc_bias_autorange_enabled: Parameter = self.add_parameter(
                 "dc_bias_autorange_enabled",
                 get_cmd=":BIAS:RANGe:AUTO?",
                 set_cmd=":BIAS:RANGe:AUTO {}",
                 vals=Bool(),
-                val_mapping=create_on_off_val_mapping(on_val="1",
-                                                      off_val="0"),
+                val_mapping=create_on_off_val_mapping(on_val="1", off_val="0"),
                 docstring="Enables DC Bias range AUTO setting. When DC bias "
-                          "range is fixed (not AUTO), '#' is displayed in "
-                          "the BIAS field of the display."
+                "range is fixed (not AUTO), '#' is displayed in "
+                "the BIAS field of the display.",
             )
+            """Enables DC Bias range AUTO setting. When DC bias range is fixed (not AUTO), '#' is displayed in the BIAS field of the display."""
 
-        self.add_parameter(
+        self.signal_mode: ManualParameter = self.add_parameter(
             "signal_mode",
             initial_value=None,
             vals=Enum("Voltage", "Current", None),
             parameter_class=ManualParameter,
-            docstring="This parameter tracks the signal mode which is being "
-                      "set."
+            docstring="This parameter tracks the signal mode which is being set.",
         )
+        """This parameter tracks the signal mode which is being set."""
 
         self.add_submodule("_correction", KeysightE4980ACorrection(self, "correction"))
         self._set_signal_mode_on_driver_initialization()
@@ -356,7 +376,7 @@ class KeysightE4980A(VisaInstrument):
 
     @property
     def correction(self) -> KeysightE4980ACorrection:
-        submodule = self.submodules['_correction']
+        submodule = self.submodules["_correction"]
         return cast(KeysightE4980ACorrection, submodule)
 
     @property
@@ -379,9 +399,7 @@ class KeysightE4980A(VisaInstrument):
         measurement = self.ask(":FETCH:IMPedance:CORRected?")
         r, x = (float(n) for n in measurement.split(","))
         measurement_pair = KeysightE4980AMeasurementPair(
-            name="RX",
-            names=("resistance", "reactance"),
-            units=("Ohm", "Ohm")
+            name="RX", names=("resistance", "reactance"), units=("Ohm", "Ohm")
         )
         measurement_pair.set((r, x))
         return measurement_pair
@@ -395,7 +413,7 @@ class KeysightE4980A(VisaInstrument):
         measurement_pair = KeysightE4980AMeasurementPair(
             name=self._measurement_pair.name,
             names=self._measurement_pair.names,
-            units=self._measurement_pair.units
+            units=self._measurement_pair.units,
         )
         measurement_pair.set((val1, val2))
         return measurement_pair
@@ -413,8 +431,10 @@ class KeysightE4980A(VisaInstrument):
         otherwise raises an error.
         """
         if self.signal_mode() == "Current":
-            raise RuntimeError("Cannot get voltage level as signal is set "
-                               "with current level parameter.")
+            raise RuntimeError(
+                "Cannot get voltage level as signal is set "
+                "with current level parameter."
+            )
 
         v_level = self.ask(":VOLTage:LEVel?")
 
@@ -446,8 +466,10 @@ class KeysightE4980A(VisaInstrument):
         otherwise raises an error.
         """
         if self.signal_mode() == "Voltage":
-            raise RuntimeError("Cannot get current level as signal is set "
-                               "with voltage level parameter.")
+            raise RuntimeError(
+                "Cannot get current level as signal is set "
+                "with voltage level parameter."
+            )
 
         i_level = self.ask(":CURRent:LEVel?")
 
@@ -484,8 +506,8 @@ class KeysightE4980A(VisaInstrument):
         options are possible. Two of the possible options are Power/DC Bias
         Enhance (option 001) and Bias Current Interface (option 002).
         """
-        options_raw = self.ask('*OPT?')
-        return tuple(options_raw.split(','))
+        options_raw = self.ask("*OPT?")
+        return tuple(options_raw.split(","))
 
     def system_errors(self) -> str:
         """
@@ -503,10 +525,10 @@ class KeysightE4980A(VisaInstrument):
             Operation Status Event Register
             Questionable Status Event Register (No Query)
         """
-        self.write('*CLS')
+        self.write("*CLS")
 
     def reset(self) -> None:
         """
         Resets the instrument settings.
         """
-        self.write('*RST')
+        self.write("*RST")

@@ -1,18 +1,31 @@
 import logging
 from functools import partial
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from typing_extensions import deprecated
 
 import qcodes.validators as vals
-from qcodes.instrument import ChannelList, Instrument, InstrumentChannel, VisaInstrument
+from qcodes.instrument import (
+    ChannelList,
+    Instrument,
+    InstrumentBaseKWArgs,
+    InstrumentChannel,
+    VisaInstrument,
+    VisaInstrumentKWArgs,
+)
 from qcodes.parameters import (
     ArrayParameter,
     ManualParameter,
     MultiParameter,
+    Parameter,
     ParamRawDataType,
     create_on_off_val_mapping,
 )
+from qcodes.utils import QCoDeSDeprecationWarning
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +60,10 @@ class FixedFrequencyTraceIQ(MultiParameter):
             ),
             setpoint_units=(("s",), ("s",)),
             setpoint_labels=(("time",), ("time",)),
-            shapes=((npts,), (npts,),),
+            shapes=(
+                (npts,),
+                (npts,),
+            ),
             **kwargs,
         )
         self.set_cw_sweep(npts, bandwidth)
@@ -109,8 +125,14 @@ class FixedFrequencyPointIQ(MultiParameter):
             names=("I", "Q"),
             labels=(f"{instrument.short_name} I", f"{instrument.short_name} Q"),
             units=("", ""),
-            setpoints=((), (),),
-            shapes=((), (),),
+            setpoints=(
+                (),
+                (),
+            ),
+            shapes=(
+                (),
+                (),
+            ),
             **kwargs,
         )
 
@@ -151,8 +173,14 @@ class FixedFrequencyPointMagPhase(MultiParameter):
                 f"{instrument.short_name} phase",
             ),
             units=("", "rad"),
-            setpoints=((), (),),
-            shapes=((), (),),
+            setpoints=(
+                (),
+                (),
+            ),
+            shapes=(
+                (),
+                (),
+            ),
             **kwargs,
         )
 
@@ -202,7 +230,10 @@ class FrequencySweepMagPhase(MultiParameter):
                 (f"{instrument.short_name}_frequency",),
                 (f"{instrument.short_name}_frequency",),
             ),
-            shapes=((npts,), (npts,),),
+            shapes=(
+                (npts,),
+                (npts,),
+            ),
             **kwargs,
         )
         self.set_sweep(start, stop, npts)
@@ -220,7 +251,6 @@ class FrequencySweepMagPhase(MultiParameter):
         with self.instrument.format.set_to("Complex"):
             data = self.instrument._get_sweep_data(force_polar=True)
         return abs(data), np.angle(data)
-
 
 
 class FrequencySweepDBPhase(MultiParameter):
@@ -256,7 +286,10 @@ class FrequencySweepDBPhase(MultiParameter):
                 (f"{instrument.short_name}_frequency",),
                 (f"{instrument.short_name}_frequency",),
             ),
-            shapes=((npts,), (npts,),),
+            shapes=(
+                (npts,),
+                (npts,),
+            ),
             **kwargs,
         )
         self.set_sweep(start, stop, npts)
@@ -273,7 +306,7 @@ class FrequencySweepDBPhase(MultiParameter):
         assert isinstance(self.instrument, RohdeSchwarzZNBChannel)
         with self.instrument.format.set_to("Complex"):
             data = self.instrument._get_sweep_data(force_polar=True)
-        return 20*np.log10(np.abs(data)), np.angle(data)
+        return 20 * np.log10(np.abs(data)), np.angle(data)
 
 
 class FrequencySweep(ArrayParameter):
@@ -344,11 +377,12 @@ class FrequencySweep(ArrayParameter):
 class RohdeSchwarzZNBChannel(InstrumentChannel):
     def __init__(
         self,
-        parent: "ZNB",
+        parent: "RohdeSchwarzZNBBase",
         name: str,
         channel: int,
-        vna_parameter: Optional[str] = None,
-        existing_trace_to_bind_to: Optional[str] = None,
+        vna_parameter: str | None = None,
+        existing_trace_to_bind_to: str | None = None,
+        **kwargs: "Unpack[InstrumentBaseKWArgs]",
     ) -> None:
         """
         Args:
@@ -361,6 +395,7 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
             existing_trace_to_bind_to: Name of an existing trace on the VNA.
                 If supplied try to bind to an existing trace with this name
                 rather than creating a new trace.
+            **kwargs: Forwarded to base class.
         """
         n = channel
         self._instrument_channel = channel
@@ -368,7 +403,7 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
         if vna_parameter is None:
             vna_parameter = name
         self._vna_parameter = vna_parameter
-        super().__init__(parent, name)
+        super().__init__(parent, name, **kwargs)
 
         if existing_trace_to_bind_to is None:
             self._tracename = f"Trc{channel}"
@@ -410,14 +445,14 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
         self._min_source_power: float
         self._min_source_power = self._model_min_source_power[model]
 
-        self.add_parameter(
+        self.vna_parameter: Parameter = self.add_parameter(
             name="vna_parameter",
             label="VNA parameter",
-            get_cmd=f"CALC{self._instrument_channel}:PAR:MEAS? "
-                    f"'{self._tracename}'",
+            get_cmd=f"CALC{self._instrument_channel}:PAR:MEAS? '{self._tracename}'",
             get_parser=self._strip,
         )
-        self.add_parameter(
+        """Parameter vna_parameter"""
+        self.power: Parameter = self.add_parameter(
             name="power",
             label="Power",
             unit="dBm",
@@ -426,7 +461,8 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
             get_parser=float,
             vals=vals.Numbers(self._min_source_power, 25),
         )
-        self.add_parameter(
+        """Parameter power"""
+        self.bandwidth: Parameter = self.add_parameter(
             name="bandwidth",
             label="Bandwidth",
             unit="Hz",
@@ -434,8 +470,7 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
             set_cmd=self._set_bandwidth,
             get_parser=int,
             vals=vals.Enum(
-                *np.append(10 ** 6,
-                           np.kron([1, 1.5, 2, 3, 5, 7], 10 ** np.arange(6)))
+                *np.append(10**6, np.kron([1, 1.5, 2, 3, 5, 7], 10 ** np.arange(6)))
             ),
             docstring="Measurement bandwidth of the IF filter. "
             "The inverse of this sets the integration "
@@ -444,7 +479,13 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
             "(p. 4 of manual) that does not get taken "
             "into account here.",
         )
-        self.add_parameter(
+        """
+        Measurement bandwidth of the IF filter.
+        The inverse of this sets the integration time per point.
+        There is an 'increased bandwidth option' (p. 4 of manual)
+        that does not get taken into account here.
+        """
+        self.avg: Parameter = self.add_parameter(
             name="avg",
             label="Averages",
             unit="",
@@ -453,23 +494,24 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
             get_parser=int,
             vals=vals.Ints(1, 5000),
         )
-        self.add_parameter(
+        """Parameter avg"""
+        self.start: Parameter = self.add_parameter(
             name="start",
             get_cmd=f"SENS{n}:FREQ:START?",
             set_cmd=self._set_start,
             get_parser=float,
-            vals=vals.Numbers(self._parent._min_freq,
-                              self._parent._max_freq - 10),
+            vals=vals.Numbers(self._parent._min_freq, self._parent._max_freq - 10),
         )
-        self.add_parameter(
+        """Parameter start"""
+        self.stop: Parameter = self.add_parameter(
             name="stop",
             get_cmd=f"SENS{n}:FREQ:STOP?",
             set_cmd=self._set_stop,
             get_parser=float,
-            vals=vals.Numbers(self._parent._min_freq + 1,
-                              self._parent._max_freq),
+            vals=vals.Numbers(self._parent._min_freq + 1, self._parent._max_freq),
         )
-        self.add_parameter(
+        """Parameter stop"""
+        self.center: Parameter = self.add_parameter(
             name="center",
             get_cmd=f"SENS{n}:FREQ:CENT?",
             set_cmd=self._set_center,
@@ -478,27 +520,30 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
                 self._parent._min_freq + 0.5, self._parent._max_freq - 10
             ),
         )
-        self.add_parameter(
+        """Parameter center"""
+        self.span: Parameter = self.add_parameter(
             name="span",
             get_cmd=f"SENS{n}:FREQ:SPAN?",
             set_cmd=self._set_span,
             get_parser=float,
-            vals=vals.Numbers(1,
-                              self._parent._max_freq - self._parent._min_freq),
+            vals=vals.Numbers(1, self._parent._max_freq - self._parent._min_freq),
         )
-        self.add_parameter(
+        """Parameter span"""
+        self.npts: Parameter = self.add_parameter(
             name="npts",
             get_cmd=f"SENS{n}:SWE:POIN?",
             set_cmd=self._set_npts,
             get_parser=int,
         )
-        self.add_parameter(
+        """Parameter npts"""
+        self.status: Parameter = self.add_parameter(
             name="status",
             get_cmd=f"CONF:CHAN{n}:MEAS?",
             set_cmd=f"CONF:CHAN{n}:MEAS {{}}",
             get_parser=int,
         )
-        self.add_parameter(
+        """Parameter status"""
+        self.format: Parameter = self.add_parameter(
             name="format",
             get_cmd=partial(self._get_format, tracename=self._tracename),
             set_cmd=self._set_format,
@@ -517,8 +562,9 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
                 "Complex": "COMP\n",
             },
         )
+        """Parameter format"""
 
-        self.add_parameter(
+        self.trace_mag_phase: FrequencySweepMagPhase = self.add_parameter(
             name="trace_mag_phase",
             start=self.start(),
             stop=self.stop(),
@@ -526,8 +572,9 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
             channel=n,
             parameter_class=FrequencySweepMagPhase,
         )
+        """Parameter trace_mag_phase"""
 
-        self.add_parameter(
+        self.trace_db_phase: FrequencySweepDBPhase = self.add_parameter(
             name="trace_db_phase",
             start=self.start(),
             stop=self.stop(),
@@ -535,7 +582,8 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
             channel=n,
             parameter_class=FrequencySweepDBPhase,
         )
-        self.add_parameter(
+        """Parameter trace_db_phase"""
+        self.trace: FrequencySweep = self.add_parameter(
             name="trace",
             start=self.start(),
             stop=self.stop(),
@@ -543,7 +591,8 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
             channel=n,
             parameter_class=FrequencySweep,
         )
-        self.add_parameter(
+        """Parameter trace"""
+        self.electrical_delay: Parameter = self.add_parameter(
             name="electrical_delay",
             label="Electrical delay",
             get_cmd=f"SENS{n}:CORR:EDEL2:TIME?",
@@ -551,14 +600,16 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
             get_parser=float,
             unit="s",
         )
-        self.add_parameter(
+        """Parameter electrical_delay"""
+        self.sweep_time: Parameter = self.add_parameter(
             name="sweep_time",
             label="Sweep time",
             get_cmd=f"SENS{n}:SWE:TIME?",
             get_parser=float,
             unit="s",
         )
-        self.add_parameter(
+        """Parameter sweep_time"""
+        self.sweep_type: Parameter = self.add_parameter(
             name="sweep_type",
             get_cmd=f"SENS{n}:SWE:TYPE?",
             set_cmd=self._set_sweep_type,
@@ -578,7 +629,13 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
             "CW_Point modes have supporting "
             "measurement parameters.",
         )
-        self.add_parameter(
+        """
+        The sweep_type parameter is used to set the type of measurement sweeps.
+        It allows switching the default linear VNA sweep type to other types.
+        Note that at the moment only the linear and CW_Point modes
+        have supporting measurement parameters.
+        """
+        self.cw_frequency: Parameter = self.add_parameter(
             name="cw_frequency",
             get_cmd=f"SENS{n}:FREQ:CW?",
             set_cmd=self._set_cw_frequency,
@@ -590,8 +647,12 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
             "querying for it when VNA sweep type is "
             "set to CW_Point mode.",
         )
+        """
+        Parameter for setting frequency and querying for it
+        when VNA sweep type is set to CW_Point mode.
+        """
 
-        self.add_parameter(
+        self.cw_check_sweep_first: ManualParameter = self.add_parameter(
             "cw_check_sweep_first",
             parameter_class=ManualParameter,
             initial_value=True,
@@ -604,21 +665,32 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
             "one wants to minimize overhead in fast "
             "measurements. ",
         )
+        """
+        Parameter that enables a few commands which are called before each get
+        in continuous wave mode checking whether the vna is setup correctly.
+        Is recommended to be turned, but can be turned off if
+        one wants to minimize overhead in fast measurements.
+        """
 
-        self.add_parameter(
+        self.trace_fixed_frequency: FixedFrequencyTraceIQ = self.add_parameter(
             name="trace_fixed_frequency",
             npts=self.npts(),
             bandwidth=self.bandwidth(),
             parameter_class=FixedFrequencyTraceIQ,
         )
-        self.add_parameter(
+        """Parameter trace_fixed_frequency"""
+        self.point_fixed_frequency: FixedFrequencyPointIQ = self.add_parameter(
             name="point_fixed_frequency", parameter_class=FixedFrequencyPointIQ
         )
-        self.add_parameter(
-            name="point_fixed_frequency_mag_phase",
-            parameter_class=FixedFrequencyPointMagPhase,
+        """Parameter point_fixed_frequency"""
+        self.point_fixed_frequency_mag_phase: FixedFrequencyPointMagPhase = (
+            self.add_parameter(
+                name="point_fixed_frequency_mag_phase",
+                parameter_class=FixedFrequencyPointMagPhase,
+            )
         )
-        self.add_parameter(
+        """Parameter point_fixed_frequency_mag_phase"""
+        self.averaging_enabled: Parameter = self.add_parameter(
             name="averaging_enabled",
             initial_value=False,
             get_cmd=None,
@@ -626,7 +698,8 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
             vals=vals.Bool(),
             val_mapping=create_on_off_val_mapping(on_val="ON", off_val="OFF"),
         )
-        self.add_parameter(
+        """Parameter averaging_enabled"""
+        self.auto_sweep_time_enabled: Parameter = self.add_parameter(
             name="auto_sweep_time_enabled",
             initial_value=False,
             get_cmd=None,
@@ -637,6 +710,10 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
             "calculated internally using the other channel settings "
             "and zero delay",
         )
+        """
+        When enabled, the (minimum) sweep time is calculated internally
+        using the other channel settings and zero delay
+        """
 
         self.add_function(
             "set_electrical_delay_auto", call_cmd=f"SENS{n}:CORR:EDEL:AUTO ONCE"
@@ -696,8 +773,7 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
         self.write(f"SENS{channel}:FREQ:START {val:.7f}")
         stop = self.stop()
         if val >= stop:
-            raise ValueError("Stop frequency must be larger than start "
-                             "frequency.")
+            raise ValueError("Stop frequency must be larger than start frequency.")
         # we get start as the vna may not be able to set it to the
         # exact value provided.
         start = self.start()
@@ -709,8 +785,7 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
         channel = self._instrument_channel
         start = self.start()
         if val <= start:
-            raise ValueError("Stop frequency must be larger than start "
-                             "frequency.")
+            raise ValueError("Stop frequency must be larger than start frequency.")
         self.write(f"SENS{channel}:FREQ:STOP {val:.7f}")
         # We get stop as the vna may not be able to set it to the
         # exact value provided.
@@ -767,7 +842,10 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
         stop = self.stop()
         npts = self.npts()
         for _, parameter in self.parameters.items():
-            if isinstance(parameter, (FrequencySweep, FrequencySweepMagPhase, FrequencySweepDBPhase)):
+            if isinstance(
+                parameter,
+                (FrequencySweep, FrequencySweepMagPhase, FrequencySweepDBPhase),
+            ):
                 try:
                     parameter.set_sweep(start, stop, npts)
                 except AttributeError:
@@ -788,7 +866,6 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
         self.sweep_time()
 
     def _get_sweep_data(self, force_polar: bool = False) -> np.ndarray:
-
         if not self._parent.rf_power():
             log.warning("RF output is off when getting sweep data")
         # It is possible that the instrument and QCoDeS disagree about
@@ -829,10 +906,7 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
                         f" {data_format_command}"
                     )
                 data = np.array(data_str.rstrip().split(",")).astype("float64")
-                if self.format() in ["Polar",
-                                     "Complex",
-                                     "Smith",
-                                     "Inverse Smith"]:
+                if self.format() in ["Polar", "Complex", "Smith", "Inverse Smith"]:
                     data = data[0::2] + 1j * data[1::2]
             finally:
                 self.root_instrument.cont_meas_on()
@@ -914,8 +988,7 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
         with self.status.set_to(1):
             with self.root_instrument.timeout.set_to(self._get_timeout()):
                 self.write(f"INIT{self._instrument_channel}:IMM; *WAI")
-                data_str = self.ask(f"CALC{self._instrument_channel}:DATA? "
-                                    f"SDAT")
+                data_str = self.ask(f"CALC{self._instrument_channel}:DATA? SDAT")
             data = np.array(data_str.rstrip().split(",")).astype("float64")
             i = data[0::2]
             q = data[1::2]
@@ -931,11 +1004,12 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
 ZNBChannel = RohdeSchwarzZNBChannel
 
 
-class ZNB(VisaInstrument):
+class RohdeSchwarzZNBBase(VisaInstrument):
     """
-    QCoDeS driver for the Rohde & Schwarz ZNB8 and ZNB20
+    Base class for QCoDeS driver for the Rohde & Schwarz ZNB8 and ZNB20
     virtual network analyser. It can probably be extended to ZNB4 and 40
-    without too much work.
+    without too much work. This class should not be instantiated directly
+    the RohdeSchwarzZNB8 and RohdeSchwarzZNB20 should be used instead.
 
     Requires FrequencySweep parameter for taking a trace
 
@@ -961,9 +1035,8 @@ class ZNB(VisaInstrument):
         address: str,
         init_s_params: bool = True,
         reset_channels: bool = True,
-        **kwargs: Any,
+        **kwargs: "Unpack[VisaInstrumentKWArgs]",
     ) -> None:
-
         super().__init__(name=name, address=address, **kwargs)
 
         # TODO(JHN) I could not find a way to get max and min freq from
@@ -989,17 +1062,19 @@ class ZNB(VisaInstrument):
         self._max_freq: float
         self._min_freq, self._max_freq = m_frequency[model]
 
-        self.add_parameter(name="num_ports",
-                           get_cmd="INST:PORT:COUN?",
-                           get_parser=int)
+        self.num_ports: Parameter = self.add_parameter(
+            name="num_ports", get_cmd="INST:PORT:COUN?", get_parser=int
+        )
+        """Parameter num_ports"""
         num_ports = self.num_ports()
 
-        self.add_parameter(
+        self.rf_power: Parameter = self.add_parameter(
             name="rf_power",
             get_cmd="OUTP1?",
             set_cmd="OUTP1 {}",
             val_mapping={True: "1\n", False: "0\n"},
         )
+        """Parameter rf_power"""
         self.add_function("reset", call_cmd="*RST")
         self.add_function("tooltip_on", call_cmd="SYST:ERR:DISP ON")
         self.add_function("tooltip_off", call_cmd="SYST:ERR:DISP OFF")
@@ -1071,3 +1146,11 @@ class ZNB(VisaInstrument):
         for submodule in self.submodules.values():
             if isinstance(submodule, ChannelList):
                 submodule.clear()
+
+
+@deprecated(
+    "The ZNB base class has been renamed RohdeSchwarzZNBBase",
+    category=QCoDeSDeprecationWarning,
+)
+class ZNB(RohdeSchwarzZNBBase):
+    pass

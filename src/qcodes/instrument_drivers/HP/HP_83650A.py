@@ -2,10 +2,15 @@
 #
 # Written by Bruno Buijtendorp (brunobuijtendorp@gmail.com)
 import logging
-from typing import Any, Optional
+from typing import TYPE_CHECKING
 
 from qcodes import validators as vals
-from qcodes.instrument import VisaInstrument
+from qcodes.instrument import VisaInstrument, VisaInstrumentKWArgs
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+    from qcodes.parameters import Parameter
 
 log = logging.getLogger(__name__)
 
@@ -20,104 +25,132 @@ class HP83650A(VisaInstrument):
 
     """
 
-    def __init__(self,
-                 name: str,
-                 address: str,
-                 verbose: int = 1,
-                 reset: bool = False,
-                 server_name: Optional[str] = None,
-                 **kwargs: Any):
-
+    def __init__(
+        self,
+        name: str,
+        address: str,
+        verbose: int = 1,
+        reset: bool = False,
+        server_name: str | None = None,
+        **kwargs: "Unpack[VisaInstrumentKWArgs]",
+    ):
         self.verbose = verbose
-        log.debug('Initializing instrument')
+        log.debug("Initializing instrument")
         super().__init__(name, address, **kwargs)
 
-        self.add_parameter('frequency',
-                           label='Frequency',
-                           get_cmd='FREQ:CW?',
-                           set_cmd='FREQ:CW {}',
-                           vals=vals.Numbers(10e6, 40e9),
-                           docstring='Microwave frequency, ....',
-                           get_parser=float,
-                           unit='Hz')
+        self.frequency: Parameter = self.add_parameter(
+            "frequency",
+            label="Frequency",
+            get_cmd="FREQ:CW?",
+            set_cmd="FREQ:CW {}",
+            vals=vals.Numbers(10e6, 40e9),
+            docstring="Microwave frequency, ....",
+            get_parser=float,
+            unit="Hz",
+        )
+        """Microwave frequency, ...."""
 
-        self.add_parameter('freqmode',
-                           label='Frequency mode',
-                           get_cmd='FREQ:MODE?',
-                           set_cmd='FREQ:MODE {}',
-                           vals=vals.Strings(),
-                           get_parser=parsestr,
-                           docstring='Microwave frequency mode, ....')
+        self.freqmode: Parameter = self.add_parameter(
+            "freqmode",
+            label="Frequency mode",
+            get_cmd="FREQ:MODE?",
+            set_cmd="FREQ:MODE {}",
+            vals=vals.Strings(),
+            get_parser=parsestr,
+            docstring="Microwave frequency mode, ....",
+        )
+        """Microwave frequency mode, ...."""
 
-        self.add_parameter('power',
-                           label='Power',
-                           get_cmd='SOUR:POW?',
-                           set_cmd='SOUR:POW {}',
-                           vals=vals.Numbers(-20, 20),
-                           get_parser=float,
-                           unit='dBm',
-                           docstring='Microwave power, ....')
+        self.power: Parameter = self.add_parameter(
+            "power",
+            label="Power",
+            get_cmd="SOUR:POW?",
+            set_cmd="SOUR:POW {}",
+            vals=vals.Numbers(-20, 20),
+            get_parser=float,
+            unit="dBm",
+            docstring="Microwave power, ....",
+        )
+        """Microwave power, ...."""
 
-        self.add_parameter('rfstatus',
-                           label='RF status',
-                           get_cmd=':POW:STAT?',
-                           set_cmd=':POW:STAT {}',
-                           val_mapping={'on': '1', 'off': '0'},
-                           vals=vals.Strings(),
-                           get_parser=parsestr,
-                           docstring='Status, ....')
+        self.rfstatus: Parameter = self.add_parameter(
+            "rfstatus",
+            label="RF status",
+            get_cmd=":POW:STAT?",
+            set_cmd=":POW:STAT {}",
+            val_mapping={"on": "1", "off": "0"},
+            vals=vals.Strings(),
+            get_parser=parsestr,
+            docstring="Status, ....",
+        )
+        """Status, ...."""
 
-        self.add_parameter('fmstatus',
-                           label='FM status',
-                           get_cmd=':FM:STAT?',
-                           set_cmd=':FM:STAT {}',
-                           val_mapping={'on': '1', 'off': '0'},
-                           vals=vals.Strings(),
-                           get_parser=parsestr,
-                           docstring='FM status, ....')
+        self.fmstatus: Parameter = self.add_parameter(
+            "fmstatus",
+            label="FM status",
+            get_cmd=":FM:STAT?",
+            set_cmd=":FM:STAT {}",
+            val_mapping={"on": "1", "off": "0"},
+            vals=vals.Strings(),
+            get_parser=parsestr,
+            docstring="FM status, ....",
+        )
+        """FM status, ...."""
 
-        self.add_parameter('fmcoup',
-                           label='FM coupling',
-                           get_cmd=':FM:COUP?',
-                           set_cmd=':FM:COUP {}',
-                           vals=vals.Strings(),
-                           get_parser=parsestr,
-                           docstring='FM coupling, ....')
+        self.fmcoup: Parameter = self.add_parameter(
+            "fmcoup",
+            label="FM coupling",
+            get_cmd=":FM:COUP?",
+            set_cmd=":FM:COUP {}",
+            vals=vals.Strings(),
+            get_parser=parsestr,
+            docstring="FM coupling, ....",
+        )
+        """FM coupling, ...."""
 
-        self.add_parameter('amstatus',
-                           label='AM status',
-                           get_cmd=':AM:STAT?',
-                           set_cmd=':AM:STAT {}',
-                           val_mapping={'on': '1', 'off': '0'},
-                           vals=vals.Strings(),
-                           get_parser=parsestr,
-                           docstring='AM status, ....')
+        self.amstatus: Parameter = self.add_parameter(
+            "amstatus",
+            label="AM status",
+            get_cmd=":AM:STAT?",
+            set_cmd=":AM:STAT {}",
+            val_mapping={"on": "1", "off": "0"},
+            vals=vals.Strings(),
+            get_parser=parsestr,
+            docstring="AM status, ....",
+        )
+        """AM status, ...."""
 
-        self.add_parameter('pulsestatus',
-                           label='Pulse status',
-                           get_cmd=':PULS:STAT?',
-                           set_cmd=':PULS:STAT {}',
-                           val_mapping={'on': '1', 'off': '0'},
-                           vals=vals.Strings(),
-                           get_parser=parsestr,
-                           docstring='Pulse status, ....')
+        self.pulsestatus: Parameter = self.add_parameter(
+            "pulsestatus",
+            label="Pulse status",
+            get_cmd=":PULS:STAT?",
+            set_cmd=":PULS:STAT {}",
+            val_mapping={"on": "1", "off": "0"},
+            vals=vals.Strings(),
+            get_parser=parsestr,
+            docstring="Pulse status, ....",
+        )
+        """Pulse status, ...."""
 
-        self.add_parameter('pulsesource',
-                           label='Pulse source',
-                           get_cmd=':PULS:SOUR?',
-                           set_cmd=':PULS:SOUR {}',
-                           vals=vals.Strings(),
-                           get_parser=parsestr,
-                           docstring='Pulse source, ....')
+        self.pulsesource: Parameter = self.add_parameter(
+            "pulsesource",
+            label="Pulse source",
+            get_cmd=":PULS:SOUR?",
+            set_cmd=":PULS:SOUR {}",
+            vals=vals.Strings(),
+            get_parser=parsestr,
+            docstring="Pulse source, ....",
+        )
+        """Pulse source, ...."""
         self.connect_message()
 
     def reset(self) -> None:
-        log.debug('Resetting instrument')
-        self.write('*RST')
+        log.debug("Resetting instrument")
+        self.write("*RST")
         self.print_all()
 
     def print_all(self) -> None:
-        log.debug('Reading all settings from instrument')
+        log.debug("Reading all settings from instrument")
         print(f"{self.rfstatus.label}: {self.rfstatus.get()}")
         print(f"{self.power.label}: {self.power.get()} {self.power.unit}")
         print(f"{self.frequency.label}: {self.frequency.get():e} {self.frequency.unit}")

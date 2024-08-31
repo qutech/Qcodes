@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import pytest
 
@@ -12,6 +12,9 @@ from .conftest import (
     OverwriteSetParam,
     ParameterMemory,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def test_parameter_with_overwritten_get_raises() -> None:
@@ -76,12 +79,12 @@ def test_gettable_settable_attributes_with_get_set_raw(
         def set_raw(self, value: Any) -> Any:
             self._value = value
 
-    a = GetSetParam('foo', instrument=None, initial_value=1)
+    a = GetSetParam("foo", instrument=None, initial_value=1)
 
     assert a.gettable is True
     assert a.settable is True
 
-    b = ParameterBase("foo", None)
+    b = ParameterBase("foo", instrument=None)
 
     assert b.gettable is False
     assert b.settable is False
@@ -127,16 +130,16 @@ def test_set_on_parameter_marked_as_non_settable_raises() -> None:
 def test_settable() -> None:
     mem = ParameterMemory()
 
-    p = Parameter('p', set_cmd=mem.set, get_cmd=False)
+    p = Parameter("p", set_cmd=mem.set, get_cmd=False)
 
     p(10)
     assert mem.get() == 10
     with pytest.raises(NotImplementedError):
         p()
 
-    assert hasattr(p, 'set')
+    assert hasattr(p, "set")
     assert p.settable
-    assert not hasattr(p, 'get')
+    assert not hasattr(p, "get")
     assert not p.gettable
 
     # For settable-only parameters, using ``cache.set`` may not make
@@ -147,7 +150,7 @@ def test_settable() -> None:
 
 def test_gettable() -> None:
     mem = ParameterMemory()
-    p = Parameter('p', get_cmd=mem.get)
+    p = Parameter("p", get_cmd=mem.get)
     mem.set(21)
 
     assert p() == 21
@@ -156,9 +159,9 @@ def test_gettable() -> None:
     with pytest.raises(NotImplementedError):
         p(10)
 
-    assert hasattr(p, 'get')
+    assert hasattr(p, "get")
     assert p.gettable
-    assert not hasattr(p, 'set')
+    assert not hasattr(p, "set")
     assert not p.settable
 
     p.cache.set(7)

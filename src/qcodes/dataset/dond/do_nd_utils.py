@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Callable, Optional, Union
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     import matplotlib.axes
@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 ActionsT = Sequence[Callable[[], None]]
 BreakConditionT = Callable[[], bool]
 
-ParamMeasT = Union[ParameterBase, Callable[[], None]]
+ParamMeasT = ParameterBase | Callable[[], None]
 
 AxesTuple = tuple["matplotlib.axes.Axes", "matplotlib.colorbar.Colorbar"]
 AxesTupleList = tuple[
@@ -45,7 +45,7 @@ class BreakConditionInterrupt(Exception):
     pass
 
 
-MeasInterruptT = Union[KeyboardInterrupt, BreakConditionInterrupt, None]
+MeasInterruptT = KeyboardInterrupt | BreakConditionInterrupt | None
 
 
 def _register_parameters(
@@ -120,14 +120,26 @@ def _register_actions(
 
 
 @contextmanager
-def catch_interrupts() -> Iterator[Callable[[], MeasInterruptT]]:
-    interrupt_exception = None
+def catch_interrupts() -> Iterator[Callable[[], MeasInterruptT | None]]:
+    interrupt_exception: MeasInterruptT | None = None
+    interrupt_raised = False
 
-    def get_interrupt_exception() -> MeasInterruptT:
+    def get_interrupt_exception() -> MeasInterruptT | None:
         nonlocal interrupt_exception
         return interrupt_exception
 
     try:
         yield get_interrupt_exception
-    except (KeyboardInterrupt, BreakConditionInterrupt) as e:
+    except KeyboardInterrupt as e:
         interrupt_exception = e
+        interrupt_raised = True
+        raise  # Re-raise KeyboardInterrupt
+    except BreakConditionInterrupt as e:
+        interrupt_exception = e
+        interrupt_raised = True
+        # Don't re-raise BreakConditionInterrupt
+    finally:
+        if interrupt_raised:
+            log.warning(
+                f"Measurement has been interrupted, data may be incomplete: {interrupt_exception}"
+            )

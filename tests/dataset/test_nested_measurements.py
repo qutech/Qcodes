@@ -1,5 +1,3 @@
-from typing import Union
-
 import hypothesis.strategies as hst
 import numpy as np
 import pytest
@@ -12,7 +10,7 @@ from qcodes.dataset.descriptions.param_spec import ParamSpecBase
 from qcodes.dataset.sqlite.connection import atomic_transaction
 from tests.common import retry_until_does_not_throw
 
-VALUE = Union[str, float, list, np.ndarray, bool]
+VALUE = str | float | list | np.ndarray | bool
 
 
 @pytest.mark.usefixtures("experiment")
@@ -26,9 +24,10 @@ def test_nested_measurement_basic(DAC, DMM, bg_writing) -> None:
     meas2.register_parameter(DAC.ch2)
     meas2.register_parameter(DMM.v2, setpoints=(DAC.ch2,))
 
-    with meas1.run(write_in_background=bg_writing) as ds1, meas2.run(
-        write_in_background=bg_writing
-    ) as ds2:
+    with (
+        meas1.run(write_in_background=bg_writing) as ds1,
+        meas2.run(write_in_background=bg_writing) as ds2,
+    ):
         for i in range(10):
             DAC.ch1.set(i)
             DAC.ch2.set(i)
@@ -61,9 +60,10 @@ def test_nested_measurement(bg_writing) -> None:
     meas2.register_custom_parameter("foo2")
     meas2.register_custom_parameter("bar2", setpoints=("foo2",))
 
-    with meas1.run(write_in_background=bg_writing) as ds1, meas2.run(
-        write_in_background=bg_writing
-    ) as ds2:
+    with (
+        meas1.run(write_in_background=bg_writing) as ds1,
+        meas2.run(write_in_background=bg_writing) as ds2,
+    ):
         for i in range(10):
             ds1.add_result(("foo1", i), ("bar1", i**2))
             ds2.add_result(("foo2", 2 * i), ("bar2", (2 * i) ** 2))
@@ -114,9 +114,10 @@ def test_nested_measurement_array(
         paramtype="array",
     )
 
-    with meas1.run(write_in_background=bg_writing) as ds1, meas2.run(
-        write_in_background=bg_writing
-    ) as ds2:
+    with (
+        meas1.run(write_in_background=bg_writing) as ds1,
+        meas2.run(write_in_background=bg_writing) as ds2,
+    ):
         for i in range(outer_len):
             bar1sptdata = np.arange(inner_len1)
             bar2sptdata = np.arange(inner_len2)

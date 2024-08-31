@@ -1,11 +1,14 @@
 import warnings
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 import qcodes.validators as vals
-from qcodes.instrument import VisaInstrument
-from qcodes.parameters import create_on_off_val_mapping
+from qcodes.instrument import VisaInstrument, VisaInstrumentKWArgs
+from qcodes.parameters import Parameter, create_on_off_val_mapping
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
 
 
 class AgilentE8257D(VisaInstrument):
@@ -16,15 +19,16 @@ class AgilentE8257D(VisaInstrument):
     only the ones most commonly used.
     """
 
+    default_terminator = "\n"
+
     def __init__(
         self,
         name: str,
         address: str,
-        step_attenuator: Optional[bool] = None,
-        terminator: str = "\n",
-        **kwargs: Any
+        step_attenuator: bool | None = None,
+        **kwargs: "Unpack[VisaInstrumentKWArgs]",
     ) -> None:
-        super().__init__(name, address, terminator=terminator, **kwargs)
+        super().__init__(name, address, **kwargs)
 
         if step_attenuator is not None:
             warnings.warn(
@@ -88,7 +92,7 @@ class AgilentE8257D(VisaInstrument):
             self._min_power = -20
             self._max_power = 5
 
-        self.add_parameter(
+        self.frequency: Parameter = self.add_parameter(
             name="frequency",
             label="Frequency",
             unit="Hz",
@@ -98,8 +102,9 @@ class AgilentE8257D(VisaInstrument):
             set_parser=float,
             vals=vals.Numbers(self._min_freq, self._max_freq),
         )
+        """Parameter frequency"""
 
-        self.add_parameter(
+        self.phase: Parameter = self.add_parameter(
             name="phase",
             label="Phase",
             unit="deg",
@@ -109,8 +114,9 @@ class AgilentE8257D(VisaInstrument):
             set_parser=self.deg_to_rad,
             vals=vals.Numbers(-180, 180),
         )
+        """Parameter phase"""
 
-        self.add_parameter(
+        self.power: Parameter = self.add_parameter(
             name="power",
             label="Power",
             unit="dBm",
@@ -120,13 +126,15 @@ class AgilentE8257D(VisaInstrument):
             set_parser=float,
             vals=vals.Numbers(self._min_power, self._max_power),
         )
+        """Parameter power"""
 
-        self.add_parameter(
+        self.output_enabled: Parameter = self.add_parameter(
             "output_enabled",
             get_cmd=":OUTP?",
             set_cmd="OUTP {}",
             val_mapping=create_on_off_val_mapping(on_val="1", off_val="0"),
         )
+        """Parameter output_enabled"""
 
         self.connect_message()
 
@@ -139,12 +147,12 @@ class AgilentE8257D(VisaInstrument):
     # functions to convert between rad and deg
     @staticmethod
     def deg_to_rad(
-        angle_deg: Union[float, str, np.floating, np.integer]
+        angle_deg: float | str | np.floating | np.integer,
     ) -> "np.floating[Any]":
         return np.deg2rad(float(angle_deg))
 
     @staticmethod
     def rad_to_deg(
-        angle_rad: Union[float, str, np.floating, np.integer]
+        angle_rad: float | str | np.floating | np.integer,
     ) -> "np.floating[Any]":
         return np.rad2deg(float(angle_rad))

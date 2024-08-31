@@ -1,12 +1,20 @@
 """
 Driver for the Keithley S46 RF switch
 """
+
 import re
 from itertools import product
-from typing import Any, ClassVar, Optional
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from qcodes.instrument import Instrument, VisaInstrument
+from qcodes.instrument import (
+    Instrument,
+    VisaInstrument,
+    VisaInstrumentKWArgs,
+)
 from qcodes.parameters import Parameter, ParamRawDataType
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
 
 
 class KeithleyS46LockAcquisitionError(Exception):
@@ -26,7 +34,7 @@ class KeithleyS46RelayLock:
 
     def __init__(self, relay_name: str):
         self.relay_name = relay_name
-        self._locked_by: Optional[int] = None
+        self._locked_by: int | None = None
 
     def acquire(self, channel_number: int) -> None:
         """
@@ -64,12 +72,12 @@ class S46Parameter(Parameter):
     def __init__(
         self,
         name: str,
-        instrument: Optional[Instrument],
+        instrument: Instrument | None,
         channel_number: int,
         lock: KeithleyS46RelayLock,
         **kwargs: Any,
     ):
-        super().__init__(name, instrument, **kwargs)
+        super().__init__(name, instrument=instrument, **kwargs)
 
         self._lock = lock
         self._channel_number = channel_number
@@ -98,7 +106,6 @@ class S46Parameter(Parameter):
         return self._get(get_cached=False)
 
     def set_raw(self, value: ParamRawDataType) -> None:
-
         if value == "close":
             self._lock.acquire(self._channel_number)
         elif value == "open":
@@ -123,7 +130,6 @@ class S46Parameter(Parameter):
 
 
 class KeithleyS46(VisaInstrument):
-
     relay_names: list[str] = ["A", "B", "C", "D"] + [f"R{j}" for j in range(1, 9)]
 
     # Make a dictionary where keys are channel aliases (e.g. 'A1', 'B3', etc)
@@ -136,22 +142,28 @@ class KeithleyS46(VisaInstrument):
     # Make a reverse dict for efficient alias lookup given a channel number
     aliases: ClassVar[dict[int, str]] = {v: k for k, v in channel_numbers.items()}
 
-    def __init__(self, name: str, address: str, **kwargs: Any):
+    default_terminator = "\n"
 
-        super().__init__(name, address, terminator="\n", **kwargs)
+    def __init__(
+        self,
+        name: str,
+        address: str,
+        **kwargs: "Unpack[VisaInstrumentKWArgs]",
+    ):
+        super().__init__(name, address, **kwargs)
         try:
-            self.add_parameter(
+            self.closed_channels: Parameter = self.add_parameter(
                 "closed_channels",
                 get_cmd=":CLOS?",
                 get_parser=self._get_closed_channels_parser,
             )
+            """Parameter closed_channels"""
 
             self._available_channels: list[str] = []
 
             for relay_name, channel_count in zip(
                 KeithleyS46.relay_names, self.relay_layout
             ):
-
                 relay_lock = KeithleyS46RelayLock(relay_name)
 
                 for channel_index in range(1, channel_count + 1):

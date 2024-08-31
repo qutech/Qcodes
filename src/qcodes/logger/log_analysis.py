@@ -4,15 +4,16 @@ work with log messages from QCoDeS. Specifically it enables
 exports of logs and log files to a :class:`pd.DataFrame`
 
 """
+
 from __future__ import annotations
 
 import io
 import logging
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
     import numpy as np
     import numpy.typing as npt
@@ -62,8 +63,9 @@ def log_to_dataframe(
     # note: if we used commas as separators, pandas read_csv
     # could be faster than this string comprehension
 
-    split_cont = [line.split(separator) for line in log
-                  if line[0].isdigit()]  # avoid tracebacks
+    split_cont = [
+        line.split(separator) for line in log if line[0].isdigit()
+    ]  # avoid tracebacks
     dataframe = pd.DataFrame(split_cont, columns=list(columns))
 
     return dataframe
@@ -124,14 +126,13 @@ def time_difference(
     """
     import pandas as pd
 
-
-    if ',' in firsttimes.iloc[0]:
-        nfirsttimes = firsttimes.str.replace(',', '.')
+    if "," in firsttimes.iloc[0]:
+        nfirsttimes = firsttimes.str.replace(",", ".")
     else:
         nfirsttimes = firsttimes
 
-    if ',' in secondtimes.iloc[0]:
-        nsecondtimes = secondtimes.str.replace(',', '.')
+    if "," in secondtimes.iloc[0]:
+        nsecondtimes = secondtimes.str.replace(",", ".")
     else:
         nsecondtimes = secondtimes
 
@@ -180,7 +181,9 @@ def capture_dataframe(
 
         logger.addHandler(string_handler)
         try:
-            yield string_handler, lambda: log_to_dataframe(
-                log_capture.getvalue().splitlines())
+            yield (
+                string_handler,
+                lambda: log_to_dataframe(log_capture.getvalue().splitlines()),
+            )
         finally:
             logger.removeHandler(string_handler)

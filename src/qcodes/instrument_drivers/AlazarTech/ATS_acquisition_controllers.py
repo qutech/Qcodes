@@ -1,9 +1,12 @@
 import math
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from .ATS import AcquisitionController
+
+if TYPE_CHECKING:
+    from qcodes.parameters import Parameter
 
 
 # DFT AcquisitionController
@@ -26,25 +29,26 @@ class DemodulationAcquisitionController(AcquisitionController[float]):
         **kwargs: kwargs are forwarded to the Instrument base class
 
     """
+
     def __init__(
-            self,
-            name: str,
-            alazar_name: str,
-            demodulation_frequency: float,
-            **kwargs: Any):
+        self, name: str, alazar_name: str, demodulation_frequency: float, **kwargs: Any
+    ):
         self.demodulation_frequency = demodulation_frequency
         self.acquisitionkwargs: dict[str, Any] = {}
         self.samples_per_record = 0
         self.records_per_buffer = 0
         self.buffers_per_acquisition = 0
         self.number_of_channels = 2
-        self.cos_list: Optional[np.ndarray] = None
-        self.sin_list: Optional[np.ndarray] = None
-        self.buffer: Optional[np.ndarray] = None
+        self.cos_list: np.ndarray | None = None
+        self.sin_list: np.ndarray | None = None
+        self.buffer: np.ndarray | None = None
         # make a call to the parent class and by extension, create the parameter
         # structure of this class
         super().__init__(name, alazar_name, **kwargs)
-        self.add_parameter("acquisition", get_cmd=self.do_acquisition)
+        self.acquisition: Parameter = self.add_parameter(
+            "acquisition", get_cmd=self.do_acquisition
+        )
+        """Parameter acquisition"""
 
     def update_acquisitionkwargs(self, **kwargs: Any) -> None:
         """
@@ -61,8 +65,9 @@ class DemodulationAcquisitionController(AcquisitionController[float]):
         acquisiion parameter of this instrument
         :return:
         """
-        value: float = self._get_alazar().acquire(acquisition_controller=self,
-                                           **self.acquisitionkwargs)
+        value: float = self._get_alazar().acquire(
+            acquisition_controller=self, **self.acquisitionkwargs
+        )
         return value
 
     def pre_start_capture(self) -> None:
@@ -75,14 +80,15 @@ class DemodulationAcquisitionController(AcquisitionController[float]):
         self.buffers_per_acquisition = alazar.buffers_per_acquisition.get()
         sample_speed = alazar.get_sample_rate()
         integer_list = np.arange(self.samples_per_record)
-        angle_list = (2 * np.pi * self.demodulation_frequency / sample_speed *
-                      integer_list)
+        angle_list = (
+            2 * np.pi * self.demodulation_frequency / sample_speed * integer_list
+        )
 
         self.cos_list = np.cos(angle_list)
         self.sin_list = np.sin(angle_list)
-        self.buffer = np.zeros(self.samples_per_record *
-                               self.records_per_buffer *
-                               self.number_of_channels)
+        self.buffer = np.zeros(
+            self.samples_per_record * self.records_per_buffer * self.number_of_channels
+        )
 
     def pre_acquire(self) -> None:
         """
@@ -95,7 +101,7 @@ class DemodulationAcquisitionController(AcquisitionController[float]):
         pass
 
     def handle_buffer(
-        self, buffer: np.ndarray, buffer_number: Optional[int] = None
+        self, buffer: np.ndarray, buffer_number: int | None = None
     ) -> None:
         """
         See AcquisitionController
@@ -112,8 +118,9 @@ class DemodulationAcquisitionController(AcquisitionController[float]):
         assert self.buffer is not None
         alazar = self._get_alazar()
         # average all records in a buffer
-        records_per_acquisition = (1. * self.buffers_per_acquisition *
-                                   self.records_per_buffer)
+        records_per_acquisition = (
+            1.0 * self.buffers_per_acquisition * self.records_per_buffer
+        )
         recordA = np.zeros(self.samples_per_record)
         for i in range(self.records_per_buffer):
             i0 = i * self.samples_per_record
@@ -130,7 +137,7 @@ class DemodulationAcquisitionController(AcquisitionController[float]):
             # fit channel A and channel B
             res1 = self.fit(recordA)
             self.fit(recordB)
-            #return [alazar.signal_to_volt(1, res1[0] + 127.5),
+            # return [alazar.signal_to_volt(1, res1[0] + 127.5),
             #        alazar.signal_to_volt(2, res2[0] + 127.5),
             #        res1[1], res2[1],
             #        (r es1[1] - res2[1]) % 360]
@@ -152,7 +159,7 @@ class DemodulationAcquisitionController(AcquisitionController[float]):
 
         # the factor of 2 in the amplitude is due to the fact that there is
         # a negative frequency as well
-        ampl = 2 * np.sqrt(RePart ** 2 + ImPart ** 2)
+        ampl = 2 * np.sqrt(RePart**2 + ImPart**2)
 
         # see manual page 52!!! (using unsigned data)
         return ampl, math.atan2(ImPart, RePart) * 360 / (2 * math.pi)

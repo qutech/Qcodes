@@ -1,12 +1,15 @@
 """Base class for Instrument and InstrumentModule"""
+
 from __future__ import annotations
 
 import collections.abc
 import logging
 import warnings
-from typing import TYPE_CHECKING, Any, ClassVar
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import numpy as np
+from typing_extensions import TypedDict, TypeVar, deprecated
 
 from qcodes.logger import get_instrument_logger
 from qcodes.metadatable import Metadatable, MetadatableWithName
@@ -16,12 +19,35 @@ from qcodes.utils import DelegateAttributes, full_class
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
+    from typing_extensions import NotRequired
+
     from qcodes.instrument.channel import ChannelTuple, InstrumentModule
     from qcodes.logger.instrument_logger import InstrumentLoggerAdapter
 
 from qcodes.utils import QCoDeSDeprecationWarning
 
 log = logging.getLogger(__name__)
+
+TParameter = TypeVar("TParameter", bound=ParameterBase, default=Parameter)
+
+
+class InstrumentBaseKWArgs(TypedDict):
+    """
+    This TypedDict defines the type of the kwargs that can be passed to the InstrumentBase class.
+    A subclass of VisaInstrument should take ``**kwargs: Unpack[InstrumentBaseKWArgs]`` as input
+    and forward this to the super class to ensure that it can accept all the arguments defined here.
+    """
+
+    metadata: NotRequired[Mapping[Any, Any] | None]
+    """
+    Additional static metadata to add to this
+    instrument's JSON snapshot.
+    """
+    label: NotRequired[str | None]
+    """
+    Nicely formatted name of the instrument; if None,
+    the ``name`` is used.
+    """
 
 
 class InstrumentBase(MetadatableWithName, DelegateAttributes):
@@ -100,9 +126,9 @@ class InstrumentBase(MetadatableWithName, DelegateAttributes):
     def add_parameter(
         self,
         name: str,
-        parameter_class: type[ParameterBase] | None = None,
+        parameter_class: type[TParameter] | None = None,
         **kwargs: Any,
-    ) -> None:
+    ) -> TParameter:
         """
         Bind one Parameter to this instrument.
 
@@ -132,7 +158,7 @@ class InstrumentBase(MetadatableWithName, DelegateAttributes):
                 one.
         """
         if parameter_class is None:
-            parameter_class = Parameter
+            parameter_class = cast(type[TParameter], Parameter)
 
         if "bind_to_instrument" not in kwargs.keys():
             kwargs["bind_to_instrument"] = True
@@ -160,6 +186,30 @@ class InstrumentBase(MetadatableWithName, DelegateAttributes):
                 QCoDeSDeprecationWarning,
             )
             self.parameters[name] = param
+        return param
+
+    def remove_parameter(self, name: str) -> None:
+        """
+        Remove a Parameter from this instrument.
+
+        Unlike modifying the parameters dict directly, this method will
+        make sure that the parameter is properly unbound from the instrument
+        if the parameter is added as a real attribute to the instrument.
+        If a property of the same name exists it will not be modified.
+        If name is an attribute but not a parameter, it will not be modified.
+
+        Args:
+            name: The name of the parameter to remove.
+
+        Raises:
+            KeyError: If the parameter does not exist on the instrument.
+        """
+        self.parameters.pop(name)
+
+        is_property = isinstance(getattr(self.__class__, name, None), property)
+
+        if not is_property and hasattr(self, name):
+            delattr(self, name)
 
     def add_function(self, name: str, **kwargs: Any) -> None:
         """
@@ -257,7 +307,6 @@ class InstrumentBase(MetadatableWithName, DelegateAttributes):
     def _get_component_by_name(
         self, potential_top_level_name: str, remaining_name_parts: list[str]
     ) -> MetadatableWithName:
-
         log.debug(
             "trying to find component %s on %s, remaining %s",
             potential_top_level_name,
@@ -534,6 +583,10 @@ class InstrumentBase(MetadatableWithName, DelegateAttributes):
         return self.full_name
 
     @property
+    @deprecated(
+        "The private attribute `_name` is deprecated and will be removed. Use `full_name` instead.",
+        category=QCoDeSDeprecationWarning,
+    )
     def _name(self) -> str:
         """
         Private alias kept here for backwards compatibility

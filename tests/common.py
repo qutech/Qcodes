@@ -4,7 +4,7 @@ import cProfile
 import os
 from functools import wraps
 from time import sleep
-from typing import TYPE_CHECKING, Any, Callable, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import pytest
 from typing_extensions import ParamSpec
@@ -12,6 +12,7 @@ from typing_extensions import ParamSpec
 from qcodes.metadatable import MetadatableWithName
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from pytest import ExceptionInfo
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 P = ParamSpec("P")
+
 
 def retry_until_does_not_throw(
     exception_class_to_expect: type[Exception] = AssertionError,
@@ -56,7 +58,6 @@ def retry_until_does_not_throw(
     """
 
     def retry_until_passes_decorator(func: Callable[P, T]) -> Callable[P, T]:
-
         @wraps(func)
         def func_retry(*args: P.args, **kwargs: P.kwargs) -> T:
             tries_left = tries - 1
@@ -90,11 +91,12 @@ def profile(func: Callable[P, T]) -> Callable[P, T]:
     """
 
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-        profile_filename = func.__name__ + '.prof'
+        profile_filename = func.__name__ + ".prof"
         profiler = cProfile.Profile()
         result = profiler.runcall(func, *args, **kwargs)
         profiler.dump_stats(profile_filename)
         return result
+
     return wrapper
 
 
@@ -138,7 +140,6 @@ def skip_if_no_fixtures(dbname: str | Path) -> None:
 
 
 class DummyComponent(MetadatableWithName):
-
     """Docstring for DummyComponent."""
 
     def __init__(self, name: str):

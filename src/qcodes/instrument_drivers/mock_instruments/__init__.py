@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from qcodes.instrument import ChannelList, Instrument, InstrumentBase, InstrumentChannel
+from qcodes.instrument import (
+    ChannelList,
+    Instrument,
+    InstrumentBase,
+    InstrumentBaseKWArgs,
+    InstrumentChannel,
+)
 from qcodes.parameters import (
     ArrayParameter,
     MultiParameter,
@@ -20,6 +26,8 @@ from qcodes.validators import Sequence as ValidatorSequence
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
+
+    from typing_extensions import Unpack
 
 log = logging.getLogger(__name__)
 
@@ -48,38 +56,52 @@ class MockParabola(DummyBase):
     testing of numerical optimizations.
     """
 
-    def __init__(self, name: str, **kw: Any):
-        super().__init__(name, **kw)
+    def __init__(self, name: str, **kwargs: Unpack[InstrumentBaseKWArgs]):
+        super().__init__(name, **kwargs)
 
         # Instrument parameters
-        for parname in ['x', 'y', 'z']:
-            self.add_parameter(parname, unit='a.u.',
-                               parameter_class=Parameter,
-                               vals=Numbers(), initial_value=0,
-                               get_cmd=None, set_cmd=None)
+        for parname in ["x", "y", "z"]:
+            self.add_parameter(
+                parname,
+                unit="a.u.",
+                parameter_class=Parameter,
+                vals=Numbers(),
+                initial_value=0,
+                get_cmd=None,
+                set_cmd=None,
+            )
 
-        self.add_parameter('noise', unit='a.u.',
-                           label='white noise amplitude',
-                           parameter_class=Parameter,
-                           vals=Numbers(), initial_value=0,
-                           get_cmd=None, set_cmd=None)
+        self.add_parameter(
+            "noise",
+            unit="a.u.",
+            label="white noise amplitude",
+            parameter_class=Parameter,
+            vals=Numbers(),
+            initial_value=0,
+            get_cmd=None,
+            set_cmd=None,
+        )
 
-        self.add_parameter('parabola', unit='a.u.',
-                           get_cmd=self._measure_parabola)
-        self.add_parameter('skewed_parabola', unit='a.u.',
-                           get_cmd=self._measure_skewed_parabola)
+        self.add_parameter("parabola", unit="a.u.", get_cmd=self._measure_parabola)
+        self.add_parameter(
+            "skewed_parabola", unit="a.u.", get_cmd=self._measure_skewed_parabola
+        )
 
     def _measure_parabola(self) -> float:
-        return (self.x.get()**2 + self.y.get()**2 + self.z.get()**2 +
-                self.noise.get()*np.random.rand(1))
+        return (
+            self.x.get() ** 2
+            + self.y.get() ** 2
+            + self.z.get() ** 2
+            + self.noise.get() * np.random.rand(1)
+        )
 
     def _measure_skewed_parabola(self) -> float:
         """
         Adds an -x term to add a corelation between the parameters.
         """
-        return ((self.x.get()**2 + self.y.get()**2 +
-                 self.z.get()**2)*(1 + abs(self.y.get()-self.x.get())) +
-                 self.noise.get()*np.random.rand(1))
+        return (self.x.get() ** 2 + self.y.get() ** 2 + self.z.get() ** 2) * (
+            1 + abs(self.y.get() - self.x.get())
+        ) + self.noise.get() * np.random.rand(1)
 
 
 class MockMetaParabola(InstrumentBase):
@@ -93,32 +115,41 @@ class MockMetaParabola(InstrumentBase):
     snapshottable in a station.
     """
 
-    def __init__(self, name: str, mock_parabola_inst: MockParabola, **kw: Any):
+    def __init__(
+        self,
+        name: str,
+        mock_parabola_inst: MockParabola,
+        **kwargs: Unpack[InstrumentBaseKWArgs],
+    ):
         """
         Create a new MockMetaParabola, connected to an existing MockParabola instance.
         """
-        super().__init__(name, **kw)
+        super().__init__(name, **kwargs)
         self.mock_parabola_inst = mock_parabola_inst
 
         # Instrument parameters
-        for parname in ['x', 'y', 'z']:
+        for parname in ["x", "y", "z"]:
             self.parameters[parname] = getattr(mock_parabola_inst, parname)
-        self.add_parameter('gain', parameter_class=Parameter,
-                           initial_value=1,
-                           get_cmd=None, set_cmd=None)
+        self.add_parameter(
+            "gain",
+            parameter_class=Parameter,
+            initial_value=1,
+            get_cmd=None,
+            set_cmd=None,
+        )
 
-        self.add_parameter('parabola', unit='a.u.',
-                           get_cmd=self._get_parabola)
-        self.add_parameter('skewed_parabola', unit='a.u.',
-                           get_cmd=self._get_skew_parabola)
+        self.add_parameter("parabola", unit="a.u.", get_cmd=self._get_parabola)
+        self.add_parameter(
+            "skewed_parabola", unit="a.u.", get_cmd=self._get_skew_parabola
+        )
 
     def _get_parabola(self) -> float:
         val = self.mock_parabola_inst.parabola.get()
-        return val*self.gain.get()
+        return val * self.gain.get()
 
     def _get_skew_parabola(self) -> float:
         val = self.mock_parabola_inst.skewed_parabola.get()
-        return val*self.gain.get()
+        return val * self.gain.get()
 
 
 class DummyInstrument(DummyBase):
@@ -126,7 +157,7 @@ class DummyInstrument(DummyBase):
         self,
         name: str = "dummy",
         gates: Sequence[str] = ("dac1", "dac2", "dac3"),
-        **kwargs: Any,
+        **kwargs: Unpack[InstrumentBaseKWArgs],
     ):
         """
         Create a dummy instrument that can be used for testing
@@ -152,10 +183,18 @@ class DummyInstrument(DummyBase):
                 set_cmd=None,
             )
 
+        self.fixed_parameter = self.add_parameter(
+            "fixed_parameter", set_cmd=None, get_cmd=None, initial_value=5
+        )
+
 
 class DummyFailingInstrument(DummyBase):
-    def __init__(self, name: str = "dummy", fail: bool = True, **kwargs: Any):
-
+    def __init__(
+        self,
+        name: str = "dummy",
+        fail: bool = True,
+        **kwargs: Unpack[InstrumentBaseKWArgs],
+    ):
         """
         Create a dummy instrument that fails on initialization
         that can be used for testing
@@ -172,8 +211,7 @@ class DummyFailingInstrument(DummyBase):
 
 
 class DummyAttrInstrument(DummyBase):
-    def __init__(self, name: str = "dummy", **kwargs: Any):
-
+    def __init__(self, name: str = "dummy", **kwargs: Unpack[InstrumentBaseKWArgs]):
         """
         Create a dummy instrument that can be used for testing.
         This instrument has its parameters declared as attributes
@@ -279,23 +317,34 @@ class DmmGaussParameter(Parameter):
 
 
 class DummyInstrumentWithMeasurement(DummyBase):
-    def __init__(self, name: str, setter_instr: DummyInstrument, **kwargs: Any):
+    def __init__(
+        self,
+        name: str,
+        setter_instr: DummyInstrument,
+        **kwargs: Unpack[InstrumentBaseKWArgs],
+    ):
         super().__init__(name=name, **kwargs)
         self._setter_instr = setter_instr
-        self.add_parameter('v1',
-                           parameter_class=DmmExponentialParameter,
-                           initial_value=0,
-                           label='Gate v1',
-                           unit="V",
-                           vals=Numbers(-800, 400),
-                           get_cmd=None, set_cmd=None)
-        self.add_parameter('v2',
-                           parameter_class=DmmGaussParameter,
-                           initial_value=0,
-                           label='Gate v2',
-                           unit="V",
-                           vals=Numbers(-800, 400),
-                           get_cmd=None, set_cmd=None)
+        self.add_parameter(
+            "v1",
+            parameter_class=DmmExponentialParameter,
+            initial_value=0,
+            label="Gate v1",
+            unit="V",
+            vals=Numbers(-800, 400),
+            get_cmd=None,
+            set_cmd=None,
+        )
+        self.add_parameter(
+            "v2",
+            parameter_class=DmmGaussParameter,
+            initial_value=0,
+            label="Gate v2",
+            unit="V",
+            vals=Numbers(-800, 400),
+            get_cmd=None,
+            set_cmd=None,
+        )
 
 
 class DummyChannel(InstrumentChannel):
@@ -303,45 +352,64 @@ class DummyChannel(InstrumentChannel):
     A single dummy channel implementation
     """
 
-    def __init__(self, parent: Instrument, name: str, channel: str, **kwargs: Any):
+    def __init__(
+        self,
+        parent: Instrument,
+        name: str,
+        channel: str,
+        **kwargs: Unpack[InstrumentBaseKWArgs],
+    ):
         super().__init__(parent, name, **kwargs)
 
         self._channel = channel
 
         # Add the various channel parameters
-        self.add_parameter('temperature',
-                           parameter_class=Parameter,
-                           initial_value=0,
-                           label=f"Temperature_{channel}",
-                           unit='K',
-                           vals=Numbers(0, 300),
-                           get_cmd=None, set_cmd=None)
+        self.add_parameter(
+            "temperature",
+            parameter_class=Parameter,
+            initial_value=0,
+            label=f"Temperature_{channel}",
+            unit="K",
+            vals=Numbers(0, 300),
+            get_cmd=None,
+            set_cmd=None,
+        )
 
-        self.add_parameter(name='dummy_multi_parameter',
-                           parameter_class=MultiSetPointParam)
+        self.add_parameter(
+            name="dummy_multi_parameter", parameter_class=MultiSetPointParam
+        )
 
-        self.add_parameter(name='dummy_scalar_multi_parameter',
-                           parameter_class=MultiScalarParam)
+        self.add_parameter(
+            name="dummy_scalar_multi_parameter", parameter_class=MultiScalarParam
+        )
 
-        self.add_parameter(name='dummy_2d_multi_parameter',
-                           parameter_class=Multi2DSetPointParam)
+        self.add_parameter(
+            name="dummy_2d_multi_parameter", parameter_class=Multi2DSetPointParam
+        )
 
-        self.add_parameter(name='dummy_2d_multi_parameter_2',
-                           parameter_class=Multi2DSetPointParam2Sizes)
+        self.add_parameter(
+            name="dummy_2d_multi_parameter_2",
+            parameter_class=Multi2DSetPointParam2Sizes,
+        )
 
-        self.add_parameter(name='dummy_array_parameter',
-                           parameter_class=ArraySetPointParam)
+        self.add_parameter(
+            name="dummy_array_parameter", parameter_class=ArraySetPointParam
+        )
 
-        self.add_parameter(name='dummy_complex_array_parameter',
-                           parameter_class=ComplexArraySetPointParam)
+        self.add_parameter(
+            name="dummy_complex_array_parameter",
+            parameter_class=ComplexArraySetPointParam,
+        )
 
-        self.add_parameter('dummy_start',
-                           initial_value=0,
-                           unit='some unit',
-                           label='f start',
-                           vals=Numbers(0, 1e3),
-                           get_cmd=None,
-                           set_cmd=None)
+        self.add_parameter(
+            "dummy_start",
+            initial_value=0,
+            unit="some unit",
+            label="f start",
+            vals=Numbers(0, 1e3),
+            get_cmd=None,
+            set_cmd=None,
+        )
 
         self.add_parameter(
             "dummy_stop",
@@ -362,13 +430,15 @@ class DummyChannel(InstrumentChannel):
             set_cmd=None,
         )
 
-        self.add_parameter('dummy_start_2',
-                           initial_value=0,
-                           unit='some unit',
-                           label='f start',
-                           vals=Numbers(0, 1e3),
-                           get_cmd=None,
-                           set_cmd=None)
+        self.add_parameter(
+            "dummy_start_2",
+            initial_value=0,
+            unit="some unit",
+            label="f start",
+            vals=Numbers(0, 1e3),
+            get_cmd=None,
+            set_cmd=None,
+        )
 
         self.add_parameter(
             "dummy_stop_2",
@@ -389,62 +459,76 @@ class DummyChannel(InstrumentChannel):
             set_cmd=None,
         )
 
-        self.add_parameter('dummy_sp_axis',
-                           unit='some unit',
-                           label='Dummy sp axis',
-                           parameter_class=GeneratedSetPoints,
-                           startparam=self.dummy_start,
-                           stopparam=self.dummy_stop,
-                           numpointsparam=self.dummy_n_points,
-                           vals=Arrays(shape=(self.dummy_n_points,)))
+        self.add_parameter(
+            "dummy_sp_axis",
+            unit="some unit",
+            label="Dummy sp axis",
+            parameter_class=GeneratedSetPoints,
+            startparam=self.dummy_start,
+            stopparam=self.dummy_stop,
+            numpointsparam=self.dummy_n_points,
+            vals=Arrays(shape=(self.dummy_n_points,)),
+        )
 
-        self.add_parameter('dummy_sp_axis_2',
-                           unit='some unit',
-                           label='Dummy sp axis',
-                           parameter_class=GeneratedSetPoints,
-                           startparam=self.dummy_start_2,
-                           stopparam=self.dummy_stop_2,
-                           numpointsparam=self.dummy_n_points_2,
-                           vals=Arrays(shape=(self.dummy_n_points_2,)))
+        self.add_parameter(
+            "dummy_sp_axis_2",
+            unit="some unit",
+            label="Dummy sp axis",
+            parameter_class=GeneratedSetPoints,
+            startparam=self.dummy_start_2,
+            stopparam=self.dummy_stop_2,
+            numpointsparam=self.dummy_n_points_2,
+            vals=Arrays(shape=(self.dummy_n_points_2,)),
+        )
 
-        self.add_parameter(name='dummy_parameter_with_setpoints',
-                           label='Dummy Parameter with Setpoints',
-                           unit='some other unit',
-                           setpoints=(self.dummy_sp_axis,),
-                           vals=Arrays(shape=(self.dummy_n_points,)),
-                           parameter_class=DummyParameterWithSetpoints1D)
+        self.add_parameter(
+            name="dummy_parameter_with_setpoints",
+            label="Dummy Parameter with Setpoints",
+            unit="some other unit",
+            setpoints=(self.dummy_sp_axis,),
+            vals=Arrays(shape=(self.dummy_n_points,)),
+            parameter_class=DummyParameterWithSetpoints1D,
+        )
 
-        self.add_parameter(name='dummy_parameter_with_setpoints_2d',
-                           label='Dummy Parameter with Setpoints',
-                           unit='some other unit',
-                           setpoints=(self.dummy_sp_axis,self.dummy_sp_axis_2),
-                           vals=Arrays(shape=(self.dummy_n_points,self.dummy_n_points_2)),
-                           parameter_class=DummyParameterWithSetpoints2D)
+        self.add_parameter(
+            name="dummy_parameter_with_setpoints_2d",
+            label="Dummy Parameter with Setpoints",
+            unit="some other unit",
+            setpoints=(self.dummy_sp_axis, self.dummy_sp_axis_2),
+            vals=Arrays(shape=(self.dummy_n_points, self.dummy_n_points_2)),
+            parameter_class=DummyParameterWithSetpoints2D,
+        )
 
-        self.add_parameter(name='dummy_text',
-                           label='Dummy text',
-                           unit='text unit',
-                           initial_value='thisisastring',
-                           set_cmd=None,
-                           vals=Strings())
+        self.add_parameter(
+            name="dummy_text",
+            label="Dummy text",
+            unit="text unit",
+            initial_value="thisisastring",
+            set_cmd=None,
+            vals=Strings(),
+        )
 
-        self.add_parameter(name='dummy_complex',
-                           label='Dummy complex',
-                           unit='complex unit',
-                           initial_value=1+1j,
-                           set_cmd=None,
-                           vals=ComplexNumbers())
+        self.add_parameter(
+            name="dummy_complex",
+            label="Dummy complex",
+            unit="complex unit",
+            initial_value=1 + 1j,
+            set_cmd=None,
+            vals=ComplexNumbers(),
+        )
 
-        self.add_parameter(name='dummy_parameter_with_setpoints_complex',
-                           label='Dummy Parameter with Setpoints complex',
-                           unit='some other unit',
-                           setpoints=(self.dummy_sp_axis,),
-                           vals=Arrays(shape=(self.dummy_n_points,),
-                                       valid_types=(np.complexfloating,)),
-                           parameter_class=DummyParameterWithSetpointsComplex)
+        self.add_parameter(
+            name="dummy_parameter_with_setpoints_complex",
+            label="Dummy Parameter with Setpoints complex",
+            unit="some other unit",
+            setpoints=(self.dummy_sp_axis,),
+            vals=Arrays(
+                shape=(self.dummy_n_points,), valid_types=(np.complexfloating,)
+            ),
+            parameter_class=DummyParameterWithSetpointsComplex,
+        )
 
-        self.add_function(name='log_my_name',
-                          call_cmd=partial(log.debug, f'{name}'))
+        self.add_function(name="log_my_name", call_cmd=partial(log.debug, f"{name}"))
 
     def turn_on(self) -> None:
         pass
@@ -456,7 +540,10 @@ class DummyChannelInstrument(DummyBase):
     """
 
     def __init__(
-        self, name: str, channel_names: Sequence[str] | None = None, **kwargs: Any
+        self,
+        name: str,
+        channel_names: Sequence[str] | None = None,
+        **kwargs: Unpack[InstrumentBaseKWArgs],
     ):
         super().__init__(name, **kwargs)
 
@@ -480,7 +567,7 @@ class DummyChannelOnlyInstrument(DummyBase):
     Also use module names with _ in them to check that we can handle that.
     """
 
-    def __init__(self, name: str, **kwargs: Any):
+    def __init__(self, name: str, **kwargs: Unpack[InstrumentBaseKWArgs]):
         super().__init__(name, **kwargs)
 
         channels = ChannelList(self, "Temp_Sensors", DummyChannel)
@@ -513,7 +600,7 @@ class MultiGetter(MultiParameter):
         names = tuple(sorted(kwargs.keys()))
         self._return = tuple(kwargs[k] for k in names)
         shapes = tuple(np.shape(v) for v in self._return)
-        super().__init__(name='multigetter', names=names, shapes=shapes)
+        super().__init__(name="multigetter", names=names, shapes=shapes)
 
     def get_raw(self) -> ParamRawDataType:
         return self._return
@@ -532,9 +619,9 @@ class MultiSetPointParam(MultiParameter):
         **kwargs: Any,
     ):
         shapes = ((5,), (5,))
-        names = ('multi_setpoint_param_this', 'multi_setpoint_param_that')
-        labels = ('this label', 'that label')
-        units = ('this unit', 'that unit')
+        names = ("multi_setpoint_param_this", "multi_setpoint_param_that")
+        labels = ("this label", "that label")
+        units = ("this unit", "that unit")
         sp_base = tuple(np.linspace(5, 9, 5))
         setpoints = ((sp_base,), (sp_base,))
         setpoint_names = (
@@ -575,9 +662,9 @@ class Multi2DSetPointParam(MultiParameter):
         **kwargs: Any,
     ):
         shapes = ((5, 3), (5, 3))
-        names = ('this', 'that')
-        labels = ('this label', 'that label')
-        units = ('this unit', 'that unit')
+        names = ("this", "that")
+        labels = ("this label", "that label")
+        units = ("this unit", "that unit")
         sp_base_1 = tuple(np.linspace(5, 9, 5))
         sp_base_2 = tuple(np.linspace(9, 11, 3))
         array_setpoints = setpoint_generator(sp_base_1, sp_base_2)
@@ -619,7 +706,6 @@ class Multi2DSetPointParam(MultiParameter):
         return items
 
 
-
 class Multi2DSetPointParam2Sizes(MultiParameter):
     """
     Multiparameter for testing containing individual parameters with different
@@ -633,9 +719,9 @@ class Multi2DSetPointParam2Sizes(MultiParameter):
         **kwargs: Any,
     ):
         shapes = ((5, 3), (2, 7))
-        names = ('this_5_3', 'this_2_7')
-        labels = ('this label', 'that label')
-        units = ('this unit', 'that unit')
+        names = ("this_5_3", "this_2_7")
+        labels = ("this label", "that label")
+        units = ("this unit", "that unit")
         sp_base_1_1 = tuple(np.linspace(5, 9, 5))
         sp_base_2_1 = tuple(np.linspace(9, 11, 3))
         array_setpoints_1 = setpoint_generator(sp_base_1_1, sp_base_2_1)
@@ -693,9 +779,9 @@ class MultiScalarParam(MultiParameter):
         **kwargs: Any,
     ):
         shapes = ((), ())
-        names = ('thisparam', 'thatparam')
-        labels = ('thisparam label', 'thatparam label')
-        units = ('thisparam unit', 'thatparam unit')
+        names = ("thisparam", "thatparam")
+        labels = ("thisparam label", "thatparam label")
+        units = ("thisparam unit", "thatparam unit")
         setpoints = ((), ())
         super().__init__(
             name,
@@ -726,8 +812,8 @@ class ArraySetPointParam(ArrayParameter):
         **kwargs: Any,
     ):
         shape = (5,)
-        label = 'this label'
-        unit = 'this unit'
+        label = "this label"
+        unit = "this unit"
         sp_base = tuple(np.linspace(5, 9, 5))
         setpoints = (sp_base,)
         setpoint_names = ("array_setpoint_param_this_setpoint",)
@@ -763,8 +849,8 @@ class ComplexArraySetPointParam(ArrayParameter):
         **kwargs: Any,
     ):
         shape = (5,)
-        label = 'this label'
-        unit = 'this unit'
+        label = "this label"
+        unit = "this unit"
         sp_base = tuple(np.linspace(5, 9, 5))
         setpoints = (sp_base,)
         setpoint_names = ("this_setpoint",)
@@ -784,7 +870,7 @@ class ComplexArraySetPointParam(ArrayParameter):
         )
 
     def get_raw(self) -> ParamRawDataType:
-        item = np.arange(5) - 1j*np.arange(5)
+        item = np.arange(5) - 1j * np.arange(5)
         return item
 
 
@@ -808,8 +894,9 @@ class GeneratedSetPoints(Parameter):
         self._numpointsparam = numpointsparam
 
     def get_raw(self) -> ParamRawDataType:
-        return np.linspace(self._startparam(), self._stopparam(),
-                              self._numpointsparam())
+        return np.linspace(
+            self._startparam(), self._stopparam(), self._numpointsparam()
+        )
 
 
 class DummyParameterWithSetpoints1D(ParameterWithSetpoints):
@@ -837,7 +924,6 @@ class DummyParameterWithSetpoints2D(ParameterWithSetpoints):
         return np.random.rand(npoints, npoints_2)
 
 
-
 class DummyParameterWithSetpointsComplex(ParameterWithSetpoints):
     """
     Dummy parameter that returns data with a shape based on the
@@ -847,7 +933,7 @@ class DummyParameterWithSetpointsComplex(ParameterWithSetpoints):
     def get_raw(self) -> ParamRawDataType:
         assert isinstance(self.instrument, DummyChannel)
         npoints = self.instrument.dummy_n_points()
-        return np.random.rand(npoints) + 1j*np.random.rand(npoints)
+        return np.random.rand(npoints) + 1j * np.random.rand(npoints)
 
 
 def setpoint_generator(
@@ -887,14 +973,17 @@ class SnapShotTestInstrument(DummyBase):
             a subset of params
     """
 
-    def __init__(self, name: str, params: Sequence[str] = ('v1', 'v2', 'v3'),
-                 params_to_skip: Sequence[str] = ('v2')):
+    def __init__(
+        self,
+        name: str,
+        params: Sequence[str] = ("v1", "v2", "v3"),
+        params_to_skip: Sequence[str] = ("v2"),
+        **kwargs: Unpack[InstrumentBaseKWArgs],
+    ):
+        super().__init__(name, **kwargs)
 
-        super().__init__(name)
-
-        if not(set(params_to_skip).issubset(params)):
-            raise ValueError('Invalid input; params_to_skip must be a subset '
-                             'of params')
+        if not (set(params_to_skip).issubset(params)):
+            raise ValueError("Invalid input; params_to_skip must be a subset of params")
 
         self._params_to_skip = params_to_skip
         self._params = params
@@ -904,10 +993,13 @@ class SnapShotTestInstrument(DummyBase):
         self._get_calls = {p: 0 for p in params}
 
         for p_name in params:
-
-            self.add_parameter(p_name, label=f'{name} Label', unit='V',
-                               set_cmd=None,
-                               get_cmd=partial(self._getter, p_name))
+            self.add_parameter(
+                p_name,
+                label=f"{name} Label",
+                unit="V",
+                set_cmd=None,
+                get_cmd=partial(self._getter, p_name),
+            )
 
     def _getter(self, name: str) -> ParamRawDataType:
         val = self.parameters[name].cache.get(get_if_invalid=False)
@@ -922,17 +1014,17 @@ class SnapShotTestInstrument(DummyBase):
         if params_to_skip_update is None:
             params_to_skip_update = self._params_to_skip
         snap = super().snapshot_base(
-            update=update, params_to_skip_update=params_to_skip_update)
+            update=update, params_to_skip_update=params_to_skip_update
+        )
         return snap
 
 
 class MockField(DummyBase):
-
     def __init__(
         self,
         name: str,
         vals: Numbers = Numbers(min_value=-1.0, max_value=1.0),
-        **kwargs: Any,
+        **kwargs: Unpack[InstrumentBaseKWArgs],
     ):
         """Mock instrument for emulating a magnetic field axis
 
@@ -943,17 +1035,23 @@ class MockField(DummyBase):
         """
         super().__init__(name=name, **kwargs)
         self._field = 0.0
-        self.add_parameter("field",
-                           parameter_class=Parameter,
-                           initial_value=0.0,
-                           unit='T',
-                           vals=vals,
-                           get_cmd=self.get_field, set_cmd=self.set_field)
-        self.add_parameter("ramp_rate",
-                           parameter_class=Parameter,
-                           initial_value=0.1,
-                           unit='T/min',
-                           get_cmd=None, set_cmd=None)
+        self.add_parameter(
+            "field",
+            parameter_class=Parameter,
+            initial_value=0.0,
+            unit="T",
+            vals=vals,
+            get_cmd=self.get_field,
+            set_cmd=self.set_field,
+        )
+        self.add_parameter(
+            "ramp_rate",
+            parameter_class=Parameter,
+            initial_value=0.1,
+            unit="T/min",
+            get_cmd=None,
+            set_cmd=None,
+        )
         self._ramp_start_time: float | None = None
         self._wait_time: float | None = None
         self._fr = self._field_ramp()
@@ -974,7 +1072,7 @@ class MockField(DummyBase):
         if self._field == value:
             return value
 
-        wait_time = 60. * np.abs(self._field - value) / self.ramp_rate()
+        wait_time = 60.0 * np.abs(self._field - value) / self.ramp_rate()
         self._wait_time = wait_time
         self._sign = np.sign(value - self._field)
         self._start_field = self._field
@@ -1008,38 +1106,56 @@ class MockField(DummyBase):
 
 
 class MockLockin(DummyBase):
-    def __init__(self, name: str, **kwargs: Any):
+    def __init__(self, name: str, **kwargs: Unpack[InstrumentBaseKWArgs]):
         super().__init__(name=name, **kwargs)
-        self.add_parameter("X",
-                           parameter_class=Parameter,
-                           initial_value=1e-3,
-                           unit='V',
-                           get_cmd=None, set_cmd=None)
-        self.add_parameter("Y",
-                           parameter_class=Parameter,
-                           initial_value=1e-5,
-                           unit='V',
-                           get_cmd=None, set_cmd=None)
-        self.add_parameter("frequency",
-                           parameter_class=Parameter,
-                           initial_value=125.,
-                           unit='Hz',
-                           get_cmd=None, set_cmd=None)
-        self.add_parameter("amplitude",
-                           parameter_class=Parameter,
-                           initial_value=0.,
-                           unit='V',
-                           get_cmd=None, set_cmd=None)
-        self.add_parameter("phase",
-                           parameter_class=Parameter,
-                           initial_value=0.,
-                           unit='deg',
-                           get_cmd=None, set_cmd=None)
-        self.add_parameter("time_constant",
-                           parameter_class=Parameter,
-                           initial_value=1.e-3,
-                           unit='s',
-                           get_cmd=None, set_cmd=None)
+        self.add_parameter(
+            "X",
+            parameter_class=Parameter,
+            initial_value=1e-3,
+            unit="V",
+            get_cmd=None,
+            set_cmd=None,
+        )
+        self.add_parameter(
+            "Y",
+            parameter_class=Parameter,
+            initial_value=1e-5,
+            unit="V",
+            get_cmd=None,
+            set_cmd=None,
+        )
+        self.add_parameter(
+            "frequency",
+            parameter_class=Parameter,
+            initial_value=125.0,
+            unit="Hz",
+            get_cmd=None,
+            set_cmd=None,
+        )
+        self.add_parameter(
+            "amplitude",
+            parameter_class=Parameter,
+            initial_value=0.0,
+            unit="V",
+            get_cmd=None,
+            set_cmd=None,
+        )
+        self.add_parameter(
+            "phase",
+            parameter_class=Parameter,
+            initial_value=0.0,
+            unit="deg",
+            get_cmd=None,
+            set_cmd=None,
+        )
+        self.add_parameter(
+            "time_constant",
+            parameter_class=Parameter,
+            initial_value=1.0e-3,
+            unit="s",
+            get_cmd=None,
+            set_cmd=None,
+        )
 
 
 class MockDACChannel(InstrumentChannel):
@@ -1047,45 +1163,70 @@ class MockDACChannel(InstrumentChannel):
     A single dummy channel implementation
     """
 
-    def __init__(self, parent: InstrumentBase, name: str, num: str):
-        super().__init__(parent, name)
+    def __init__(
+        self,
+        parent: InstrumentBase,
+        name: str,
+        num: str,
+        **kwargs: Unpack[InstrumentBaseKWArgs],
+    ):
+        super().__init__(parent, name, **kwargs)
 
         self._num = num
-        self.add_parameter('voltage',
-                           parameter_class=Parameter,
-                           initial_value=0.,
-                           label=f"Voltage_{name}",
-                           unit='V',
-                           vals=Numbers(-2., 2.),
-                           get_cmd=None, set_cmd=None)
-        self.add_parameter('dac_output',
-                           parameter_class=Parameter,
-                           initial_value="off",
-                           vals=OnOff(),
-                           get_cmd=None, set_cmd=None)
-        self.add_parameter('smc',
-                           parameter_class=Parameter,
-                           initial_value="off",
-                           vals=OnOff(),
-                           get_cmd=None, set_cmd=None)
-        self.add_parameter('bus',
-                           parameter_class=Parameter,
-                           initial_value="off",
-                           vals=OnOff(),
-                           get_cmd=None, set_cmd=None)
-        self.add_parameter('gnd',
-                           parameter_class=Parameter,
-                           initial_value="off",
-                           vals=OnOff(),
-                           get_cmd=None, set_cmd=None)
+        self.add_parameter(
+            "voltage",
+            parameter_class=Parameter,
+            initial_value=0.0,
+            label=f"Voltage_{name}",
+            unit="V",
+            vals=Numbers(-2.0, 2.0),
+            get_cmd=None,
+            set_cmd=None,
+        )
+        self.add_parameter(
+            "dac_output",
+            parameter_class=Parameter,
+            initial_value="off",
+            vals=OnOff(),
+            get_cmd=None,
+            set_cmd=None,
+        )
+        self.add_parameter(
+            "smc",
+            parameter_class=Parameter,
+            initial_value="off",
+            vals=OnOff(),
+            get_cmd=None,
+            set_cmd=None,
+        )
+        self.add_parameter(
+            "bus",
+            parameter_class=Parameter,
+            initial_value="off",
+            vals=OnOff(),
+            get_cmd=None,
+            set_cmd=None,
+        )
+        self.add_parameter(
+            "gnd",
+            parameter_class=Parameter,
+            initial_value="off",
+            vals=OnOff(),
+            get_cmd=None,
+            set_cmd=None,
+        )
 
     def channel_number(self) -> str:
         return self._num
 
 
 class MockDAC(DummyBase):
-    def __init__(self, name: str = "mdac", num_channels: int = 10, **kwargs: Any):
-
+    def __init__(
+        self,
+        name: str = "mdac",
+        num_channels: int = 10,
+        **kwargs: Unpack[InstrumentBaseKWArgs],
+    ):
         """
         Create a dummy instrument that can be used for testing
 
@@ -1116,6 +1257,7 @@ class MockCustomChannel(InstrumentChannel):
         name: str,
         channel: str | InstrumentChannel,
         current_valid_range: Sequence[float] | None = None,
+        **kwargs: Unpack[InstrumentBaseKWArgs],
     ) -> None:
         """
         A custom instrument channel emulating an existing channel.
@@ -1131,6 +1273,7 @@ class MockCustomChannel(InstrumentChannel):
             current_valid_range: Voltage range the channel is expected to show
                 interesting features. It's just an example of an additional
                 parameter a regular instrument channel does not have.
+            **kwargs: Forwarded to base class.
         """
         if isinstance(channel, str):
             _, channel_name = channel.split(".")
@@ -1141,7 +1284,7 @@ class MockCustomChannel(InstrumentChannel):
         else:
             raise ValueError('Unknown input type for "channel".')
 
-        super().__init__(parent, name)
+        super().__init__(parent, name, **kwargs)
 
         if current_valid_range is None:
             current_valid_range = []

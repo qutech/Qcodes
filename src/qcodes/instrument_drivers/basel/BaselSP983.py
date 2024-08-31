@@ -1,8 +1,11 @@
-from typing import Any, Optional
+from typing import TYPE_CHECKING
 
-from qcodes.instrument import Instrument
+from qcodes.instrument import Instrument, InstrumentBaseKWArgs
 from qcodes.parameters import DelegateParameter, Parameter
 from qcodes.validators import Enum, Numbers
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
 
 
 class BaselSP983(Instrument):
@@ -29,14 +32,18 @@ class BaselSP983(Instrument):
             used to set offset voltage parameter of the preamp and the
             source parameter should represent a voltage source that is
             connected to the "Offset Input Voltage" connector of the SP983C.
+        **kwargs: Forwarded to base class.
     """
 
     def __init__(
-        self, name: str, input_offset_voltage: Optional[Parameter] = None, **kwargs: Any
+        self,
+        name: str,
+        input_offset_voltage: Parameter | None = None,
+        **kwargs: "Unpack[InstrumentBaseKWArgs]",
     ):
         super().__init__(name, **kwargs)
 
-        self.add_parameter(
+        self.gain: Parameter = self.add_parameter(
             "gain",
             initial_value=1e8,
             label="Gain",
@@ -45,8 +52,9 @@ class BaselSP983(Instrument):
             set_cmd=None,
             vals=Enum(1e09, 1e08, 1e07, 1e06, 1e05),
         )
+        """Parameter gain"""
 
-        self.add_parameter(
+        self.fcut: Parameter = self.add_parameter(
             "fcut",
             initial_value=1e3,
             label="Cutoff frequency",
@@ -55,8 +63,9 @@ class BaselSP983(Instrument):
             set_cmd=None,
             vals=Enum(30.0, 100.0, 300.0, 1e3, 3e3, 10e3, 30e3, 100e3, 1e6),
         )
+        """Parameter fcut"""
 
-        self.add_parameter(
+        self.offset_voltage: DelegateParameter = self.add_parameter(
             "offset_voltage",
             label="Offset Voltage",
             unit="V",
@@ -65,8 +74,9 @@ class BaselSP983(Instrument):
             source=input_offset_voltage,
             parameter_class=DelegateParameter,
         )
+        """Parameter offset_voltage"""
 
-    def get_idn(self) -> dict[str, Optional[str]]:
+    def get_idn(self) -> dict[str, str | None]:
         vendor = "Physics Basel"
         model = "SP 983"
         serial = None

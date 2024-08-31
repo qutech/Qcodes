@@ -5,25 +5,38 @@ import numbers
 import time
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import ExitStack
 from functools import partial
-from typing import Any, Callable, ClassVar, TypeVar, cast
+from typing import TYPE_CHECKING, ClassVar, Concatenate, TypeVar, cast
 
 import numpy as np
 from pyvisa import VisaIOError
+from typing_extensions import ParamSpec, deprecated
 
-from qcodes.instrument import Instrument, InstrumentChannel, VisaInstrument
+from qcodes.instrument import (
+    Instrument,
+    InstrumentBaseKWArgs,
+    InstrumentChannel,
+    VisaInstrument,
+    VisaInstrumentKWArgs,
+)
 from qcodes.math_utils import FieldVector
 from qcodes.parameters import Parameter
 from qcodes.utils import QCoDeSDeprecationWarning
 from qcodes.validators import Anything, Bool, Enum, Ints, Numbers
 
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+
 log = logging.getLogger(__name__)
 
 CartesianFieldLimitFunction = Callable[[float, float, float], bool]
 
+S = TypeVar("S", bound="AMI430SwitchHeater")
 T = TypeVar("T")
+P = ParamSpec("P")
 
 
 class AMI430Exception(Exception):
@@ -37,43 +50,50 @@ class AMI430Warning(UserWarning):
 class AMI430SwitchHeater(InstrumentChannel):
     class _Decorators:
         @classmethod
-        def check_enabled(cls, f: Callable[..., T]) -> Callable[..., T]:
+        def check_enabled(
+            cls, f: Callable[Concatenate[S, P], T]
+        ) -> Callable[Concatenate[S, P], T]:
             def check_enabled_decorator(
-                self: AMI430SwitchHeater, *args: Any, **kwargs: Any
+                self: S, *args: P.args, **kwargs: P.kwargs
             ) -> T:
-                if not self.check_enabled():
+                if not self.enabled():
                     raise AMI430Exception("Switch not enabled")
                 return f(self, *args, **kwargs)
 
             return check_enabled_decorator
 
-    def __init__(self, parent: AMIModel430) -> None:
-        super().__init__(parent, "SwitchHeater")
+    def __init__(
+        self, parent: AMIModel430, **kwargs: Unpack[InstrumentBaseKWArgs]
+    ) -> None:
+        super().__init__(parent, "SwitchHeater", **kwargs)
 
         # Add state parameters
-        self.add_parameter(
+        self.enabled: Parameter = self.add_parameter(
             "enabled",
             label="Switch Heater Enabled",
-            get_cmd=self.check_enabled,
-            set_cmd=lambda x: (self.enable() if x else self.disable()),
+            get_cmd=self._check_enabled,
+            set_cmd=lambda x: (self._enable() if x else self._disable()),
             vals=Bool(),
         )
-        self.add_parameter(
+        """Parameter enabled"""
+        self.state: Parameter = self.add_parameter(
             "state",
             label="Switch Heater On",
-            get_cmd=self.check_state,
-            set_cmd=lambda x: (self.on() if x else self.off()),
+            get_cmd=self._check_state,
+            set_cmd=lambda x: (self._on() if x else self._off()),
             vals=Bool(),
         )
-        self.add_parameter(
+        """Parameter state. Always False is the switch heater is not enabled"""
+        self.in_persistent_mode: Parameter = self.add_parameter(
             "in_persistent_mode",
             label="Persistent Mode",
             get_cmd="PERS?",
             val_mapping={True: 1, False: 0},
         )
+        """Parameter in_persistent_mode"""
 
         # Configuration Parameters
-        self.add_parameter(
+        self.current: Parameter = self.add_parameter(
             "current",
             label="Switch Heater Current",
             unit="mA",
@@ -82,7 +102,8 @@ class AMI430SwitchHeater(InstrumentChannel):
             set_cmd="CONF:PS:CURR {}",
             vals=Numbers(0, 125),
         )
-        self.add_parameter(
+        """Parameter current"""
+        self.heat_time: Parameter = self.add_parameter(
             "heat_time",
             label="Heating Time",
             unit="s",
@@ -91,7 +112,8 @@ class AMI430SwitchHeater(InstrumentChannel):
             set_cmd="CONF:PS:HTIME {}",
             vals=Ints(5, 120),
         )
-        self.add_parameter(
+        """Parameter heat_time"""
+        self.cool_time: Parameter = self.add_parameter(
             "cool_time",
             label="Cooling Time",
             unit="s",
@@ -100,54 +122,82 @@ class AMI430SwitchHeater(InstrumentChannel):
             set_cmd="CONF:PS:CTIME {}",
             vals=Ints(5, 3600),
         )
+        """Parameter cool_time"""
 
-    def disable(self) -> None:
+    def _disable(self) -> None:
         """Turn measurement off"""
         self.write("CONF:PS 0")
         self._enabled = False
 
-    def enable(self) -> None:
+    def _enable(self) -> None:
         """Turn measurement on"""
-        self.write("CONF:PS 1")
+        self.write(cmd="CONF:PS 1")
         self._enabled = True
 
-    def check_enabled(self) -> bool:
+    @deprecated(
+        "Use enabled parameter to enable/disable the switch heater.",
+        category=QCoDeSDeprecationWarning,
+    )
+    def disable(self) -> None:
+        self._disable()
+
+    @deprecated(
+        "Use enabled parameter to enable/disable the switch heater.",
+        category=QCoDeSDeprecationWarning,
+    )
+    def enable(self) -> None:
+        self._enable()
+
+    def _check_enabled(self) -> bool:
         return bool(int(self.ask("PS:INST?").strip()))
 
+    @deprecated(
+        "Use enabled parameter to inspect switch heater status.",
+        category=QCoDeSDeprecationWarning,
+    )
+    def check_enabled(self) -> bool:
+        return self._check_enabled()
+
     @_Decorators.check_enabled
-    def on(self) -> None:
+    def _on(self) -> None:
         self.write("PS 1")
         while self._parent.ramping_state() == "heating switch":
             self._parent._sleep(0.5)
 
+    @deprecated(
+        "Use state parameter to turn on the switch heater.",
+        category=QCoDeSDeprecationWarning,
+    )
+    def on(self) -> None:
+        self._on()
+
     @_Decorators.check_enabled
-    def off(self) -> None:
+    def _off(self) -> None:
         self.write("PS 0")
         while self._parent.ramping_state() == "cooling switch":
             self._parent._sleep(0.5)
 
-    @_Decorators.check_enabled
-    def check_state(self) -> bool:
+    @deprecated(
+        "Use state parameter to turn off the switch heater.",
+        category=QCoDeSDeprecationWarning,
+    )
+    def off(self) -> None:
+        self._off()
+
+    def _check_state(self) -> bool:
+        if self.enabled() is False:
+            return False
         return bool(int(self.ask("PS?").strip()))
+
+    @deprecated(
+        "Use state parameter to inspect if switch heater is on.",
+        category=QCoDeSDeprecationWarning,
+    )
+    def check_state(self) -> bool:
+        return self._check_state()
 
 
 class AMIModel430(VisaInstrument):
-    """
-    Driver for the American Magnetics Model 430 magnet power supply programmer.
-
-    This class controls a single magnet power supply. In order to use two or
-    three magnets simultaneously to set field vectors, first instantiate the
-    individual magnets using this class and then pass them as arguments to
-    the AMIModel4303D virtual instrument classes.
-
-    Args:
-        name: a name for the instrument
-        address: VISA formatted address of the power supply programmer.
-            Of the form ``TCPIP[board]::host address::port::SOCKET``
-            e.g. ``TCPIP0::192.168.0.1::7800::SOCKET``
-        current_ramp_limit: A current ramp limit, in units of A/s
-    """
-
     _SHORT_UNITS: ClassVar[dict[str, str]] = {
         "seconds": "s",
         "minutes": "min",
@@ -158,27 +208,45 @@ class AMIModel430(VisaInstrument):
     _RETRY_WRITE_ASK = True
     _RETRY_TIME = 5
 
+    default_terminator = "\r\n"
+
     def __init__(
         self,
         name: str,
         address: str,
         reset: bool = False,
-        terminator: str = "\r\n",
         current_ramp_limit: float | None = None,
-        **kwargs: Any,
+        **kwargs: Unpack[VisaInstrumentKWArgs],
     ):
+        """
+        Driver for the American Magnetics Model 430 magnet power supply programmer.
+
+        This class controls a single magnet power supply. In order to use two or
+        three magnets simultaneously to set field vectors, first instantiate the
+        individual magnets using this class and then pass them as arguments to
+        the AMIModel4303D virtual instrument classes.
+
+        Args:
+            name: a name for the instrument
+            address: VISA formatted address of the power supply programmer.
+                Of the form ``TCPIP[board]::host address::port::SOCKET``
+                e.g. ``TCPIP0::192.168.0.1::7800::SOCKET``
+            reset: Should the reset method be called on the instrument at init time
+            current_ramp_limit: A current ramp limit, in units of A/s
+            **kwargs: Additional kwargs are passed to the base class
+        """
         if "has_current_rating" in kwargs.keys():
             warnings.warn(
                 "'has_current_rating' kwarg to AMIModel430 "
                 "is deprecated and has no effect",
                 category=QCoDeSDeprecationWarning,
             )
-            kwargs.pop("has_current_rating")
+            # this key should not be here so mypy complains about it
+            kwargs.pop("has_current_rating")  # type: ignore[typeddict-item]
 
         super().__init__(
             name,
             address,
-            terminator=terminator,
             **kwargs,
         )
 
@@ -210,33 +278,37 @@ class AMIModel430(VisaInstrument):
             self.reset()
 
         # Add parameters setting instrument units
-        self.add_parameter(
+        self.ramp_rate_units: Parameter = self.add_parameter(
             "ramp_rate_units",
             get_cmd="RAMP:RATE:UNITS?",
             set_cmd=(lambda units: self._update_units(ramp_rate_units=units)),
             val_mapping={"seconds": 0, "minutes": 1},
         )
-        self.add_parameter(
+        """Parameter ramp_rate_units"""
+        self.field_units: Parameter = self.add_parameter(
             "field_units",
             get_cmd="FIELD:UNITS?",
             set_cmd=(lambda units: self._update_units(field_units=units)),
             val_mapping={"kilogauss": 0, "tesla": 1},
         )
+        """Parameter field_units"""
 
         # Set programmatic safety limits
-        self.add_parameter(
+        self.current_ramp_limit: Parameter = self.add_parameter(
             "current_ramp_limit",
             get_cmd=lambda: self._current_ramp_limit,
             set_cmd=self._update_ramp_rate_limit,
             unit="A/s",
         )
-        self.add_parameter(
+        """Parameter current_ramp_limit"""
+        self.field_ramp_limit: Parameter = self.add_parameter(
             "field_ramp_limit",
             get_cmd=lambda: self.current_ramp_limit(),
             set_cmd=lambda x: self.current_ramp_limit(x),
             scale=1 / float(self.ask("COIL?")),
             unit="T/s",
         )
+        """Parameter field_ramp_limit"""
         if current_ramp_limit is None:
             self._update_ramp_rate_limit(
                 AMIModel430._DEFAULT_CURRENT_RAMP_LIMIT, update=False
@@ -245,14 +317,15 @@ class AMIModel430(VisaInstrument):
             self._update_ramp_rate_limit(current_ramp_limit, update=False)
 
         # Add solenoid parameters
-        self.add_parameter(
+        self.coil_constant: Parameter = self.add_parameter(
             "coil_constant",
             get_cmd=self._update_coil_constant,
             set_cmd=self._update_coil_constant,
             vals=Numbers(0.001, 999.99999),
         )
+        """Parameter coil_constant"""
 
-        self.add_parameter(
+        self.current_limit: Parameter = self.add_parameter(
             "current_limit",
             unit="A",
             set_cmd="CONF:CURR:LIMIT {}",
@@ -260,29 +333,37 @@ class AMIModel430(VisaInstrument):
             get_parser=float,
             vals=Numbers(0, 80),
         )  # what are good numbers here?
+        """Parameter current_limit"""
 
-        self.add_parameter(
+        self.field_limit: Parameter = self.add_parameter(
             "field_limit",
             set_cmd=self.current_limit.set,
             get_cmd=self.current_limit.get,
             scale=1 / float(self.ask("COIL?")),
         )
+        """Parameter field_limit"""
 
         # Add current solenoid parameters
         # Note that field is validated in set_field
-        self.add_parameter(
+        self.field: Parameter = self.add_parameter(
             "field", get_cmd="FIELD:MAG?", get_parser=float, set_cmd=self.set_field
         )
-        self.add_parameter(
+        """Parameter field"""
+        self.ramp_rate: Parameter = self.add_parameter(
             "ramp_rate", get_cmd=self._get_ramp_rate, set_cmd=self._set_ramp_rate
         )
-        self.add_parameter("setpoint", get_cmd="FIELD:TARG?", get_parser=float)
-        self.add_parameter(
+        """Parameter ramp_rate"""
+        self.setpoint: Parameter = self.add_parameter(
+            "setpoint", get_cmd="FIELD:TARG?", get_parser=float
+        )
+        """Parameter setpoint"""
+        self.is_quenched: Parameter = self.add_parameter(
             "is_quenched", get_cmd="QU?", val_mapping={True: 1, False: 0}
         )
+        """Parameter is_quenched"""
         self.add_function("reset_quench", call_cmd="QU 0")
         self.add_function("set_quenched", call_cmd="QU 1")
-        self.add_parameter(
+        self.ramping_state: Parameter = self.add_parameter(
             "ramping_state",
             get_cmd="STATE?",
             get_parser=int,
@@ -299,13 +380,15 @@ class AMIModel430(VisaInstrument):
                 "cooling switch": 10,
             },
         )
-        self.add_parameter(
+        """Parameter ramping_state"""
+        self.ramping_state_check_interval: Parameter = self.add_parameter(
             "ramping_state_check_interval",
             initial_value=0.05,
             unit="s",
             vals=Numbers(0, 10),
             set_cmd=None,
         )
+        """Parameter ramping_state_check_interval"""
 
         # Add persistent switch
         switch_heater = AMI430SwitchHeater(self)
@@ -415,7 +498,6 @@ class AMIModel430(VisaInstrument):
             raise AMI430Exception(msg.format(value, exit_state))
 
     def wait_while_ramping(self) -> str:
-
         while self.ramping_state() == "ramping":
             self._sleep(self.ramping_state_check_interval())
 
@@ -481,6 +563,7 @@ class AMIModel430(VisaInstrument):
             ramp_rate_units_int: str = self.ramp_rate_units()
         else:
             self.write(f"CONF:RAMP:RATE:UNITS {ramp_rate_units}")
+            assert self.ramp_rate_units.inverse_val_mapping is not None
             ramp_rate_units_int = self.ramp_rate_units.inverse_val_mapping[
                 ramp_rate_units
             ]
@@ -488,6 +571,7 @@ class AMIModel430(VisaInstrument):
             field_units_int: str = self.field_units()
         else:
             self.write(f"CONF:FIELD:UNITS {field_units}")
+            assert self.field_units.inverse_val_mapping is not None
             field_units_int = self.field_units.inverse_val_mapping[field_units]
 
         # Map to shortened unit names
@@ -520,7 +604,6 @@ class AMIModel430(VisaInstrument):
         self.coil_constant()
 
     def write_raw(self, cmd: str) -> None:
-
         try:
             super().write_raw(cmd)
         except VisaIOError as err:
@@ -538,7 +621,6 @@ class AMIModel430(VisaInstrument):
                 raise err
 
     def ask_raw(self, cmd: str) -> str:
-
         try:
             result = super().ask_raw(cmd)
         except VisaIOError as err:
@@ -557,6 +639,10 @@ class AMIModel430(VisaInstrument):
         return result
 
 
+@deprecated(
+    "Use qcodes.instrument_drivers.american_magnetics.AMIModel430 instead.",
+    category=QCoDeSDeprecationWarning,
+)
 class AMI430(AMIModel430):
     pass
 
@@ -569,7 +655,7 @@ class AMIModel4303D(Instrument):
         instrument_y: AMIModel430 | str,
         instrument_z: AMIModel430 | str,
         field_limit: float | Iterable[CartesianFieldLimitFunction],
-        **kwargs: Any,
+        **kwargs: Unpack[InstrumentBaseKWArgs],
     ):
         """
         Driver for controlling three American Magnetics Model 430 magnet power
@@ -650,136 +736,157 @@ class AMIModel4303D(Instrument):
         )
 
         # Get-only parameters that return a measured value
-        self.add_parameter(
+        self.cartesian_measured: Parameter = self.add_parameter(
             "cartesian_measured",
             get_cmd=partial(self._get_measured, "x", "y", "z"),
             unit="T",
         )
+        """Parameter cartesian_measured"""
 
-        self.add_parameter(
+        self.x_measured: Parameter = self.add_parameter(
             "x_measured", get_cmd=partial(self._get_measured, "x"), unit="T"
         )
+        """Parameter x_measured"""
 
-        self.add_parameter(
+        self.y_measured: Parameter = self.add_parameter(
             "y_measured", get_cmd=partial(self._get_measured, "y"), unit="T"
         )
+        """Parameter y_measured"""
 
-        self.add_parameter(
+        self.z_measured: Parameter = self.add_parameter(
             "z_measured", get_cmd=partial(self._get_measured, "z"), unit="T"
         )
+        """Parameter z_measured"""
 
-        self.add_parameter(
+        self.spherical_measured: Parameter = self.add_parameter(
             "spherical_measured",
             get_cmd=partial(self._get_measured, "r", "theta", "phi"),
             unit="T",
         )
+        """Parameter spherical_measured"""
 
-        self.add_parameter(
+        self.phi_measured: Parameter = self.add_parameter(
             "phi_measured", get_cmd=partial(self._get_measured, "phi"), unit="deg"
         )
+        """Parameter phi_measured"""
 
-        self.add_parameter(
+        self.theta_measured: Parameter = self.add_parameter(
             "theta_measured", get_cmd=partial(self._get_measured, "theta"), unit="deg"
         )
+        """Parameter theta_measured"""
 
-        self.add_parameter(
+        self.field_measured: Parameter = self.add_parameter(
             "field_measured", get_cmd=partial(self._get_measured, "r"), unit="T"
         )
+        """Parameter field_measured"""
 
-        self.add_parameter(
+        self.cylindrical_measured: Parameter = self.add_parameter(
             "cylindrical_measured",
             get_cmd=partial(self._get_measured, "rho", "phi", "z"),
             unit="T",
         )
+        """Parameter cylindrical_measured"""
 
-        self.add_parameter(
+        self.rho_measured: Parameter = self.add_parameter(
             "rho_measured", get_cmd=partial(self._get_measured, "rho"), unit="T"
         )
+        """Parameter rho_measured"""
 
         # Get and set parameters for the set points of the coordinates
-        self.add_parameter(
+        self.cartesian: Parameter = self.add_parameter(
             "cartesian",
             get_cmd=partial(self._get_setpoints, ("x", "y", "z")),
             set_cmd=partial(self._set_setpoints, ("x", "y", "z")),
             unit="T",
             vals=Anything(),
         )
+        """Parameter cartesian"""
 
-        self.add_parameter(
+        self.x: Parameter = self.add_parameter(
             "x",
             get_cmd=partial(self._get_setpoints, ("x",)),
             set_cmd=partial(self._set_setpoints, ("x",)),
             unit="T",
             vals=Numbers(),
         )
+        """Parameter x"""
 
-        self.add_parameter(
+        self.y: Parameter = self.add_parameter(
             "y",
             get_cmd=partial(self._get_setpoints, ("y",)),
             set_cmd=partial(self._set_setpoints, ("y",)),
             unit="T",
             vals=Numbers(),
         )
+        """Parameter y"""
 
-        self.add_parameter(
+        self.z: Parameter = self.add_parameter(
             "z",
             get_cmd=partial(self._get_setpoints, ("z",)),
             set_cmd=partial(self._set_setpoints, ("z",)),
             unit="T",
             vals=Numbers(),
         )
+        """Parameter z"""
 
-        self.add_parameter(
+        self.spherical: Parameter = self.add_parameter(
             "spherical",
             get_cmd=partial(self._get_setpoints, ("r", "theta", "phi")),
             set_cmd=partial(self._set_setpoints, ("r", "theta", "phi")),
             unit="tuple?",
             vals=Anything(),
         )
+        """Parameter spherical"""
 
-        self.add_parameter(
+        self.phi: Parameter = self.add_parameter(
             "phi",
             get_cmd=partial(self._get_setpoints, ("phi",)),
             set_cmd=partial(self._set_setpoints, ("phi",)),
             unit="deg",
             vals=Numbers(),
         )
+        """Parameter phi"""
 
-        self.add_parameter(
+        self.theta: Parameter = self.add_parameter(
             "theta",
             get_cmd=partial(self._get_setpoints, ("theta",)),
             set_cmd=partial(self._set_setpoints, ("theta",)),
             unit="deg",
             vals=Numbers(),
         )
+        """Parameter theta"""
 
-        self.add_parameter(
+        self.field: Parameter = self.add_parameter(
             "field",
             get_cmd=partial(self._get_setpoints, ("r",)),
             set_cmd=partial(self._set_setpoints, ("r",)),
             unit="T",
             vals=Numbers(),
         )
+        """Parameter field"""
 
-        self.add_parameter(
+        self.cylindrical: Parameter = self.add_parameter(
             "cylindrical",
             get_cmd=partial(self._get_setpoints, ("rho", "phi", "z")),
             set_cmd=partial(self._set_setpoints, ("rho", "phi", "z")),
             unit="tuple?",
             vals=Anything(),
         )
+        """Parameter cylindrical"""
 
-        self.add_parameter(
+        self.rho: Parameter = self.add_parameter(
             "rho",
             get_cmd=partial(self._get_setpoints, ("rho",)),
             set_cmd=partial(self._set_setpoints, ("rho",)),
             unit="T",
             vals=Numbers(),
         )
+        """Parameter rho"""
 
-        self.add_parameter(
+        self.block_during_ramp: Parameter = self.add_parameter(
             "block_during_ramp", set_cmd=None, initial_value=True, unit="", vals=Bool()
         )
+        """Parameter block_during_ramp"""
 
         self.ramp_mode = Parameter(
             name="ramp_mode",
@@ -982,7 +1089,6 @@ class AMIModel4303D(Instrument):
 
         # Check if the individual instruments are ready
         for name, value in zip(["x", "y", "z"], values):
-
             instrument = getattr(self, f"_instrument_{name}")
             if instrument.ramping_state() == "ramping":
                 msg = "_set_fields aborted; magnet {} is already ramping"
@@ -1056,13 +1162,12 @@ class AMIModel4303D(Instrument):
         self.log.debug("Simultaneous ramp: returning from the ramp call")
 
     def _perform_default_ramp(self, values: tuple[float, float, float]) -> None:
-        operators: tuple[Callable[[Any, Any], bool], ...] = (np.less, np.greater)
+        operators: tuple[Callable[[float, float], bool], ...] = (np.less, np.greater)
         for operator in operators:
             # First ramp the coils that are decreasing in field strength.
             # This will ensure that we are always in a safe region as
             # far as the quenching of the magnets is concerned
             for name, value in zip(["x", "y", "z"], values):
-
                 instrument = getattr(self, f"_instrument_{name}")
                 current_actual = instrument.field()
 
@@ -1170,7 +1275,6 @@ class AMIModel4303D(Instrument):
         return return_value
 
     def _get_setpoints(self, names: Sequence[str]) -> float | list[float]:
-
         measured_values = self._set_point.get_components(*names)
 
         # Convert angles from radians to degrees
@@ -1188,7 +1292,6 @@ class AMIModel4303D(Instrument):
         return return_value
 
     def _set_setpoints(self, names: Sequence[str], values: Sequence[float]) -> None:
-
         kwargs = dict(zip(names, np.atleast_1d(values)))
 
         set_point = FieldVector()
@@ -1206,5 +1309,9 @@ class AMIModel4303D(Instrument):
         self._set_point = set_point
 
 
+@deprecated(
+    "Use qcodes.instrument_drivers.american_magnetics.AMIModel4303D instead.",
+    category=QCoDeSDeprecationWarning,
+)
 class AMI430_3D(AMIModel4303D):
     pass

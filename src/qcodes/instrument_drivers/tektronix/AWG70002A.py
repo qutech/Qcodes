@@ -1,17 +1,27 @@
-from typing import Any
+from typing import TYPE_CHECKING
 
-from .AWG70000A import AWG70000A
+from .AWG70000A import TektronixAWG70000Base
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+    from qcodes.instrument import VisaInstrumentKWArgs
 
 
-class TektronixAWG70002A(AWG70000A):
+class TektronixAWG70002A(TektronixAWG70000Base):
     """
     The QCoDeS driver for Tektronix AWG70002A series AWG's.
 
     All the actual driver meat is in the superclass AWG70000A.
     """
 
+    default_timeout = 10
+
     def __init__(
-        self, name: str, address: str, timeout: float = 10, **kwargs: Any
+        self,
+        name: str,
+        address: str,
+        **kwargs: "Unpack[VisaInstrumentKWArgs]",
     ) -> None:
         """
         Args:
@@ -21,8 +31,7 @@ class TektronixAWG70002A(AWG70000A):
             **kwargs: kwargs are forwarded to base class.
         """
 
-        super().__init__(name, address, num_channels=2,
-                         timeout=timeout, **kwargs)
+        super().__init__(name, address, num_channels=2, **kwargs)
 
 
 class AWG70002A(TektronixAWG70002A):

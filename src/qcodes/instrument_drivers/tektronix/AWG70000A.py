@@ -12,13 +12,26 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from broadbean.sequence import InvalidForgedSequenceError, fs_schema
+from typing_extensions import deprecated
 
 from qcodes import validators as vals
-from qcodes.instrument import ChannelList, Instrument, InstrumentChannel, VisaInstrument
+from qcodes.instrument import (
+    ChannelList,
+    Instrument,
+    InstrumentBaseKWArgs,
+    InstrumentChannel,
+    VisaInstrument,
+    VisaInstrumentKWArgs,
+)
 from qcodes.parameters import create_on_off_val_mapping
+from qcodes.utils import QCoDeSDeprecationWarning
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from typing_extensions import Unpack
+
+    from qcodes.parameters import Parameter
 
 log = logging.getLogger(__name__)
 
@@ -33,8 +46,8 @@ def _parse_string_response(input_str: str) -> str:
     Remove quotation marks from string and return 'N/A'
     if the input is empty
     """
-    output = input_str.replace('"', '')
-    output = output if output else 'N/A'
+    output = input_str.replace('"', "")
+    output = output if output else "N/A"
 
     return output
 
@@ -46,76 +59,68 @@ def _parse_string_response(input_str: str) -> str:
 # TODO: it seems that a lot of settings differ between models
 # perhaps these dicts should be merged to one
 
-_fg_path_val_map = {'5208': {'DC High BW': "DCHB",
-                             'DC High Voltage': "DCHV",
-                             'AC Direct': "ACD"},
-                    '70001A': {'direct': 'DIR',
-                               'DCamplified': 'DCAM',
-                               'AC': 'AC'},
-                    '70002A': {'direct': 'DIR',
-                               'DCamplified': 'DCAM',
-                               'AC': 'AC'},
-                    '70001B': {'direct': 'DIR',
-                               'DCamplified': 'DCAM',
-                               'AC': 'AC'},
-                    '70002B': {'direct': 'DIR',
-                               'DCamplified': 'DCAM',
-                               'AC': 'AC'}}
+_fg_path_val_map = {
+    "5208": {"DC High BW": "DCHB", "DC High Voltage": "DCHV", "AC Direct": "ACD"},
+    "70001A": {"direct": "DIR", "DCamplified": "DCAM", "AC": "AC"},
+    "70002A": {"direct": "DIR", "DCamplified": "DCAM", "AC": "AC"},
+    "70001B": {"direct": "DIR", "DCamplified": "DCAM", "AC": "AC"},
+    "70002B": {"direct": "DIR", "DCamplified": "DCAM", "AC": "AC"},
+}
 
 # number of markers per channel
-_num_of_markers_map = {'5208': 4,
-                       '70001A': 2,
-                       '70002A': 2,
-                       '70001B': 2,
-                       '70002B': 2}
+_num_of_markers_map = {"5208": 4, "70001A": 2, "70002A": 2, "70001B": 2, "70002B": 2}
 
 # channel resolution
-_chan_resolutions = {'5208': [12, 13, 14, 15, 16],
-                     '70001A': [8, 9, 10],
-                     '70002A': [8, 9, 10],
-                     '70001B': [8, 9, 10],
-                     '70002B': [8, 9, 10]}
+_chan_resolutions = {
+    "5208": [12, 13, 14, 15, 16],
+    "70001A": [8, 9, 10],
+    "70002A": [8, 9, 10],
+    "70001B": [8, 9, 10],
+    "70002B": [8, 9, 10],
+}
 
 # channel resolution docstrings
-_chan_resolution_docstrings = {'5208': "12 bit resolution allows for four "
-                                       "markers, 13 bit resolution "
-                                       "allows for three, etc. with 16 bit "
-                                       "allowing for ZERO markers",
-                               '70001A': "8 bit resolution allows for two "
-                                         "markers, 9 bit resolution "
-                                         "allows for one, and 10 bit "
-                                         "does NOT allow for markers ",
-                               '70002A': "8 bit resolution allows for two "
-                                         "markers, 9 bit resolution "
-                                         "allows for one, and 10 bit "
-                                         "does NOT allow for markers ",
-                               '70001B': "8 bit resolution allows for two "
-                                         "markers, 9 bit resolution "
-                                         "allows for one, and 10 bit "
-                                         "does NOT allow for markers ",
-                               '70002B': "8 bit resolution allows for two "
-                                         "markers, 9 bit resolution "
-                                         "allows for one, and 10 bit "
-                                         "does NOT allow for markers "}
+_chan_resolution_docstrings = {
+    "5208": "12 bit resolution allows for four "
+    "markers, 13 bit resolution "
+    "allows for three, etc. with 16 bit "
+    "allowing for ZERO markers",
+    "70001A": "8 bit resolution allows for two "
+    "markers, 9 bit resolution "
+    "allows for one, and 10 bit "
+    "does NOT allow for markers ",
+    "70002A": "8 bit resolution allows for two "
+    "markers, 9 bit resolution "
+    "allows for one, and 10 bit "
+    "does NOT allow for markers ",
+    "70001B": "8 bit resolution allows for two "
+    "markers, 9 bit resolution "
+    "allows for one, and 10 bit "
+    "does NOT allow for markers ",
+    "70002B": "8 bit resolution allows for two "
+    "markers, 9 bit resolution "
+    "allows for one, and 10 bit "
+    "does NOT allow for markers ",
+}
 
 # channel amplitudes
-_chan_amps = {'70001A': 0.5,
-              '70002A': 0.5,
-              '70001B': 0.5,
-              '70002B': 0.5,
-              '5208': 1.5}
+_chan_amps = {"70001A": 0.5, "70002A": 0.5, "70001B": 0.5, "70002B": 0.5, "5208": 1.5}
 
 # marker ranges
-_marker_high = {'70001A': (-1.4, 1.4),
-                '70002A': (-1.4, 1.4),
-                '70001B': (-1.4, 1.4),
-                '70002B': (-1.4, 1.4),
-                '5208': (-0.5, 1.75)}
-_marker_low = {'70001A': (-1.4, 1.4),
-               '70002A': (-1.4, 1.4),
-               '70001B': (-1.4, 1.4),
-               '70002B': (-1.4, 1.4),
-               '5208': (-0.3, 1.55)}
+_marker_high = {
+    "70001A": (-1.4, 1.4),
+    "70002A": (-1.4, 1.4),
+    "70001B": (-1.4, 1.4),
+    "70002B": (-1.4, 1.4),
+    "5208": (-0.5, 1.75),
+}
+_marker_low = {
+    "70001A": (-1.4, 1.4),
+    "70002A": (-1.4, 1.4),
+    "70001B": (-1.4, 1.4),
+    "70002B": (-1.4, 1.4),
+    "5208": (-0.3, 1.55),
+}
 
 
 class SRValidator(vals.Validator[float]):
@@ -123,32 +128,32 @@ class SRValidator(vals.Validator[float]):
     Validator to validate the AWG clock sample rate
     """
 
-    def __init__(self, awg: AWG70000A) -> None:
+    def __init__(self, awg: TektronixAWG70000Base) -> None:
         """
         Args:
             awg: The parent instrument instance. We need this since sample
                 rate validation depends on many clock settings
         """
         self.awg = awg
-        if self.awg.model in ['70001A', '70001B']:
+        if self.awg.model in ["70001A", "70001B"]:
             self._internal_validator = vals.Numbers(1.49e3, 50e9)
             self._freq_multiplier = 4
-        elif self.awg.model in ['70002A', '70002B']:
+        elif self.awg.model in ["70002A", "70002B"]:
             self._internal_validator = vals.Numbers(1.49e3, 25e9)
             self._freq_multiplier = 2
-        elif self.awg.model == '5208':
+        elif self.awg.model == "5208":
             self._internal_validator = vals.Numbers(1.49e3, 2.5e9)
         # no other models are possible, since the __init__ of
         # the AWG70000A raises an error if anything else is given
 
-    def validate(self, value: float, context: str='') -> None:
-        if 'Internal' in self.awg.clock_source():
+    def validate(self, value: float, context: str = "") -> None:
+        if "Internal" in self.awg.clock_source():
             self._internal_validator.validate(value)
         else:
             ext_freq = self.awg.clock_external_frequency()
             # TODO: I'm not sure what the minimal allowed sample rate is
             # in this case
-            validator = vals.Numbers(1.49e3, self._freq_multiplier*ext_freq)
+            validator = vals.Numbers(1.49e3, self._freq_multiplier * ext_freq)
             validator.validate(value)
 
 
@@ -157,110 +162,149 @@ class Tektronix70000AWGChannel(InstrumentChannel):
     Class to hold a channel of the AWG.
     """
 
-    def __init__(self,  parent: Instrument, name: str, channel: int) -> None:
+    def __init__(
+        self,
+        parent: Instrument,
+        name: str,
+        channel: int,
+        **kwargs: Unpack[InstrumentBaseKWArgs],
+    ) -> None:
         """
         Args:
             parent: The Instrument instance to which the channel is
                 to be attached.
             name: The name used in the DataSet
             channel: The channel number, either 1 or 2.
+            **kwargs: Forwarded to base class.
         """
 
-        super().__init__(parent, name)
+        super().__init__(parent, name, **kwargs)
 
         self.channel = channel
 
         num_channels = self.root_instrument.num_channels
         self.model = self.root_instrument.model
 
-        fg = 'function generator'
+        fg = "function generator"
 
-        if channel not in list(range(1, num_channels+1)):
-            raise ValueError('Illegal channel value.')
+        if channel not in list(range(1, num_channels + 1)):
+            raise ValueError("Illegal channel value.")
 
-        self.add_parameter('state',
-                           label=f'Channel {channel} state',
-                           get_cmd=f'OUTPut{channel}:STATe?',
-                           set_cmd=f'OUTPut{channel}:STATe {{}}',
-                           vals=vals.Ints(0, 1),
-                           get_parser=int)
+        self.state: Parameter = self.add_parameter(
+            "state",
+            label=f"Channel {channel} state",
+            get_cmd=f"OUTPut{channel}:STATe?",
+            set_cmd=f"OUTPut{channel}:STATe {{}}",
+            vals=vals.Ints(0, 1),
+            get_parser=int,
+        )
+        """Parameter state"""
 
         ##################################################
         # FGEN PARAMETERS
 
         # TODO: Setting high and low will change this parameter's value
-        self.add_parameter('fgen_amplitude',
-                           label=f'Channel {channel} {fg} amplitude',
-                           get_cmd=f'FGEN:CHANnel{channel}:AMPLitude?',
-                           set_cmd=f'FGEN:CHANnel{channel}:AMPLitude {{}}',
-                           unit='V',
-                           vals=vals.Numbers(0, _chan_amps[self.model]),
-                           get_parser=float)
+        self.fgen_amplitude: Parameter = self.add_parameter(
+            "fgen_amplitude",
+            label=f"Channel {channel} {fg} amplitude",
+            get_cmd=f"FGEN:CHANnel{channel}:AMPLitude?",
+            set_cmd=f"FGEN:CHANnel{channel}:AMPLitude {{}}",
+            unit="V",
+            vals=vals.Numbers(0, _chan_amps[self.model]),
+            get_parser=float,
+        )
+        """Parameter fgen_amplitude"""
 
-        self.add_parameter('fgen_offset',
-                           label=f'Channel {channel} {fg} offset',
-                           get_cmd=f'FGEN:CHANnel{channel}:OFFSet?',
-                           set_cmd=f'FGEN:CHANnel{channel}:OFFSet {{}}',
-                           unit='V',
-                           vals=vals.Numbers(0, 0.250),  # depends on ampl.
-                           get_parser=float)
+        self.fgen_offset: Parameter = self.add_parameter(
+            "fgen_offset",
+            label=f"Channel {channel} {fg} offset",
+            get_cmd=f"FGEN:CHANnel{channel}:OFFSet?",
+            set_cmd=f"FGEN:CHANnel{channel}:OFFSet {{}}",
+            unit="V",
+            vals=vals.Numbers(0, 0.250),  # depends on ampl.
+            get_parser=float,
+        )
+        """Parameter fgen_offset"""
 
-        self.add_parameter('fgen_frequency',
-                           label=f'Channel {channel} {fg} frequency',
-                           get_cmd=f'FGEN:CHANnel{channel}:FREQuency?',
-                           set_cmd=partial(self._set_fgfreq, channel),
-                           unit='Hz',
-                           get_parser=float)
+        self.fgen_frequency: Parameter = self.add_parameter(
+            "fgen_frequency",
+            label=f"Channel {channel} {fg} frequency",
+            get_cmd=f"FGEN:CHANnel{channel}:FREQuency?",
+            set_cmd=partial(self._set_fgfreq, channel),
+            unit="Hz",
+            get_parser=float,
+        )
+        """Parameter fgen_frequency"""
 
-        self.add_parameter('fgen_dclevel',
-                           label=f'Channel {channel} {fg} DC level',
-                           get_cmd=f'FGEN:CHANnel{channel}:DCLevel?',
-                           set_cmd=f'FGEN:CHANnel{channel}:DCLevel {{}}',
-                           unit='V',
-                           vals=vals.Numbers(-0.25, 0.25),
-                           get_parser=float)
+        self.fgen_dclevel: Parameter = self.add_parameter(
+            "fgen_dclevel",
+            label=f"Channel {channel} {fg} DC level",
+            get_cmd=f"FGEN:CHANnel{channel}:DCLevel?",
+            set_cmd=f"FGEN:CHANnel{channel}:DCLevel {{}}",
+            unit="V",
+            vals=vals.Numbers(-0.25, 0.25),
+            get_parser=float,
+        )
+        """Parameter fgen_dclevel"""
 
-        self.add_parameter('fgen_signalpath',
-                           label=f'Channel {channel} {fg} signal path',
-                           set_cmd=f'FGEN:CHANnel{channel}:PATH {{}}',
-                           get_cmd=f'FGEN:CHANnel{channel}:PATH?',
-                           val_mapping=_fg_path_val_map[self.root_instrument.model])
+        self.fgen_signalpath: Parameter = self.add_parameter(
+            "fgen_signalpath",
+            label=f"Channel {channel} {fg} signal path",
+            set_cmd=f"FGEN:CHANnel{channel}:PATH {{}}",
+            get_cmd=f"FGEN:CHANnel{channel}:PATH?",
+            val_mapping=_fg_path_val_map[self.root_instrument.model],
+        )
+        """Parameter fgen_signalpath"""
 
-        self.add_parameter('fgen_period',
-                           label=f'Channel {channel} {fg} period',
-                           get_cmd=f'FGEN:CHANnel{channel}:PERiod?',
-                           unit='s',
-                           get_parser=float)
+        self.fgen_period: Parameter = self.add_parameter(
+            "fgen_period",
+            label=f"Channel {channel} {fg} period",
+            get_cmd=f"FGEN:CHANnel{channel}:PERiod?",
+            unit="s",
+            get_parser=float,
+        )
+        """Parameter fgen_period"""
 
-        self.add_parameter('fgen_phase',
-                           label=f'Channel {channel} {fg} phase',
-                           get_cmd=f'FGEN:CHANnel{channel}:PHASe?',
-                           set_cmd=f'FGEN:CHANnel{channel}:PHASe {{}}',
-                           unit='degrees',
-                           vals=vals.Numbers(-180, 180),
-                           get_parser=float)
+        self.fgen_phase: Parameter = self.add_parameter(
+            "fgen_phase",
+            label=f"Channel {channel} {fg} phase",
+            get_cmd=f"FGEN:CHANnel{channel}:PHASe?",
+            set_cmd=f"FGEN:CHANnel{channel}:PHASe {{}}",
+            unit="degrees",
+            vals=vals.Numbers(-180, 180),
+            get_parser=float,
+        )
+        """Parameter fgen_phase"""
 
-        self.add_parameter('fgen_symmetry',
-                           label=f'Channel {channel} {fg} symmetry',
-                           set_cmd=f'FGEN:CHANnel{channel}:SYMMetry {{}}',
-                           get_cmd=f'FGEN:CHANnel{channel}:SYMMetry?',
-                           unit='%',
-                           vals=vals.Numbers(0, 100),
-                           get_parser=float)
+        self.fgen_symmetry: Parameter = self.add_parameter(
+            "fgen_symmetry",
+            label=f"Channel {channel} {fg} symmetry",
+            set_cmd=f"FGEN:CHANnel{channel}:SYMMetry {{}}",
+            get_cmd=f"FGEN:CHANnel{channel}:SYMMetry?",
+            unit="%",
+            vals=vals.Numbers(0, 100),
+            get_parser=float,
+        )
+        """Parameter fgen_symmetry"""
 
-        self.add_parameter('fgen_type',
-                           label=f'Channel {channel} {fg} type',
-                           set_cmd=f'FGEN:CHANnel{channel}:TYPE {{}}',
-                           get_cmd=f'FGEN:CHANnel{channel}:TYPE?',
-                           val_mapping={'SINE': 'SINE',
-                                        'SQUARE': 'SQU',
-                                        'TRIANGLE': 'TRI',
-                                        'NOISE': 'NOIS',
-                                        'DC': 'DC',
-                                        'GAUSSIAN': 'GAUSS',
-                                        'EXPONENTIALRISE': 'EXPR',
-                                        'EXPONENTIALDECAY': 'EXPD',
-                                        'NONE': 'NONE'})
+        self.fgen_type: Parameter = self.add_parameter(
+            "fgen_type",
+            label=f"Channel {channel} {fg} type",
+            set_cmd=f"FGEN:CHANnel{channel}:TYPE {{}}",
+            get_cmd=f"FGEN:CHANnel{channel}:TYPE?",
+            val_mapping={
+                "SINE": "SINE",
+                "SQUARE": "SQU",
+                "TRIANGLE": "TRI",
+                "NOISE": "NOIS",
+                "DC": "DC",
+                "GAUSSIAN": "GAUSS",
+                "EXPONENTIALRISE": "EXPR",
+                "EXPONENTIALDECAY": "EXPD",
+                "NONE": "NONE",
+            },
+        )
+        """Parameter fgen_type"""
 
         ##################################################
         # AWG PARAMETERS
@@ -269,88 +313,110 @@ class Tektronix70000AWGChannel(InstrumentChannel):
         # the manual claims that this command only works in AC mode
         # (OUTPut[n]:PATH is AC), but I've tested that it does what
         # one would expect in DIR mode.
-        self.add_parameter(
-            'awg_amplitude',
-            label=f'Channel {channel} AWG peak-to-peak amplitude',
-            set_cmd=f'SOURCe{channel}:VOLTage {{}}',
-            get_cmd=f'SOURce{channel}:VOLTage?',
-            unit='V',
+        self.awg_amplitude: Parameter = self.add_parameter(
+            "awg_amplitude",
+            label=f"Channel {channel} AWG peak-to-peak amplitude",
+            set_cmd=f"SOURCe{channel}:VOLTage {{}}",
+            get_cmd=f"SOURce{channel}:VOLTage?",
+            unit="V",
             get_parser=float,
-            vals=vals.Numbers(0.250, _chan_amps[self.model]))
+            vals=vals.Numbers(0.250, _chan_amps[self.model]),
+        )
+        """Parameter awg_amplitude"""
 
-        self.add_parameter('assigned_asset',
-                           label=('Waveform/sequence assigned to '
-                                  f' channel {self.channel}'),
-                           get_cmd=f"SOURCE{self.channel}:CASSet?",
-                           get_parser=_parse_string_response)
+        self.offset: Parameter = self.add_parameter(
+            "offset",
+            label=f"Channel {channel} Offset for DC Output paths",
+            set_cmd=f"SOURce{channel}:VOLTage:LEVel:IMMediate:OFFSet {{}}",
+            get_cmd=f"SOURce{channel}:VOLTage:LEVel:IMMediate:OFFSet?",
+            unit="V",
+            get_parser=float,
+            vals=vals.Numbers(-2.0, 2.0),
+        )
+        """Parameter offset"""
+
+        self.assigned_asset: Parameter = self.add_parameter(
+            "assigned_asset",
+            label=(f"Waveform/sequence assigned to channel {self.channel}"),
+            get_cmd=f"SOURCE{self.channel}:CASSet?",
+            get_parser=_parse_string_response,
+        )
+        """Parameter assigned_asset"""
 
         # markers
-        for mrk in range(1, _num_of_markers_map[self.model]+1):
-
+        for mrk in range(1, _num_of_markers_map[self.model] + 1):
             self.add_parameter(
-                f'marker{mrk}_high',
-                label=f'Channel {channel} marker {mrk} high level',
+                f"marker{mrk}_high",
+                label=f"Channel {channel} marker {mrk} high level",
                 set_cmd=partial(self._set_marker, channel, mrk, True),
-                get_cmd=f'SOURce{channel}:MARKer{mrk}:VOLTage:HIGH?',
-                unit='V',
+                get_cmd=f"SOURce{channel}:MARKer{mrk}:VOLTage:HIGH?",
+                unit="V",
                 vals=vals.Numbers(*_marker_high[self.model]),
-                get_parser=float)
+                get_parser=float,
+            )
 
             self.add_parameter(
-                f'marker{mrk}_low',
-                label=f'Channel {channel} marker {mrk} low level',
+                f"marker{mrk}_low",
+                label=f"Channel {channel} marker {mrk} low level",
                 set_cmd=partial(self._set_marker, channel, mrk, False),
-                get_cmd=f'SOURce{channel}:MARKer{mrk}:VOLTage:LOW?',
-                unit='V',
+                get_cmd=f"SOURce{channel}:MARKer{mrk}:VOLTage:LOW?",
+                unit="V",
                 vals=vals.Numbers(*_marker_low[self.model]),
-                get_parser=float)
+                get_parser=float,
+            )
 
             self.add_parameter(
-                f'marker{mrk}_waitvalue',
-                label=f'Channel {channel} marker {mrk} wait state',
-                set_cmd=f'OUTPut{channel}:WVALue:MARKer{mrk} {{}}',
-                get_cmd=f'OUTPut{channel}:WVALue:MARKer{mrk}?',
-                vals=vals.Enum('FIRST', 'LOW', 'HIGH'))
+                f"marker{mrk}_waitvalue",
+                label=f"Channel {channel} marker {mrk} wait state",
+                set_cmd=f"OUTPut{channel}:WVALue:MARKer{mrk} {{}}",
+                get_cmd=f"OUTPut{channel}:WVALue:MARKer{mrk}?",
+                vals=vals.Enum("FIRST", "LOW", "HIGH"),
+            )
 
             self.add_parameter(
-                name=f'marker{mrk}_stoppedvalue',
-                label=f'Channel {channel} marker {mrk} stopped value',
-                set_cmd=f'OUTPut{channel}:SVALue:MARKer{mrk} {{}}',
-                get_cmd=f'OUTPut{channel}:SVALue:MARKer{mrk}?',
-                vals=vals.Enum('OFF', 'LOW'))
+                name=f"marker{mrk}_stoppedvalue",
+                label=f"Channel {channel} marker {mrk} stopped value",
+                set_cmd=f"OUTPut{channel}:SVALue:MARKer{mrk} {{}}",
+                get_cmd=f"OUTPut{channel}:SVALue:MARKer{mrk}?",
+                vals=vals.Enum("OFF", "LOW"),
+            )
 
         ##################################################
         # MISC.
 
-        self.add_parameter('resolution',
-                           label=f'Channel {channel} bit resolution',
-                           get_cmd=f'SOURce{channel}:DAC:RESolution?',
-                           set_cmd=f'SOURce{channel}:DAC:RESolution {{}}',
-                           vals=vals.Enum(*_chan_resolutions[self.model]),
-                           get_parser=int,
-                           docstring=_chan_resolution_docstrings[self.model])
+        self.resolution: Parameter = self.add_parameter(
+            "resolution",
+            label=f"Channel {channel} bit resolution",
+            get_cmd=f"SOURce{channel}:DAC:RESolution?",
+            set_cmd=f"SOURce{channel}:DAC:RESolution {{}}",
+            vals=vals.Enum(*_chan_resolutions[self.model]),
+            get_parser=int,
+            docstring=_chan_resolution_docstrings[self.model],
+        )
+        """Parameter resolution"""
 
-    def _set_marker(self, channel: int, marker: int,
-                    high: bool, voltage: float) -> None:
+    def _set_marker(
+        self, channel: int, marker: int, high: bool, voltage: float
+    ) -> None:
         """
         Set the marker high/low value and update the low/high value
         """
         if high:
-            this = 'HIGH'
-            other = 'low'
+            this = "HIGH"
+            other = "low"
         else:
-            this = 'LOW'
-            other = 'high'
+            this = "LOW"
+            other = "high"
 
-        self.write(f'SOURce{channel}:MARKer{marker}:VOLTage:{this} {voltage}')
-        self.parameters[f'marker{marker}_{other}'].get()
+        self.write(f"SOURce{channel}:MARKer{marker}:VOLTage:{this} {voltage}")
+        self.parameters[f"marker{marker}_{other}"].get()
 
     def _set_fgfreq(self, channel: int, frequency: float) -> None:
         """
         Set the function generator frequency
         """
         functype = self.fgen_type.get()
-        if functype in ['SINE', 'SQUARE']:
+        if functype in ["SINE", "SQUARE"]:
             max_freq = 12.5e9
         else:
             max_freq = 6.25e9
@@ -363,8 +429,7 @@ class Tektronix70000AWGChannel(InstrumentChannel):
                 "Hz, minimum is 1 Hz"
             )
         else:
-            self.root_instrument.write(f'FGEN:CHANnel{channel}:'
-                                       f'FREQuency {frequency}')
+            self.root_instrument.write(f"FGEN:CHANnel{channel}:FREQuency {frequency}")
 
     def setWaveform(self, name: str) -> None:
         """
@@ -374,7 +439,7 @@ class Tektronix70000AWGChannel(InstrumentChannel):
             name: The name of the waveform
         """
         if name not in self.root_instrument.waveformList:
-            raise ValueError('No such waveform in the waveform list')
+            raise ValueError("No such waveform in the waveform list")
 
         self.root_instrument.write(f'SOURce{self.channel}:CASSet:WAVeform "{name}"')
 
@@ -387,13 +452,13 @@ class Tektronix70000AWGChannel(InstrumentChannel):
             tracknr: Which track to use (1 or 2)
         """
 
-        self.root_instrument.write(f'SOURCE{self.channel}:'
-                                   f'CASSet:SEQuence "{seqname}"'
-                                   f', {tracknr}')
+        self.root_instrument.write(
+            f'SOURCE{self.channel}:CASSet:SEQuence "{seqname}", {tracknr}'
+        )
 
     def clear_asset(self) -> None:
         """
-        Clear asssinged assets on this channel
+        Clear assigned assets on this channel
         """
 
         self.root_instrument.write(f"SOURce{self.channel}:CASSet:CLEAR")
@@ -405,38 +470,38 @@ Alias for Tektronix70000AWGChannel for backwards compatibility.
 """
 
 
-class AWG70000A(VisaInstrument):
+class TektronixAWG70000Base(VisaInstrument):
     """
-    The QCoDeS driver for Tektronix AWG70000A series AWG's.
+    Base class for QCoDeS drivers for Tektronix AWG70000 series AWG's.
 
     The drivers for AWG70001A/AWG70001B and AWG70002A/AWG70002B should be
     subclasses of this general class.
     """
+
+    default_terminator = "\n"
+    default_timeout = 10
 
     def __init__(
         self,
         name: str,
         address: str,
         num_channels: int,
-        timeout: float = 10,
-        **kwargs: Any,
+        **kwargs: Unpack[VisaInstrumentKWArgs],
     ) -> None:
         """
         Args:
             name: The name used internally by QCoDeS in the DataSet
             address: The VISA resource name of the instrument
-            timeout: The VISA timeout time (in seconds)
             num_channels: Number of channels on the AWG
             **kwargs: kwargs are forwarded to base class.
         """
 
         self.num_channels = num_channels
 
-        super().__init__(name, address, timeout=timeout, terminator='\n',
-                         **kwargs)
+        super().__init__(name, address, **kwargs)
 
         # The 'model' value begins with 'AWG'
-        self.model = self.IDN()['model'][3:]
+        self.model = self.IDN()["model"][3:]
 
         if self.model not in ["70001A", "70002A", "70001B", "70002B", "5208"]:
             raise ValueError(
@@ -444,60 +509,79 @@ class AWG70000A(VisaInstrument):
                 f"the right driver for your instrument?"
             )
 
-        self.add_parameter('current_directory',
-                           label='Current file system directory',
-                           set_cmd='MMEMory:CDIRectory "{}"',
-                           get_cmd='MMEMory:CDIRectory?',
-                           vals=vals.Strings())
+        self.current_directory: Parameter = self.add_parameter(
+            "current_directory",
+            label="Current file system directory",
+            set_cmd='MMEMory:CDIRectory "{}"',
+            get_cmd="MMEMory:CDIRectory?",
+            vals=vals.Strings(),
+        )
+        """Parameter current_directory"""
 
-        self.add_parameter('mode',
-                           label='Instrument operation mode',
-                           set_cmd='INSTrument:MODE {}',
-                           get_cmd='INSTrument:MODE?',
-                           vals=vals.Enum('AWG', 'FGEN'))
+        self.mode: Parameter = self.add_parameter(
+            "mode",
+            label="Instrument operation mode",
+            set_cmd="INSTrument:MODE {}",
+            get_cmd="INSTrument:MODE?",
+            vals=vals.Enum("AWG", "FGEN"),
+        )
+        """Parameter mode"""
 
         ##################################################
         # Clock parameters
 
-        self.add_parameter('sample_rate',
-                           label='Clock sample rate',
-                           set_cmd='CLOCk:SRATe {}',
-                           get_cmd='CLOCk:SRATe?',
-                           unit='Sa/s',
-                           get_parser=float,
-                           vals=SRValidator(self))
+        self.sample_rate: Parameter = self.add_parameter(
+            "sample_rate",
+            label="Clock sample rate",
+            set_cmd="CLOCk:SRATe {}",
+            get_cmd="CLOCk:SRATe?",
+            unit="Sa/s",
+            get_parser=float,
+            vals=SRValidator(self),
+        )
+        """Parameter sample_rate"""
 
-        self.add_parameter('clock_source',
-                           label='Clock source',
-                           set_cmd='CLOCk:SOURce {}',
-                           get_cmd='CLOCk:SOURce?',
-                           val_mapping={'Internal': 'INT',
-                                        'Internal, 10 MHZ ref.': 'EFIX',
-                                        'Internal, variable ref.': 'EVAR',
-                                        'External': 'EXT'})
+        self.clock_source: Parameter = self.add_parameter(
+            "clock_source",
+            label="Clock source",
+            set_cmd="CLOCk:SOURce {}",
+            get_cmd="CLOCk:SOURce?",
+            val_mapping={
+                "Internal": "INT",
+                "Internal, 10 MHZ ref.": "EFIX",
+                "Internal, variable ref.": "EVAR",
+                "External": "EXT",
+            },
+        )
+        """Parameter clock_source"""
 
-        self.add_parameter('clock_external_frequency',
-                           label='External clock frequency',
-                           set_cmd='CLOCk:ECLock:FREQuency {}',
-                           get_cmd='CLOCk:ECLock:FREQuency?',
-                           get_parser=float,
-                           unit='Hz',
-                           vals=vals.Numbers(6.25e9, 12.5e9))
+        self.clock_external_frequency: Parameter = self.add_parameter(
+            "clock_external_frequency",
+            label="External clock frequency",
+            set_cmd="CLOCk:ECLock:FREQuency {}",
+            get_cmd="CLOCk:ECLock:FREQuency?",
+            get_parser=float,
+            unit="Hz",
+            vals=vals.Numbers(6.25e9, 12.5e9),
+        )
+        """Parameter clock_external_frequency"""
 
-        self.add_parameter('run_state',
-                           label='Run state',
-                           get_cmd='AWGControl:RSTATe?',
-                           val_mapping={'Stopped': '0',
-                                        'Waiting for trigger': '1',
-                                        'Running': '2'})
+        self.run_state: Parameter = self.add_parameter(
+            "run_state",
+            label="Run state",
+            get_cmd="AWGControl:RSTATe?",
+            val_mapping={"Stopped": "0", "Waiting for trigger": "1", "Running": "2"},
+        )
+        """Parameter run_state"""
 
-        self.add_parameter(
+        self.all_output_off: Parameter = self.add_parameter(
             "all_output_off",
             label="All Output Off",
             get_cmd="OUTPut:OFF?",
             set_cmd="OUTPut:OFF {}",
             val_mapping=create_on_off_val_mapping(on_val="1", off_val="0"),
         )
+        """Parameter all_output_off"""
 
         add_channel_list = self.num_channels > 2
         # We deem 2 channels too few for a channel list
@@ -506,8 +590,8 @@ class AWG70000A(VisaInstrument):
                 self, "Channels", Tektronix70000AWGChannel, snapshotable=False
             )
 
-        for ch_num in range(1, num_channels+1):
-            ch_name = f'ch{ch_num}'
+        for ch_num in range(1, num_channels + 1):
+            ch_name = f"ch{ch_num}"
             channel = Tektronix70000AWGChannel(self, ch_name, ch_num)
             self.add_submodule(ch_name, channel)
             if add_channel_list:
@@ -535,22 +619,21 @@ class AWG70000A(VisaInstrument):
         """
         Force a trigger A event
         """
-        self.write('TRIGger:IMMediate ATRigger')
+        self.write("TRIGger:IMMediate ATRigger")
 
     def force_triggerB(self) -> None:
         """
         Force a trigger B event
         """
-        self.write('TRIGger:IMMediate BTRigger')
+        self.write("TRIGger:IMMediate BTRigger")
 
     def wait_for_operation_to_complete(self) -> None:
         """
         Waits for the latest issued overlapping command to finish
         """
-        self.ask('*OPC?')
+        self.ask("*OPC?")
 
-    def play(self, wait_for_running: bool = True,
-             timeout: float = 10) -> None:
+    def play(self, wait_for_running: bool = True, timeout: float = 10) -> None:
         """
         Run the AWG/Func. Gen. This command is equivalent to pressing the
         play button on the front panel.
@@ -561,27 +644,28 @@ class AWG70000A(VisaInstrument):
             timeout: The maximal time to wait for the instrument to play.
                 Raises an exception is this time is reached.
         """
-        self.write('AWGControl:RUN')
+        self.write("AWGControl:RUN")
         if wait_for_running:
             start_time = time.perf_counter()
             running = False
             while not running:
                 time.sleep(0.1)
-                running = self.run_state() in ('Running',
-                                               'Waiting for trigger')
+                running = self.run_state() in ("Running", "Waiting for trigger")
                 waited_for = start_time - time.perf_counter()
                 if waited_for > timeout:
-                    raise RuntimeError(f'Reached timeout ({timeout} s) '
-                                       'while waiting for instrument to play.'
-                                       ' Perhaps some waveform or sequence is'
-                                       ' corrupt?')
+                    raise RuntimeError(
+                        f"Reached timeout ({timeout} s) "
+                        "while waiting for instrument to play."
+                        " Perhaps some waveform or sequence is"
+                        " corrupt?"
+                    )
 
     def stop(self) -> None:
         """
         Stop the output of the instrument. This command is equivalent to
         pressing the stop button on the front panel.
         """
-        self.write('AWGControl:STOP')
+        self.write("AWGControl:STOP")
 
     @property
     def sequenceList(self) -> list[str]:
@@ -591,10 +675,10 @@ class AWG70000A(VisaInstrument):
         # There is no SLISt:LIST command, so we do it slightly differently
         N = int(self.ask("SLISt:SIZE?"))
         slist = []
-        for n in range(1, N+1):
+        for n in range(1, N + 1):
             resp = self.ask(f"SLISt:NAME? {n}")
             resp = resp.strip()
-            resp = resp.replace('"', '')
+            resp = resp.replace('"', "")
             slist.append(resp)
 
         return slist
@@ -606,8 +690,8 @@ class AWG70000A(VisaInstrument):
         """
         respstr = self.ask("WLISt:LIST?")
         respstr = respstr.strip()
-        respstr = respstr.replace('"', '')
-        resp = respstr.split(',')
+        respstr = respstr.replace('"', "")
+        resp = respstr.split(",")
 
         return resp
 
@@ -625,13 +709,13 @@ class AWG70000A(VisaInstrument):
         """
         Clear the sequence list
         """
-        self.write('SLISt:SEQuence:DELete ALL')
+        self.write("SLISt:SEQuence:DELete ALL")
 
     def clearWaveformList(self) -> None:
         """
         Clear the waveform list
         """
-        self.write('WLISt:WAVeform:DELete ALL')
+        self.write("WLISt:WAVeform:DELete ALL")
 
     @staticmethod
     def makeWFMXFile(data: np.ndarray, amplitude: float) -> bytes:
@@ -658,12 +742,13 @@ class AWG70000A(VisaInstrument):
             N = shape[1]
             markers_included = True
         else:
-            raise ValueError('Input data has too many dimensions!')
+            raise ValueError("Input data has too many dimensions!")
 
-        wfmx_hdr_str = AWG70000A._makeWFMXFileHeader(num_samples=N,
-                                                     markers_included=markers_included)
-        wfmx_hdr = bytes(wfmx_hdr_str, 'ascii')
-        wfmx_data = AWG70000A._makeWFMXFileBinaryData(data, amplitude)
+        wfmx_hdr_str = TektronixAWG70000Base._makeWFMXFileHeader(
+            num_samples=N, markers_included=markers_included
+        )
+        wfmx_hdr = bytes(wfmx_hdr_str, "ascii")
+        wfmx_data = TektronixAWG70000Base._makeWFMXFileBinaryData(data, amplitude)
 
         wfmx = wfmx_hdr
 
@@ -705,8 +790,9 @@ class AWG70000A(VisaInstrument):
 
         self._sendBinaryFile(wfmx, filename, path)
 
-    def _sendBinaryFile(self, binfile: bytes, filename: str,
-                        path: str, overwrite: bool = True) -> None:
+    def _sendBinaryFile(
+        self, binfile: bytes, filename: str, path: str, overwrite: bool = True
+    ) -> None:
         """
         Send a binary file to the AWG's mass memory (disk).
 
@@ -718,22 +804,22 @@ class AWG70000A(VisaInstrument):
             overwrite: If true, the file on disk gets overwritten
         """
 
-        name_str = f'MMEMory:DATA "{filename}"'.encode('ascii')
+        name_str = f'MMEMory:DATA "{filename}"'.encode("ascii")
         len_file = len(binfile)
         len_str = len(str(len_file))  # No. of digits needed to write length
-        size_str = (f',#{len_str}{len_file}').encode('ascii')
+        size_str = (f",#{len_str}{len_file}").encode("ascii")
 
         msg = name_str + size_str + binfile
 
         # IEEE 488.2 limit on a single write is 999,999,999 bytes
         # TODO: If this happens, we should split the file
-        if len(msg) > 1e9-1:
-            raise ValueError('File too large to transfer')
+        if len(msg) > 1e9 - 1:
+            raise ValueError("File too large to transfer")
 
         self.current_directory(path)
 
         if overwrite:
-            self.log.debug(f'Pre-deleting file {filename} at {path}')
+            self.log.debug(f"Pre-deleting file {filename} at {path}")
             self.visa_handle.write(f'MMEMory:DELete "{filename}"')
             # if the file does not exist,
             # an error code -256 is put in the error queue
@@ -756,7 +842,7 @@ class AWG70000A(VisaInstrument):
         if not path:
             path = self.wfmxFileFolder
 
-        pathstr = 'C:' + path + '\\' + filename
+        pathstr = "C:" + path + "\\" + filename
 
         self.write(f'MMEMory:OPEN "{pathstr}"')
         # the above command is overlapping, but we want a blocking command
@@ -775,15 +861,14 @@ class AWG70000A(VisaInstrument):
         if not path:
             path = self.seqxFileFolder
 
-        pathstr = f'C:{path}\\{filename}'
+        pathstr = f"C:{path}\\{filename}"
 
         self.write(f'MMEMory:OPEN:SASSet:SEQuence "{pathstr}"')
         # the above command is overlapping, but we want a blocking command
-        self.ask('*OPC?')
+        self.ask("*OPC?")
 
     @staticmethod
-    def _makeWFMXFileHeader(num_samples: int,
-                            markers_included: bool) -> str:
+    def _makeWFMXFileHeader(num_samples: int, markers_included: bool) -> str:
         """
         Compiles a valid XML header for a .wfmx file
         There might be behaviour we can't capture
@@ -793,27 +878,28 @@ class AWG70000A(VisaInstrument):
         offsetdigits = 9
 
         if not isinstance(num_samples, int):
-            raise ValueError('num_samples must be of type int.')
+            raise ValueError("num_samples must be of type int.")
 
         if num_samples < 2400:
-            raise ValueError('num_samples must be at least 2400.')
+            raise ValueError("num_samples must be at least 2400.")
 
         # form the timestamp string
         timezone = time.timezone
         tz_m, _ = divmod(timezone, 60)  # returns (minutes, seconds)
         tz_h, tz_m = divmod(tz_m, 60)
         if np.sign(tz_h) == -1:
-            signstr = '-'
+            signstr = "-"
             tz_h *= -1
         else:
-            signstr = '+'
-        timestr = dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
+            signstr = "+"
+        timestr = dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
         timestr += signstr
-        timestr += f'{tz_h:02.0f}:{tz_m:02.0f}'
+        timestr += f"{tz_h:02.0f}:{tz_m:02.0f}"
 
-        hdr = ET.Element('DataFile', attrib={'offset': '0'*offsetdigits,
-                                             'version': '0.1'})
-        dsc = ET.SubElement(hdr, 'DataSetsCollection')
+        hdr = ET.Element(
+            "DataFile", attrib={"offset": "0" * offsetdigits, "version": "0.1"}
+        )
+        dsc = ET.SubElement(hdr, "DataSetsCollection")
         dsc.set("xmlns", "http://www.tektronix.com")
         dsc.set("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
         dsc.set(
@@ -829,52 +915,52 @@ class AWG70000A(VisaInstrument):
         datasets.set("xmlns", "http://www.tektronix.com")
 
         # Description of the data
-        datadesc = ET.SubElement(datasets, 'DataDescription')
-        temp_elem = ET.SubElement(datadesc, 'NumberSamples')
-        temp_elem.text = f'{num_samples:d}'
-        temp_elem = ET.SubElement(datadesc, 'SamplesType')
-        temp_elem.text = 'AWGWaveformSample'
-        temp_elem = ET.SubElement(datadesc, 'MarkersIncluded')
-        temp_elem.text = (f'{markers_included}').lower()
-        temp_elem = ET.SubElement(datadesc, 'NumberFormat')
-        temp_elem.text = 'Single'
-        temp_elem = ET.SubElement(datadesc, 'Endian')
-        temp_elem.text = 'Little'
-        temp_elem = ET.SubElement(datadesc, 'Timestamp')
+        datadesc = ET.SubElement(datasets, "DataDescription")
+        temp_elem = ET.SubElement(datadesc, "NumberSamples")
+        temp_elem.text = f"{num_samples:d}"
+        temp_elem = ET.SubElement(datadesc, "SamplesType")
+        temp_elem.text = "AWGWaveformSample"
+        temp_elem = ET.SubElement(datadesc, "MarkersIncluded")
+        temp_elem.text = (f"{markers_included}").lower()
+        temp_elem = ET.SubElement(datadesc, "NumberFormat")
+        temp_elem.text = "Single"
+        temp_elem = ET.SubElement(datadesc, "Endian")
+        temp_elem.text = "Little"
+        temp_elem = ET.SubElement(datadesc, "Timestamp")
         temp_elem.text = timestr
 
         # Product specific information
-        prodspec = ET.SubElement(datasets, 'ProductSpecific')
-        prodspec.set('name', '')
-        temp_elem = ET.SubElement(prodspec, 'ReccSamplingRate')
-        temp_elem.set('units', 'Hz')
-        temp_elem.text = 'NaN'
-        temp_elem = ET.SubElement(prodspec, 'ReccAmplitude')
-        temp_elem.set('units', 'Volts')
-        temp_elem.text = 'NaN'
-        temp_elem = ET.SubElement(prodspec, 'ReccOffset')
-        temp_elem.set('units', 'Volts')
-        temp_elem.text = 'NaN'
-        temp_elem = ET.SubElement(prodspec, 'SerialNumber')
-        temp_elem = ET.SubElement(prodspec, 'SoftwareVersion')
-        temp_elem.text = '1.0.0917'
-        temp_elem = ET.SubElement(prodspec, 'UserNotes')
-        temp_elem = ET.SubElement(prodspec, 'OriginalBitDepth')
-        temp_elem.text = 'Floating'
-        temp_elem = ET.SubElement(prodspec, 'Thumbnail')
-        temp_elem = ET.SubElement(prodspec, 'CreatorProperties',
-                          attrib={'name': ''})
-        temp_elem = ET.SubElement(hdr, 'Setup')
+        prodspec = ET.SubElement(datasets, "ProductSpecific")
+        prodspec.set("name", "")
+        temp_elem = ET.SubElement(prodspec, "ReccSamplingRate")
+        temp_elem.set("units", "Hz")
+        temp_elem.text = "NaN"
+        temp_elem = ET.SubElement(prodspec, "ReccAmplitude")
+        temp_elem.set("units", "Volts")
+        temp_elem.text = "NaN"
+        temp_elem = ET.SubElement(prodspec, "ReccOffset")
+        temp_elem.set("units", "Volts")
+        temp_elem.text = "NaN"
+        temp_elem = ET.SubElement(prodspec, "SerialNumber")
+        temp_elem = ET.SubElement(prodspec, "SoftwareVersion")
+        temp_elem.text = "1.0.0917"
+        temp_elem = ET.SubElement(prodspec, "UserNotes")
+        temp_elem = ET.SubElement(prodspec, "OriginalBitDepth")
+        temp_elem.text = "Floating"
+        temp_elem = ET.SubElement(prodspec, "Thumbnail")
+        temp_elem = ET.SubElement(prodspec, "CreatorProperties", attrib={"name": ""})
+        temp_elem = ET.SubElement(hdr, "Setup")
 
-        xmlstr = ET.tostring(hdr, encoding='unicode')
-        xmlstr = xmlstr.replace('><', '>\r\n<')
+        xmlstr = ET.tostring(hdr, encoding="unicode")
+        xmlstr = xmlstr.replace("><", ">\r\n<")
 
         # As the final step, count the length of the header and write this
         # in the DataFile tag attribute 'offset'
 
-        xmlstr = xmlstr.replace('0'*offsetdigits,
-                                '{num:0{pad}d}'.format(num=len(xmlstr),
-                                                       pad=offsetdigits))
+        xmlstr = xmlstr.replace(
+            "0" * offsetdigits,
+            "{num:0{pad}d}".format(num=len(xmlstr), pad=offsetdigits),
+        )
 
         return xmlstr
 
@@ -898,24 +984,24 @@ class AWG70000A(VisaInstrument):
                 channel's max. voltage.
         """
 
-        channel_max = amplitude/2
-        channel_min = -amplitude/2
+        channel_max = amplitude / 2
+        channel_min = -amplitude / 2
 
         shape = np.shape(data)
 
         if len(shape) == 1:
             N = shape[0]
-            binary_marker = b''
+            binary_marker = b""
             wfm = data
         else:
             N = shape[1]
             M = shape[0]
             wfm = data[0, :]
             markers = data[1, :]
-            for i in range(1, M-1):
-                markers += data[i+1, :] * (2**i)
+            for i in range(1, M - 1):
+                markers += data[i + 1, :] * (2**i)
             markers = markers.astype(int)
-            fmt = N*'B'  # endian-ness doesn't matter for one byte
+            fmt = N * "B"  # endian-ness doesn't matter for one byte
             binary_marker = struct.pack(fmt, *markers)
 
         if wfm.max() > channel_max or wfm.min() < channel_min:
@@ -928,11 +1014,11 @@ class AWG70000A(VisaInstrument):
 
         # the data must be such that channel_max becomes 1 and
         # channel_min becomes -1
-        scale = 2/amplitude
-        wfm = wfm*scale
+        scale = 2 / amplitude
+        wfm = wfm * scale
 
         # TODO: Is this a fast method?
-        fmt = '<' + N*'f'
+        fmt = "<" + N * "f"
         binary_wfm = struct.pack(fmt, *wfm)
         binary_out = binary_wfm + binary_marker
 
@@ -971,27 +1057,30 @@ class AWG70000A(VisaInstrument):
 
         chan_list: list[str | int] = []
         for pos1 in seq.keys():
-            for pos2 in seq[pos1]['content'].keys():
-                for ch in seq[pos1]['content'][pos2]['data'].keys():
+            for pos2 in seq[pos1]["content"].keys():
+                for ch in seq[pos1]["content"][pos2]["data"].keys():
                     if ch not in chan_list:
                         chan_list.append(ch)
 
         if channel_mapping is None:
-            channel_mapping = {ch: ch_ind+1
-                               for ch_ind, ch in enumerate(chan_list)}
+            channel_mapping = {ch: ch_ind + 1 for ch_ind, ch in enumerate(chan_list)}
 
         if len(set(chan_list)) != len(amplitudes):
-            raise ValueError('Incorrect number of amplitudes provided.')
+            raise ValueError("Incorrect number of amplitudes provided.")
 
         if set(chan_list) != set(channel_mapping.keys()):
-            raise ValueError(f'Invalid channel_mapping. The sequence has '
-                             f'channels {set(chan_list)}, but the '
-                             'channel_mapping maps from the channels '
-                             f'{set(channel_mapping.keys())}')
+            raise ValueError(
+                f"Invalid channel_mapping. The sequence has "
+                f"channels {set(chan_list)}, but the "
+                "channel_mapping maps from the channels "
+                f"{set(channel_mapping.keys())}"
+            )
 
-        if set(channel_mapping.values()) != set(range(1, 1+len(chan_list))):
-            raise ValueError('Invalid channel_mapping. Must map onto '
-                             f'{list(range(1, 1+len(chan_list)))}')
+        if set(channel_mapping.values()) != set(range(1, 1 + len(chan_list))):
+            raise ValueError(
+                "Invalid channel_mapping. Must map onto "
+                f"{list(range(1, 1+len(chan_list)))}"
+            )
 
         ##########
         # STEP 1:
@@ -1001,34 +1090,34 @@ class AWG70000A(VisaInstrument):
         wfmx_filenames: list[str] = []
 
         for pos1 in seq.keys():
-            for pos2 in seq[pos1]['content'].keys():
-                for ch, data in seq[pos1]['content'][pos2]['data'].items():
-                    wfm = data['wfm']
+            for pos2 in seq[pos1]["content"].keys():
+                for ch, data in seq[pos1]["content"][pos2]["data"].items():
+                    wfm = data["wfm"]
 
                     markerdata = []
-                    for mkey in ['m1', 'm2', 'm3', 'm4']:
+                    for mkey in ["m1", "m2", "m3", "m4"]:
                         if mkey in data.keys():
                             markerdata.append(data.get(mkey))
                     wfm_data = np.stack((wfm, *markerdata))
 
                     awgchan = channel_mapping[ch]
-                    wfmx = AWG70000A.makeWFMXFile(wfm_data,
-                                                  amplitudes[awgchan-1])
+                    wfmx = TektronixAWG70000Base.makeWFMXFile(
+                        wfm_data, amplitudes[awgchan - 1]
+                    )
                     wfmx_files.append(wfmx)
-                    wfmx_filenames.append(f'wfm_{pos1}_{pos2}_{awgchan}')
+                    wfmx_filenames.append(f"wfm_{pos1}_{pos2}_{awgchan}")
 
         ##########
         # STEP 2:
         # Make all subsequence .sml files
 
-        log.debug(f'Waveforms done: {wfmx_filenames}')
+        log.debug(f"Waveforms done: {wfmx_filenames}")
 
         subseqsml_files: list[str] = []
         subseqsml_filenames: list[str] = []
 
         for pos1 in seq.keys():
-            if seq[pos1]['type'] == 'subsequence':
-
+            if seq[pos1]["type"] == "subsequence":
                 ss_wfm_names: list[list[str]] = []
 
                 # we need to "flatten" all the individual dicts of element
@@ -1036,36 +1125,38 @@ class AWG70000A(VisaInstrument):
                 # and we must also provide default values if nothing
                 # is specified
                 seqings: list[dict[str, int]] = []
-                for pos2 in (seq[pos1]['content'].keys()):
-                    pos_seqs = seq[pos1]['content'][pos2]['sequencing']
-                    pos_seqs['twait'] = pos_seqs.get('twait', 0)
-                    pos_seqs['nrep'] = pos_seqs.get('nrep', 1)
-                    pos_seqs['jump_input'] = pos_seqs.get('jump_input', 0)
-                    pos_seqs['jump_target'] = pos_seqs.get('jump_target', 0)
-                    pos_seqs['goto'] = pos_seqs.get('goto', 0)
+                for pos2 in seq[pos1]["content"].keys():
+                    pos_seqs = seq[pos1]["content"][pos2]["sequencing"]
+                    pos_seqs["twait"] = pos_seqs.get("twait", 0)
+                    pos_seqs["nrep"] = pos_seqs.get("nrep", 1)
+                    pos_seqs["jump_input"] = pos_seqs.get("jump_input", 0)
+                    pos_seqs["jump_target"] = pos_seqs.get("jump_target", 0)
+                    pos_seqs["goto"] = pos_seqs.get("goto", 0)
                     seqings.append(pos_seqs)
 
-                    ss_wfm_names.append([n for n in wfmx_filenames
-                                         if f'wfm_{pos1}_{pos2}' in n])
+                    ss_wfm_names.append(
+                        [n for n in wfmx_filenames if f"wfm_{pos1}_{pos2}" in n]
+                    )
 
-                seqing = {k: [d[k] for d in seqings]
-                          for k in seqings[0].keys()}
+                seqing = {k: [d[k] for d in seqings] for k in seqings[0].keys()}
 
-                subseqname = f'subsequence_{pos1}'
+                subseqname = f"subsequence_{pos1}"
 
-                log.debug(f'Subsequence waveform names: {ss_wfm_names}')
+                log.debug(f"Subsequence waveform names: {ss_wfm_names}")
 
-                subseqsml = AWG70000A._makeSMLFile(trig_waits=seqing['twait'],
-                                                   nreps=seqing['nrep'],
-                                                   event_jumps=seqing['jump_input'],
-                                                   event_jump_to=seqing['jump_target'],
-                                                   go_to=seqing['goto'],
-                                                   elem_names=ss_wfm_names,
-                                                   seqname=subseqname,
-                                                   chans=len(channel_mapping))
+                subseqsml = TektronixAWG70000Base._makeSMLFile(
+                    trig_waits=seqing["twait"],
+                    nreps=seqing["nrep"],
+                    event_jumps=seqing["jump_input"],
+                    event_jump_to=seqing["jump_target"],
+                    go_to=seqing["goto"],
+                    elem_names=ss_wfm_names,
+                    seqname=subseqname,
+                    chans=len(channel_mapping),
+                )
 
                 subseqsml_files.append(subseqsml)
-                subseqsml_filenames.append(f'{subseqname}')
+                subseqsml_filenames.append(f"{subseqname}")
 
         ##########
         # STEP 3:
@@ -1075,55 +1166,57 @@ class AWG70000A(VisaInstrument):
         seqings = []
         subseq_positions: list[int] = []
         for pos1 in seq.keys():
-            pos_seqs = seq[pos1]['sequencing']
+            pos_seqs = seq[pos1]["sequencing"]
 
-            pos_seqs['twait'] = pos_seqs.get('twait', 0)
-            pos_seqs['nrep'] = pos_seqs.get('nrep', 1)
-            pos_seqs['jump_input'] = pos_seqs.get('jump_input', 0)
-            pos_seqs['jump_target'] = pos_seqs.get('jump_target', 0)
-            pos_seqs['goto'] = pos_seqs.get('goto', 0)
+            pos_seqs["twait"] = pos_seqs.get("twait", 0)
+            pos_seqs["nrep"] = pos_seqs.get("nrep", 1)
+            pos_seqs["jump_input"] = pos_seqs.get("jump_input", 0)
+            pos_seqs["jump_target"] = pos_seqs.get("jump_target", 0)
+            pos_seqs["goto"] = pos_seqs.get("goto", 0)
             seqings.append(pos_seqs)
-            if seq[pos1]['type'] == 'subsequence':
+            if seq[pos1]["type"] == "subsequence":
                 subseq_positions.append(pos1)
-                asset_names.append([sn for sn in subseqsml_filenames
-                                    if f'_{pos1}' in sn])
+                asset_names.append(
+                    [sn for sn in subseqsml_filenames if f"_{pos1}" in sn]
+                )
             else:
-                asset_names.append([wn for wn in wfmx_filenames
-                                    if f'wfm_{pos1}' in wn])
+                asset_names.append([wn for wn in wfmx_filenames if f"wfm_{pos1}" in wn])
         seqing = {k: [d[k] for d in seqings] for k in seqings[0].keys()}
 
-        log.debug(f'Assets for SML file: {asset_names}')
+        log.debug(f"Assets for SML file: {asset_names}")
 
         mainseqname = seqname
-        mainseqsml = AWG70000A._makeSMLFile(trig_waits=seqing['twait'],
-                                            nreps=seqing['nrep'],
-                                            event_jumps=seqing['jump_input'],
-                                            event_jump_to=seqing['jump_target'],
-                                            go_to=seqing['goto'],
-                                            elem_names=asset_names,
-                                            seqname=mainseqname,
-                                            chans=len(channel_mapping),
-                                            subseq_positions=subseq_positions)
+        mainseqsml = TektronixAWG70000Base._makeSMLFile(
+            trig_waits=seqing["twait"],
+            nreps=seqing["nrep"],
+            event_jumps=seqing["jump_input"],
+            event_jump_to=seqing["jump_target"],
+            go_to=seqing["goto"],
+            elem_names=asset_names,
+            seqname=mainseqname,
+            chans=len(channel_mapping),
+            subseq_positions=subseq_positions,
+        )
 
         ##########
         # STEP 4:
         # Build the .seqx file
 
-        user_file = b''
-        setup_file = AWG70000A._makeSetupFile(mainseqname)
+        user_file = b""
+        setup_file = TektronixAWG70000Base._makeSetupFile(mainseqname)
 
         buffer = io.BytesIO()
 
-        zipfile = zf.ZipFile(buffer, mode='a')
+        zipfile = zf.ZipFile(buffer, mode="a")
         for ssn, ssf in zip(subseqsml_filenames, subseqsml_files):
-            zipfile.writestr(f'Sequences/{ssn}.sml', ssf)
-        zipfile.writestr(f'Sequences/{mainseqname}.sml', mainseqsml)
+            zipfile.writestr(f"Sequences/{ssn}.sml", ssf)
+        zipfile.writestr(f"Sequences/{mainseqname}.sml", mainseqsml)
 
-        for (name, wfile) in zip(wfmx_filenames, wfmx_files):
-            zipfile.writestr(f'Waveforms/{name}.wfmx', wfile)
+        for name, wfile in zip(wfmx_filenames, wfmx_files):
+            zipfile.writestr(f"Waveforms/{name}.wfmx", wfile)
 
-        zipfile.writestr('setup.xml', setup_file)
-        zipfile.writestr('userNotes.txt', user_file)
+        zipfile.writestr("setup.xml", setup_file)
+        zipfile.writestr("userNotes.txt", user_file)
         zipfile.close()
 
         buffer.seek(0)
@@ -1193,41 +1286,51 @@ class AWG70000A(VisaInstrument):
         """
 
         # input sanitising to avoid spaces in filenames
-        seqname = seqname.replace(' ', '_')
+        seqname = seqname.replace(" ", "_")
 
         (chans, elms) = (len(wfms), len(wfms[0]))
-        wfm_names = [[f'wfmch{ch}pos{el}' for ch in range(1, chans+1)]
-                     for el in range(1, elms+1)]
+        wfm_names = [
+            [f"wfmch{ch}pos{el}" for ch in range(1, chans + 1)]
+            for el in range(1, elms + 1)
+        ]
 
         # generate wfmx files for the waveforms
         flat_wfmxs = []
         for amplitude, wfm_lst in zip(amplitudes, wfms):
-            flat_wfmxs += [AWG70000A.makeWFMXFile(wfm, amplitude)
-                           for wfm in wfm_lst]
+            flat_wfmxs += [
+                TektronixAWG70000Base.makeWFMXFile(wfm, amplitude) for wfm in wfm_lst
+            ]
 
         # This unfortunately assumes no subsequences
-        flat_wfm_names = list(np.reshape(np.array(wfm_names).transpose(),
-                                         (chans*elms,)))
+        flat_wfm_names = list(
+            np.reshape(np.array(wfm_names).transpose(), (chans * elms,))
+        )
 
-        sml_file = AWG70000A._makeSMLFile(trig_waits, nreps,
-                                          event_jumps, event_jump_to,
-                                          go_to, wfm_names,
-                                          seqname,
-                                          chans, flags=flags)
+        sml_file = TektronixAWG70000Base._makeSMLFile(
+            trig_waits,
+            nreps,
+            event_jumps,
+            event_jump_to,
+            go_to,
+            wfm_names,
+            seqname,
+            chans,
+            flags=flags,
+        )
 
-        user_file = b''
-        setup_file = AWG70000A._makeSetupFile(seqname)
+        user_file = b""
+        setup_file = TektronixAWG70000Base._makeSetupFile(seqname)
 
         buffer = io.BytesIO()
 
-        zipfile = zf.ZipFile(buffer, mode='a')
-        zipfile.writestr(f'Sequences/{seqname}.sml', sml_file)
+        zipfile = zf.ZipFile(buffer, mode="a")
+        zipfile.writestr(f"Sequences/{seqname}.sml", sml_file)
 
-        for (name, wfile) in zip(flat_wfm_names, flat_wfmxs):
-            zipfile.writestr(f'Waveforms/{name}.wfmx', wfile)
+        for name, wfile in zip(flat_wfm_names, flat_wfmxs):
+            zipfile.writestr(f"Waveforms/{name}.wfmx", wfile)
 
-        zipfile.writestr('setup.xml', setup_file)
-        zipfile.writestr('userNotes.txt', user_file)
+        zipfile.writestr("setup.xml", setup_file)
+        zipfile.writestr("userNotes.txt", user_file)
         zipfile.close()
 
         buffer.seek(0)
@@ -1247,23 +1350,23 @@ class AWG70000A(VisaInstrument):
         Returns:
             The setup file as a string
         """
-        head = ET.Element('RSAPersist')
-        head.set('version', '0.1')
-        temp_elem = ET.SubElement(head, 'Application')
-        temp_elem.text = 'Pascal'
-        temp_elem = ET.SubElement(head, 'MainSequence')
+        head = ET.Element("RSAPersist")
+        head.set("version", "0.1")
+        temp_elem = ET.SubElement(head, "Application")
+        temp_elem.text = "Pascal"
+        temp_elem = ET.SubElement(head, "MainSequence")
         temp_elem.text = sequence
-        prodspec = ET.SubElement(head, 'ProductSpecific')
-        prodspec.set('name', 'AWG70002A')
-        temp_elem = ET.SubElement(prodspec, 'SerialNumber')
-        temp_elem.text = 'B020397'
-        temp_elem = ET.SubElement(prodspec, 'SoftwareVersion')
-        temp_elem.text = '5.3.0128.0'
-        temp_elem = ET.SubElement(prodspec, 'CreatorProperties')
-        temp_elem.set('name', '')
+        prodspec = ET.SubElement(head, "ProductSpecific")
+        prodspec.set("name", "AWG70002A")
+        temp_elem = ET.SubElement(prodspec, "SerialNumber")
+        temp_elem.text = "B020397"
+        temp_elem = ET.SubElement(prodspec, "SoftwareVersion")
+        temp_elem.text = "5.3.0128.0"
+        temp_elem = ET.SubElement(prodspec, "CreatorProperties")
+        temp_elem.set("name", "")
 
-        xmlstr = ET.tostring(head, encoding='unicode')
-        xmlstr = xmlstr.replace('><', '>\r\n<')
+        xmlstr = ET.tostring(head, encoding="unicode")
+        xmlstr = xmlstr.replace("><", ">\r\n<")
 
         return xmlstr
 
@@ -1318,21 +1421,23 @@ class AWG70000A(VisaInstrument):
 
         offsetdigits = 9
 
-        waitinputs = {0: 'None', 1: 'TrigA', 2: 'TrigB', 3: 'Internal'}
-        eventinputs = {0: 'None', 1: 'TrigA', 2: 'TrigB', 3: 'Internal'}
-        flaginputs = {0:'NoChange', 1:'High', 2:'Low', 3:'Toggle', 4:'Pulse'}
+        waitinputs = {0: "None", 1: "TrigA", 2: "TrigB", 3: "Internal"}
+        eventinputs = {0: "None", 1: "TrigA", 2: "TrigB", 3: "Internal"}
+        flaginputs = {0: "NoChange", 1: "High", 2: "Low", 3: "Toggle", 4: "Pulse"}
 
         inputlsts = [trig_waits, nreps, event_jump_to, go_to]
         lstlens = [len(lst) for lst in inputlsts]
         if lstlens.count(lstlens[0]) != len(lstlens):
-            raise ValueError('All input lists must have the same length!')
+            raise ValueError("All input lists must have the same length!")
 
         if lstlens[0] == 0:
-            raise ValueError('Received empty sequence option lengths!')
+            raise ValueError("Received empty sequence option lengths!")
 
         if lstlens[0] != len(elem_names):
-            raise ValueError('Mismatch between number of waveforms and'
-                             ' number of sequencing steps.')
+            raise ValueError(
+                "Mismatch between number of waveforms and"
+                " number of sequencing steps."
+            )
 
         N = lstlens[0]
 
@@ -1341,17 +1446,18 @@ class AWG70000A(VisaInstrument):
         tz_m, _ = divmod(timezone, 60)
         tz_h, tz_m = divmod(tz_m, 60)
         if np.sign(tz_h) == -1:
-            signstr = '-'
+            signstr = "-"
             tz_h *= -1
         else:
-            signstr = '+'
-        timestr = dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
+            signstr = "+"
+        timestr = dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
         timestr += signstr
-        timestr += f'{tz_h:02.0f}:{tz_m:02.0f}'
+        timestr += f"{tz_h:02.0f}:{tz_m:02.0f}"
 
-        datafile = ET.Element('DataFile', attrib={'offset': '0'*offsetdigits,
-                                                  'version': '0.1'})
-        dsc = ET.SubElement(datafile, 'DataSetsCollection')
+        datafile = ET.Element(
+            "DataFile", attrib={"offset": "0" * offsetdigits, "version": "0.1"}
+        )
+        dsc = ET.SubElement(datafile, "DataSetsCollection")
         dsc.set("xmlns", "http://www.tektronix.com")
         dsc.set("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
         dsc.set(
@@ -1367,103 +1473,111 @@ class AWG70000A(VisaInstrument):
         datasets.set("xmlns", "http://www.tektronix.com")
 
         # Description of the data
-        datadesc = ET.SubElement(datasets, 'DataDescription')
-        temp_elem = ET.SubElement(datadesc, 'SequenceName')
+        datadesc = ET.SubElement(datasets, "DataDescription")
+        temp_elem = ET.SubElement(datadesc, "SequenceName")
         temp_elem.text = seqname
-        temp_elem = ET.SubElement(datadesc, 'Timestamp')
+        temp_elem = ET.SubElement(datadesc, "Timestamp")
         temp_elem.text = timestr
-        temp_elem = ET.SubElement(datadesc, 'JumpTiming')
-        temp_elem.text = 'JumpImmed'  # TODO: What does this control?
-        temp_elem = ET.SubElement(datadesc, 'RecSampleRate')
-        temp_elem.text = 'NaN'
-        temp_elem = ET.SubElement(datadesc, 'RepeatFlag')
-        temp_elem.text = 'false'
-        temp_elem = ET.SubElement(datadesc, 'PatternJumpTable')
-        temp_elem.set('Enabled', 'false')
-        temp_elem.set('Count', '65536')
-        steps = ET.SubElement(datadesc, 'Steps')
-        steps.set('StepCount', f'{N:d}')
-        steps.set('TrackCount', f'{chans:d}')
+        temp_elem = ET.SubElement(datadesc, "JumpTiming")
+        temp_elem.text = "JumpImmed"  # TODO: What does this control?
+        temp_elem = ET.SubElement(datadesc, "RecSampleRate")
+        temp_elem.text = "NaN"
+        temp_elem = ET.SubElement(datadesc, "RepeatFlag")
+        temp_elem.text = "false"
+        temp_elem = ET.SubElement(datadesc, "PatternJumpTable")
+        temp_elem.set("Enabled", "false")
+        temp_elem.set("Count", "65536")
+        steps = ET.SubElement(datadesc, "Steps")
+        steps.set("StepCount", f"{N:d}")
+        steps.set("TrackCount", f"{chans:d}")
 
-        for n in range(1, N+1):
-            step = ET.SubElement(steps, 'Step')
-            temp_elem = ET.SubElement(step, 'StepNumber')
-            temp_elem.text = f'{n:d}'
+        for n in range(1, N + 1):
+            step = ET.SubElement(steps, "Step")
+            temp_elem = ET.SubElement(step, "StepNumber")
+            temp_elem.text = f"{n:d}"
             # repetitions
-            rep = ET.SubElement(step, 'Repeat')
-            repcount = ET.SubElement(step, 'RepeatCount')
-            if nreps[n-1] == 0:
-                rep.text = 'Infinite'
-                repcount.text = '1'
-            elif nreps[n-1] == 1:
-                rep.text = 'Once'
-                repcount.text = '1'
+            rep = ET.SubElement(step, "Repeat")
+            repcount = ET.SubElement(step, "RepeatCount")
+            if nreps[n - 1] == 0:
+                rep.text = "Infinite"
+                repcount.text = "1"
+            elif nreps[n - 1] == 1:
+                rep.text = "Once"
+                repcount.text = "1"
             else:
                 rep.text = "RepeatCount"
                 repcount.text = f"{nreps[n-1]:d}"
             # trigger wait
-            temp_elem = ET.SubElement(step, 'WaitInput')
-            temp_elem.text = waitinputs[trig_waits[n-1]]
+            temp_elem = ET.SubElement(step, "WaitInput")
+            temp_elem.text = waitinputs[trig_waits[n - 1]]
             # event jump
-            temp_elem = ET.SubElement(step, 'EventJumpInput')
-            temp_elem.text = eventinputs[event_jumps[n-1]]
-            jumpto = ET.SubElement(step, 'EventJumpTo')
-            jumpstep = ET.SubElement(step, 'EventJumpToStep')
-            if event_jump_to[n-1] == 0:
-                jumpto.text = 'Next'
-                jumpstep.text = '1'
+            temp_elem = ET.SubElement(step, "EventJumpInput")
+            temp_elem.text = eventinputs[event_jumps[n - 1]]
+            jumpto = ET.SubElement(step, "EventJumpTo")
+            jumpstep = ET.SubElement(step, "EventJumpToStep")
+            if event_jump_to[n - 1] == 0:
+                jumpto.text = "Next"
+                jumpstep.text = "1"
             else:
                 jumpto.text = "StepIndex"
                 jumpstep.text = f"{event_jump_to[n-1]:d}"
             # Go to
-            goto = ET.SubElement(step, 'GoTo')
-            gotostep = ET.SubElement(step, 'GoToStep')
-            if go_to[n-1] == 0:
-                goto.text = 'Next'
-                gotostep.text = '1'
+            goto = ET.SubElement(step, "GoTo")
+            gotostep = ET.SubElement(step, "GoToStep")
+            if go_to[n - 1] == 0:
+                goto.text = "Next"
+                gotostep.text = "1"
             else:
                 goto.text = "StepIndex"
                 gotostep.text = f"{go_to[n-1]:d}"
 
-            assets = ET.SubElement(step, 'Assets')
-            for assetname in elem_names[n-1]:
-                asset = ET.SubElement(assets, 'Asset')
-                temp_elem = ET.SubElement(asset, 'AssetName')
+            assets = ET.SubElement(step, "Assets")
+            for assetname in elem_names[n - 1]:
+                asset = ET.SubElement(assets, "Asset")
+                temp_elem = ET.SubElement(asset, "AssetName")
                 temp_elem.text = assetname
-                temp_elem = ET.SubElement(asset, 'AssetType')
+                temp_elem = ET.SubElement(asset, "AssetType")
                 if n in subseq_positions:
-                    temp_elem.text = 'Sequence'
+                    temp_elem.text = "Sequence"
                 else:
-                    temp_elem.text = 'Waveform'
+                    temp_elem.text = "Waveform"
 
             # convert flag settings to strings
-            flags_list = ET.SubElement(step, 'Flags')
+            flags_list = ET.SubElement(step, "Flags")
             for chan in range(chans):
-                flagset = ET.SubElement(flags_list, 'FlagSet')
-                for flgind, flg in enumerate(['A', 'B', 'C', 'D']):
-                    temp_elem = ET.SubElement(flagset, 'Flag')
-                    temp_elem.set('name', flg)
+                flagset = ET.SubElement(flags_list, "FlagSet")
+                for flgind, flg in enumerate(["A", "B", "C", "D"]):
+                    temp_elem = ET.SubElement(flagset, "Flag")
+                    temp_elem.set("name", flg)
                     if flags is None:
                         # no flags were passed to the function
-                        temp_elem.text = 'NoChange'
+                        temp_elem.text = "NoChange"
                     else:
-                        temp_elem.text = flaginputs[flags[chan][n-1][flgind]]
+                        temp_elem.text = flaginputs[flags[chan][n - 1][flgind]]
 
-        temp_elem = ET.SubElement(datasets, 'ProductSpecific')
-        temp_elem.set('name', '')
-        temp_elem = ET.SubElement(datafile, 'Setup')
+        temp_elem = ET.SubElement(datasets, "ProductSpecific")
+        temp_elem.set("name", "")
+        temp_elem = ET.SubElement(datafile, "Setup")
 
         # the tostring() call takes roughly 75% of the total
         # time spent in this function. Can we speed up things?
         # perhaps we should use lxml?
-        xmlstr = ET.tostring(datafile, encoding='unicode')
-        xmlstr = xmlstr.replace('><', '>\r\n<')
+        xmlstr = ET.tostring(datafile, encoding="unicode")
+        xmlstr = xmlstr.replace("><", ">\r\n<")
 
         # As the final step, count the length of the header and write this
         # in the DataFile tag attribute 'offset'
 
-        xmlstr = xmlstr.replace('0'*offsetdigits,
-                                '{num:0{pad}d}'.format(num=len(xmlstr),
-                                                       pad=offsetdigits))
+        xmlstr = xmlstr.replace(
+            "0" * offsetdigits,
+            "{num:0{pad}d}".format(num=len(xmlstr), pad=offsetdigits),
+        )
 
         return xmlstr
+
+
+@deprecated(
+    "Base class renamed TektronixAWG70000Base", category=QCoDeSDeprecationWarning
+)
+class AWG70000A(TektronixAWG70000Base):
+    pass

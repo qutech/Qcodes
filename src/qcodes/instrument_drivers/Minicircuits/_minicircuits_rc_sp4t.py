@@ -1,31 +1,49 @@
 import math
-from typing import Optional
+from typing import TYPE_CHECKING
 
 from qcodes import validators as vals
-from qcodes.instrument import ChannelList, InstrumentChannel, IPInstrument
+from qcodes.instrument import (
+    ChannelList,
+    InstrumentBaseKWArgs,
+    InstrumentChannel,
+    IPInstrument,
+)
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+    from qcodes.parameters import Parameter
 
 
 class MiniCircuitsRCSP4TChannel(InstrumentChannel):
-    def __init__(self, parent: IPInstrument, name: str, channel_letter: str):
+    def __init__(
+        self,
+        parent: IPInstrument,
+        name: str,
+        channel_letter: str,
+        **kwargs: "Unpack[InstrumentBaseKWArgs]",
+    ):
         """
         Args:
             parent: The instrument the channel is a part of
             name: the name of the channel
             channel_letter: channel letter ['a', 'b'])
+            **kwargs: Forwarded to base class.
         """
 
-        super().__init__(parent, name)
+        super().__init__(parent, name, **kwargs)
         self.channel_letter = channel_letter.upper()
         chanlist = ["a", "b"]
         self.channel_number = chanlist.index(channel_letter)
 
-        self.add_parameter(
+        self.switch: Parameter = self.add_parameter(
             "switch",
             label="switch",
             set_cmd=self._set_switch,
             get_cmd=self._get_switch,
             vals=vals.Ints(0, 4),
         )
+        """Parameter switch"""
 
     def _set_switch(self, switch: int) -> None:
         if len(self._parent.channels) > 1:
@@ -66,10 +84,17 @@ class MiniCircuitsRCSP4T(IPInstrument):
         name: the name of the instrument
         address: ip address ie "10.0.0.1"
         port: port to connect to default Telnet:23
+        **kwargs: Forwarded to the baseclass
     """
 
-    def __init__(self, name: str, address: str, port: int = 23):
-        super().__init__(name, address, port)
+    def __init__(
+        self,
+        name: str,
+        address: str,
+        port: int = 23,
+        **kwargs: "Unpack[InstrumentBaseKWArgs]",
+    ):
+        super().__init__(name, address, port, **kwargs)
         self.flush_connection()
 
         channels = ChannelList(
@@ -93,12 +118,12 @@ class MiniCircuitsRCSP4T(IPInstrument):
         ret = ret.strip()
         return ret
 
-    def get_idn(self) -> dict[str, Optional[str]]:
+    def get_idn(self) -> dict[str, str | None]:
         fw = self.ask("FIRMWARE?")
         MN = self.ask("MN?")
         SN = self.ask("SN?")
 
-        id_dict: dict[str, Optional[str]] = {
+        id_dict: dict[str, str | None] = {
             "firmware": fw,
             "model": MN[3:],
             "serial": SN[3:],

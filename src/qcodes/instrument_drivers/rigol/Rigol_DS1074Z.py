@@ -1,10 +1,21 @@
-from typing import Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from qcodes.instrument import ChannelList, InstrumentChannel, VisaInstrument
+from qcodes.instrument import (
+    ChannelList,
+    InstrumentBaseKWArgs,
+    InstrumentChannel,
+    VisaInstrument,
+    VisaInstrumentKWArgs,
+)
 from qcodes.parameters import ParameterWithSetpoints
 from qcodes.validators import Arrays, Enum, Numbers
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+    from qcodes.parameters import Parameter
 
 
 class RigolDS1074ZChannel(InstrumentChannel):
@@ -16,18 +27,25 @@ class RigolDS1074ZChannel(InstrumentChannel):
     can be obtained using 'trace' parameter.
     """
 
-    def __init__(self, parent: "RigolDS1074Z", name: str, channel: int):
-        super().__init__(parent, name)
+    def __init__(
+        self,
+        parent: "RigolDS1074Z",
+        name: str,
+        channel: int,
+        **kwargs: "Unpack[InstrumentBaseKWArgs]",
+    ):
+        super().__init__(parent, name, **kwargs)
         self.channel = channel
 
-        self.add_parameter(
+        self.vertical_scale: Parameter = self.add_parameter(
             "vertical_scale",
             get_cmd=f":CHANnel{channel}:SCALe?",
             set_cmd=":CHANnel{}:SCALe {}".format(channel, "{}"),
             get_parser=float,
         )
+        """Parameter vertical_scale"""
 
-        self.add_parameter(
+        self.trace: ParameterWithSetpoints = self.add_parameter(
             "trace",
             get_cmd=self._get_full_trace,
             vals=Arrays(shape=(self.parent.waveform_npoints,)),
@@ -36,6 +54,7 @@ class RigolDS1074ZChannel(InstrumentChannel):
             parameter_class=ParameterWithSetpoints,
             snapshot_value=False,
         )
+        """Parameter trace"""
 
     def _get_full_trace(self) -> np.ndarray:
         y_ori = self.root_instrument.waveform_yorigin()
@@ -71,53 +90,58 @@ class RigolDS1074Z(VisaInstrument):
         terminator: terminator for SCPI commands.
     """
 
+    default_terminator = "\n"
+    default_timeout = 5
+
     def __init__(
         self,
         name: str,
         address: str,
-        terminator: str = "\n",
-        timeout: float = 5,
-        **kwargs: Any,
+        **kwargs: "Unpack[VisaInstrumentKWArgs]",
     ):
-        super().__init__(
-            name, address, terminator=terminator, timeout=timeout, **kwargs
-        )
+        super().__init__(name, address, **kwargs)
 
-        self.add_parameter(
+        self.waveform_xorigin: Parameter = self.add_parameter(
             "waveform_xorigin", get_cmd="WAVeform:XORigin?", unit="s", get_parser=float
         )
+        """Parameter waveform_xorigin"""
 
-        self.add_parameter(
+        self.waveform_xincrem: Parameter = self.add_parameter(
             "waveform_xincrem",
             get_cmd=":WAVeform:XINCrement?",
             unit="s",
             get_parser=float,
         )
+        """Parameter waveform_xincrem"""
 
-        self.add_parameter(
+        self.waveform_npoints: Parameter = self.add_parameter(
             "waveform_npoints",
             get_cmd="WAV:POIN?",
             set_cmd="WAV:POIN {}",
             unit="s",
             get_parser=int,
         )
+        """Parameter waveform_npoints"""
 
-        self.add_parameter(
+        self.waveform_yorigin: Parameter = self.add_parameter(
             "waveform_yorigin", get_cmd="WAVeform:YORigin?", unit="V", get_parser=float
         )
+        """Parameter waveform_yorigin"""
 
-        self.add_parameter(
+        self.waveform_yincrem: Parameter = self.add_parameter(
             "waveform_yincrem",
             get_cmd=":WAVeform:YINCrement?",
             unit="V",
             get_parser=float,
         )
+        """Parameter waveform_yincrem"""
 
-        self.add_parameter(
+        self.waveform_yref: Parameter = self.add_parameter(
             "waveform_yref", get_cmd=":WAVeform:YREFerence?", unit="V", get_parser=float
         )
+        """Parameter waveform_yref"""
 
-        self.add_parameter(
+        self.trigger_mode: Parameter = self.add_parameter(
             "trigger_mode",
             get_cmd=":TRIGger:MODE?",
             set_cmd=":TRIGger:MODE {}",
@@ -125,17 +149,19 @@ class RigolDS1074Z(VisaInstrument):
             vals=Enum("edge", "pulse", "video", "pattern"),
             get_parser=str,
         )
+        """Parameter trigger_mode"""
 
         # trigger source
-        self.add_parameter(
+        self.trigger_level: Parameter = self.add_parameter(
             "trigger_level",
             unit="V",
             get_cmd=self._get_trigger_level,
             set_cmd=self._set_trigger_level,
             vals=Numbers(),
         )
+        """Parameter trigger_level"""
 
-        self.add_parameter(
+        self.trigger_edge_source: Parameter = self.add_parameter(
             "trigger_edge_source",
             label="Source channel for the edge trigger",
             get_cmd=":TRIGger:EDGE:SOURce?",
@@ -147,16 +173,18 @@ class RigolDS1074Z(VisaInstrument):
                 "ch4": "CHAN4",
             },
         )
+        """Parameter trigger_edge_source"""
 
-        self.add_parameter(
+        self.trigger_edge_slope: Parameter = self.add_parameter(
             "trigger_edge_slope",
             label="Slope of the edge trigger",
             get_cmd=":TRIGger:EDGE:SLOPe?",
             set_cmd=":TRIGger:EDGE:SLOPe {}",
             vals=Enum("positive", "negative", "neither"),
         )
+        """Parameter trigger_edge_slope"""
 
-        self.add_parameter(
+        self.data_source: Parameter = self.add_parameter(
             "data_source",
             label="Waveform Data source",
             get_cmd=":WAVeform:SOURce?",
@@ -168,8 +196,9 @@ class RigolDS1074Z(VisaInstrument):
                 "ch4": "CHAN4",
             },
         )
+        """Parameter data_source"""
 
-        self.add_parameter(
+        self.time_axis: Parameter = self.add_parameter(
             "time_axis",
             unit="s",
             label="Time",
@@ -178,6 +207,7 @@ class RigolDS1074Z(VisaInstrument):
             vals=Arrays(shape=(self.waveform_npoints,)),
             snapshot_value=False,
         )
+        """Parameter time_axis"""
 
         channels = ChannelList(
             self, "channels", RigolDS1074ZChannel, snapshotable=False

@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 def test_type() -> None:
     list_validator: Lists[Any] = Lists()
-    v1 = ['a', 'b', 5]
+    v1 = ["a", "b", 5]
     list_validator.validate(v1)
 
     v2 = 234
@@ -20,7 +20,7 @@ def test_type() -> None:
 
 def test_elt_vals() -> None:
     list_validator = Lists(Ints(max_value=10))
-    v1: list[Union[int, np.integer, bool]] = [0, 1, 5]
+    v1: list[int | np.integer | bool] = [0, 1, 5]
     list_validator.validate(v1)
 
     v2 = [0, 1, 11]

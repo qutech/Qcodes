@@ -1,14 +1,14 @@
 import numpy as np
 import pytest
 
-from qcodes.instrument_drivers.Keysight.Keysight_34465A_submodules import (
-    Keysight_34465A,
+from qcodes.instrument_drivers.Keysight import (
+    Keysight34465A,
 )
 
 
-@pytest.fixture(scope='function')
+@pytest.fixture(scope="function")
 def driver():
-    keysight_sim = Keysight_34465A(
+    keysight_sim = Keysight34465A(
         "keysight_34465A_sim",
         address="GPIB::1::INSTR",
         pyvisa_sim_file="Keysight_34465A.yaml",
@@ -17,12 +17,12 @@ def driver():
     try:
         yield keysight_sim
     finally:
-        Keysight_34465A.close_all()
+        Keysight34465A.close_all()
 
 
-@pytest.fixture(scope='function')
+@pytest.fixture(scope="function")
 def driver_with_read_and_fetch_mocked(val_volt):
-    keysight_sim = Keysight_34465A(
+    keysight_sim = Keysight34465A(
         "keysight_34465A_sim",
         address="GPIB::1::INSTR",
         pyvisa_sim_file="Keysight_34465A.yaml",
@@ -34,19 +34,20 @@ def driver_with_read_and_fetch_mocked(val_volt):
                 return read_value
             else:
                 return original_ask(cmd)
+
         return ask_with_read_mock
 
     keysight_sim.ask = get_ask_with_read_mock(keysight_sim.ask, val_volt)
     try:
         yield keysight_sim
     finally:
-        Keysight_34465A.close_all()
+        Keysight34465A.close_all()
 
 
 def test_init(driver) -> None:
     idn = driver.IDN()
-    assert idn['vendor'] == 'Keysight'
-    assert idn['model'] == '34465A'
+    assert idn["vendor"] == "Keysight"
+    assert idn["model"] == "34465A"
 
 
 def test_has_dig_option(driver) -> None:
@@ -68,29 +69,32 @@ def test_NPLC(driver) -> None:
     driver.NPLC.set(10.0)
 
 
-@pytest.mark.parametrize("val_volt", ['100.0'])
+@pytest.mark.parametrize("val_volt", ["100.0"])
 def test_get_voltage(driver_with_read_and_fetch_mocked, val_volt) -> None:
     voltage = driver_with_read_and_fetch_mocked.volt.get()
     assert voltage == 100.0
 
 
-@pytest.mark.parametrize("val_volt", ['9.9e37'])
+@pytest.mark.parametrize("val_volt", ["9.9e37"])
 def test_get_voltage_plus_inf(driver_with_read_and_fetch_mocked, val_volt) -> None:
     voltage = driver_with_read_and_fetch_mocked.volt.get()
     assert voltage == np.inf
 
 
-@pytest.mark.parametrize("val_volt", ['-9.9e37'])
+@pytest.mark.parametrize("val_volt", ["-9.9e37"])
 def test_get_voltage_minus_inf(driver_with_read_and_fetch_mocked, val_volt) -> None:
     voltage = driver_with_read_and_fetch_mocked.volt.get()
     assert voltage == -np.inf
 
 
-@pytest.mark.xfail(run=False, reason="If the test is run, it will pass "
-                                     "but all tests after this one will "
-                                     "fail. The problem is coming from "
-                                     "timetrace().")
-@pytest.mark.parametrize("val_volt", ['10, 9.9e37, -9.9e37'])
+@pytest.mark.xfail(
+    run=False,
+    reason="If the test is run, it will pass "
+    "but all tests after this one will "
+    "fail. The problem is coming from "
+    "timetrace().",
+)
+@pytest.mark.parametrize("val_volt", ["10, 9.9e37, -9.9e37"])
 def test_get_timetrace(driver_with_read_and_fetch_mocked, val_volt) -> None:
     driver_with_read_and_fetch_mocked.timetrace_npts(3)
     assert driver_with_read_and_fetch_mocked.timetrace_npts() == 3
@@ -100,13 +104,13 @@ def test_get_timetrace(driver_with_read_and_fetch_mocked, val_volt) -> None:
 
 def test_set_get_autorange(driver) -> None:
     ar = driver.autorange.get()
-    assert ar == 'OFF'
-    driver.autorange.set('ON')
+    assert ar == "OFF"
+    driver.autorange.set("ON")
     ar = driver.autorange.get()
-    assert ar == 'ON'
-    driver.autorange.set('OFF')
+    assert ar == "ON"
+    driver.autorange.set("OFF")
     ar = driver.autorange.get()
-    assert ar == 'OFF'
+    assert ar == "OFF"
 
 
 def test_increase_decrease_range(driver) -> None:
@@ -125,7 +129,6 @@ def test_increase_decrease_range(driver) -> None:
 
 
 def test_display_text(driver) -> None:
-
     original_text = driver.display.text()
     assert original_text == ""
 

@@ -17,6 +17,7 @@ list of parameters to monitor:
 
 ``monitor = qcodes.Monitor(param1, param2, param3, ...)``
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,7 +32,7 @@ from collections import defaultdict
 from contextlib import suppress
 from importlib.resources import as_file, files
 from threading import Event, Thread
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 import websockets
 import websockets.exceptions
@@ -40,7 +41,7 @@ import websockets.server
 from qcodes.parameters import Parameter
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Sequence
+    from collections.abc import Awaitable, Callable, Sequence
 
 WEBSOCKET_PORT = 5678
 SERVER_PORT = 3000
@@ -93,14 +94,12 @@ def _get_metadata(
 
 def _handler(
     parameters: Sequence[Parameter], interval: float, use_root_instrument: bool = True
-) -> Callable[[websockets.server.WebSocketServerProtocol, str], Awaitable[None]]:
+) -> Callable[[websockets.server.WebSocketServerProtocol], Awaitable[None]]:
     """
     Return the websockets server handler.
     """
 
-    async def server_func(
-        websocket: websockets.server.WebSocketServerProtocol, _: str
-    ) -> None:
+    async def server_func(websocket: websockets.server.WebSocketServerProtocol) -> None:
         """
         Create a websockets handler that sends parameter values to a listener
         every "interval" seconds.
@@ -120,8 +119,7 @@ def _handler(
                 # Wait for interval seconds and then send again
                 await asyncio.sleep(interval)
             except (CancelledError, websockets.exceptions.ConnectionClosed):
-                log.debug("Got CancelledError or ConnectionClosed",
-                          exc_info=True)
+                log.debug("Got CancelledError or ConnectionClosed", exc_info=True)
                 break
         log.debug("Closing websockets connection")
 
@@ -155,8 +153,9 @@ class Monitor(Thread):
         # Check that all values are valid parameters
         for parameter in parameters:
             if not isinstance(parameter, Parameter):
-                raise TypeError(f"We can only monitor QCodes "
-                                f"Parameters, not {type(parameter)}")
+                raise TypeError(
+                    f"We can only monitor QCodes Parameters, not {type(parameter)}"
+                )
 
         self.loop: asyncio.AbstractEventLoop | None = None
         self._stop_loop_future: asyncio.Future | None = None
@@ -193,10 +192,8 @@ class Monitor(Thread):
                 self.handler, "127.0.0.1", WEBSOCKET_PORT, close_timeout=1
             ):
                 self.server_is_started.set()
-                try:
-                    await self._stop_loop_future
-                except asyncio.CancelledError:
-                    log.debug("Websocket server thread shutting down")
+                await self._stop_loop_future
+                log.debug("Websocket server thread shutting down")
 
         try:
             asyncio.run(run_loop())
@@ -234,7 +231,7 @@ class Monitor(Thread):
         try:
             if self.loop is not None and self._stop_loop_future is not None:
                 log.debug("Instructing server to stop event loop.")
-                self.loop.call_soon_threadsafe(self._stop_loop_future.cancel)
+                self.loop.call_soon_threadsafe(self._stop_loop_future.set_result, True)
             else:
                 log.debug("No event loop found. Cannot stop event loop.")
         except RuntimeError:

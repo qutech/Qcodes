@@ -1,10 +1,17 @@
-from typing import Any
+from typing import TYPE_CHECKING
 
 from . import N52xx
 
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
 
-class KeysightN5222B(N52xx.PNABase):
-    def __init__(self, name: str, address: str, **kwargs: Any):
+    from qcodes.instrument import VisaInstrumentKWArgs
+
+
+class KeysightN5222B(N52xx.KeysightPNABase):
+    def __init__(
+        self, name: str, address: str, **kwargs: "Unpack[VisaInstrumentKWArgs]"
+    ):
         """Driver for Keysight PNA N5222B."""
         super().__init__(
             name,
@@ -14,7 +21,7 @@ class KeysightN5222B(N52xx.PNABase):
             min_power=-30,
             max_power=13,
             nports=4,
-            **kwargs
+            **kwargs,
         )
 
         attenuators_options = {"217", "219", "220", "417", "419", "420"}

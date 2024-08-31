@@ -1,11 +1,16 @@
 import os
-from typing import Any, Optional
+from typing import TYPE_CHECKING
 
 # QCoDeS imports
 from qcodes.instrument_drivers.Minicircuits.Base_SPDT import (
-    SPDT_Base,
-    SwitchChannelBase,
+    MiniCircuitsSPDTBase,
+    MiniCircuitsSPDTSwitchChannelBase,
 )
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+    from qcodes.instrument import InstrumentBaseKWArgs
 
 try:
     import clr  # pyright: ignore[reportMissingTypeStubs,reportMissingImports]
@@ -17,7 +22,7 @@ except ImportError:
     )
 
 
-class MiniCircuitsUsbSPDTSwitchChannel(SwitchChannelBase):
+class MiniCircuitsUsbSPDTSwitchChannel(MiniCircuitsSPDTSwitchChannelBase):
     def _set_switch(self, switch: int) -> None:
         self._parent.switch.Set_Switch(self.channel_letter, switch - 1)
 
@@ -26,18 +31,7 @@ class MiniCircuitsUsbSPDTSwitchChannel(SwitchChannelBase):
         return int(f"{status:04b}"[-1 - self.channel_number]) + 1
 
 
-class MiniCircuitsUsbSPDT(SPDT_Base):
-    """
-    Mini-Circuits SPDT RF switch
-
-    Args:
-            name: the name of the instrument
-            driver_path: path to the dll
-            serial_number: the serial number of the device
-               (printed on the sticker on the back side, without s/n)
-            kwargs: kwargs to be passed to Instrument class.
-    """
-
+class MiniCircuitsUsbSPDT(MiniCircuitsSPDTBase):
     CHANNEL_CLASS = MiniCircuitsUsbSPDTSwitchChannel
     PATH_TO_DRIVER = r"mcl_RF_Switch_Controller64"
     PATH_TO_DRIVER_45 = r"mcl_RF_Switch_Controller_NET45"
@@ -45,14 +39,20 @@ class MiniCircuitsUsbSPDT(SPDT_Base):
     def __init__(
         self,
         name: str,
-        driver_path: Optional[str] = None,
-        serial_number: Optional[str] = None,
-        **kwargs: Any,
+        driver_path: str | None = None,
+        serial_number: str | None = None,
+        **kwargs: "Unpack[InstrumentBaseKWArgs]",
     ):
-        # we are eventually overwriting this but since it's called
-        # in __getattr__ of `SPDT_Base` it's important that it's
-        # always set to something to avoid infinite recursion
-        self._deprecated_attributes = {}
+        """
+        Mini-Circuits SPDT RF switch
+
+        Args:
+            name: the name of the instrument
+            driver_path: path to the dll
+            serial_number: the serial number of the device
+                (printed on the sticker on the back side, without s/n)
+            kwargs: kwargs to be passed to Instrument class.
+        """
         # import .net exception so we can catch it below
         # we keep this import local so that the module can be imported
         # without a working .net install
@@ -94,7 +94,7 @@ class MiniCircuitsUsbSPDT(SPDT_Base):
         self.connect_message()
         self.add_channels()
 
-    def get_idn(self) -> dict[str, Optional[str]]:
+    def get_idn(self) -> dict[str, str | None]:
         # the arguments in those functions is the serial number or none if
         # there is only one switch.
         fw = self.switch.GetFirmware()

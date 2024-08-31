@@ -1,8 +1,18 @@
-from typing import Any, ClassVar, Optional
+from typing import TYPE_CHECKING, ClassVar
 
 from qcodes import validators as vals
-from qcodes.instrument import ChannelList, Instrument, InstrumentChannel, VisaInstrument
-from qcodes.parameters import create_on_off_val_mapping
+from qcodes.instrument import (
+    ChannelList,
+    Instrument,
+    InstrumentBaseKWArgs,
+    InstrumentChannel,
+    VisaInstrument,
+    VisaInstrumentKWArgs,
+)
+from qcodes.parameters import Parameter, create_on_off_val_mapping
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
 
 
 class NotKnownModel(Exception):
@@ -20,7 +30,11 @@ class AimTTiChannel(InstrumentChannel):
     """
 
     def __init__(
-        self, parent: Instrument, name: str, channel: int, **kwargs: Any
+        self,
+        parent: Instrument,
+        name: str,
+        channel: int,
+        **kwargs: "Unpack[InstrumentBaseKWArgs]",
     ) -> None:
         """
         Args:
@@ -37,7 +51,7 @@ class AimTTiChannel(InstrumentChannel):
         # internally.
         self.set_up_store_slots = [i for i in range(0, 10)]
 
-        self.add_parameter(
+        self.volt: Parameter = self.add_parameter(
             "volt",
             get_cmd=self._get_voltage_value,
             get_parser=float,
@@ -45,8 +59,9 @@ class AimTTiChannel(InstrumentChannel):
             label="Voltage",
             unit="V",
         )
+        """Parameter volt"""
 
-        self.add_parameter(
+        self.volt_step_size: Parameter = self.add_parameter(
             "volt_step_size",
             get_cmd=self._get_voltage_step_size,
             get_parser=float,
@@ -54,8 +69,9 @@ class AimTTiChannel(InstrumentChannel):
             label="Voltage Step Size",
             unit="V",
         )
+        """Parameter volt_step_size"""
 
-        self.add_parameter(
+        self.curr: Parameter = self.add_parameter(
             "curr",
             get_cmd=self._get_current_value,
             get_parser=float,
@@ -63,8 +79,9 @@ class AimTTiChannel(InstrumentChannel):
             label="Current",
             unit="A",
         )
+        """Parameter curr"""
 
-        self.add_parameter(
+        self.curr_range: Parameter = self.add_parameter(
             "curr_range",
             get_cmd=f"IRANGE{channel}?",
             get_parser=int,
@@ -72,12 +89,13 @@ class AimTTiChannel(InstrumentChannel):
             label="Current Range",
             unit="A",
             vals=vals.Numbers(1, 2),
-            docstring="Set the current range of the output."
+            docstring="Set the current range of the output. "
             "Here, the integer 1 is for the Low range, "
             "and integer 2 is for the High range.",
         )
+        """Set the current range of the output. Here, the integer 1 is for the Low range, and integer 2 is for the High range."""
 
-        self.add_parameter(
+        self.curr_step_size: Parameter = self.add_parameter(
             "curr_step_size",
             get_cmd=self._get_current_step_size,
             get_parser=float,
@@ -85,14 +103,16 @@ class AimTTiChannel(InstrumentChannel):
             label="Current Step Size",
             unit="A",
         )
+        """Parameter curr_step_size"""
 
-        self.add_parameter(
+        self.output: Parameter = self.add_parameter(
             "output",
             get_cmd=f"OP{channel}?",
             get_parser=float,
             set_cmd=f"OP{channel} {{}}",
             val_mapping=create_on_off_val_mapping(on_val=1, off_val=0),
         )
+        """Parameter output"""
 
     def _get_voltage_value(self) -> float:
         channel_id = self.channel
@@ -211,8 +231,10 @@ class AimTTiChannel(InstrumentChannel):
 
 class AimTTi(VisaInstrument):
     """
-    This is the QCoDeS driver for the Aim TTi PL-P series power supply.
-    Tested with Aim TTi PL601-P equipped with a single output channel.
+    Base class for Aim TTi PL-P series power supply.
+    This class should not be instantiated directly, but rather one of the
+    subclasses corresponding to the specific model of the power supply should
+    be used.
     """
 
     _numOutputChannels: ClassVar[dict[str, int]] = {
@@ -224,15 +246,21 @@ class AimTTi(VisaInstrument):
         "PL303QMT-P": 3,
         "QL355TP": 3,
     }
+    default_terminator = "\n"
 
-    def __init__(self, name: str, address: str, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        name: str,
+        address: str,
+        **kwargs: "Unpack[VisaInstrumentKWArgs]",
+    ) -> None:
         """
         Args:
             name: Name to use internally in QCoDeS.
             address: VISA resource address
             **kwargs: kwargs are forwarded to base class.
         """
-        super().__init__(name, address, terminator="\n", **kwargs)
+        super().__init__(name, address, **kwargs)
 
         channels = ChannelList(self, "Channels", AimTTiChannel, snapshotable=False)
 
@@ -252,7 +280,7 @@ class AimTTi(VisaInstrument):
 
     # Interface Management
 
-    def get_idn(self) -> dict[str, Optional[str]]:
+    def get_idn(self) -> dict[str, str | None]:
         """
         Returns the instrument identification including vendor, model, serial
         number and the firmware.
@@ -260,7 +288,7 @@ class AimTTi(VisaInstrument):
         IDNstr = self.ask_raw("*IDN?")
         vendor, model, serial, firmware = map(str.strip, IDNstr.split(","))
 
-        IDN: dict[str, Optional[str]] = {
+        IDN: dict[str, str | None] = {
             "vendor": vendor,
             "model": model,
             "serial": serial,

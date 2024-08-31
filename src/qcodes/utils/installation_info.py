@@ -3,40 +3,32 @@ This module contains helper functions that provide information about how
 QCoDeS is installed and about what other packages are installed along with
 QCoDeS
 """
+
 import json
 import logging
 import subprocess
-import sys
-from typing import Optional
-
-if sys.version_info >= (3, 10):
-    # distribution.name used below became part of the
-    # official api in 3.10
-    from importlib.metadata import distributions
-else:
-    # 3.9 and earlier
-    from importlib_metadata import distributions
-
+from importlib.metadata import distributions
 
 log = logging.getLogger(__name__)
 
 
-def is_qcodes_installed_editably() -> Optional[bool]:
+def is_qcodes_installed_editably() -> bool | None:
     """
     Try to ask pip whether QCoDeS is installed in editable mode and return
     the answer a boolean. Returns None if pip somehow did not respond as
     expected.
     """
 
-    answer: Optional[bool]
+    answer: bool | None
 
     try:
-        pipproc = subprocess.run(['python', '-m', 'pip', 'list', '-e', '--no-index',
-                                  '--format=json'],
-                                 check=True,
-                                 stdout=subprocess.PIPE)
-        e_pkgs = json.loads(pipproc.stdout.decode('utf-8'))
-        answer = any([d["name"] == 'qcodes' for d in e_pkgs])
+        pipproc = subprocess.run(
+            ["python", "-m", "pip", "list", "-e", "--no-index", "--format=json"],
+            check=True,
+            stdout=subprocess.PIPE,
+        )
+        e_pkgs = json.loads(pipproc.stdout.decode("utf-8"))
+        answer = any([d["name"] == "qcodes" for d in e_pkgs])
     except Exception as e:  # we actually do want a catch-all here
         log.warning(f"{type(e)}: {e!s}")
         answer = None

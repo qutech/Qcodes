@@ -3,17 +3,18 @@ This module encapsulates the initial schema of the QCoDeS database. The
 schema is being adjusted by upgrade functions, if needed, see more on this
 in :mod:`db_upgrades` module.
 """
+
 from __future__ import annotations
 
 from qcodes.dataset.sqlite.connection import ConnectionPlus, atomic, transaction
 
 
 def init_db(conn: ConnectionPlus) -> None:
-    with atomic(conn) as conn:
-        transaction(conn, _experiment_table_schema)
-        transaction(conn, _runs_table_schema)
-        transaction(conn, _layout_table_schema)
-        transaction(conn, _dependencies_table_schema)
+    with atomic(conn) as atomic_conn:
+        transaction(atomic_conn, _experiment_table_schema)
+        transaction(atomic_conn, _runs_table_schema)
+        transaction(atomic_conn, _layout_table_schema)
+        transaction(atomic_conn, _dependencies_table_schema)
 
 
 _experiment_table_schema = """

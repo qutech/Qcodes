@@ -1,15 +1,18 @@
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING
 
 from .constants import ChNr, ModuleKind
-from .KeysightB1500_module import B1500Module
+from .KeysightB1500_module import KeysightB1500Module
 
 if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+    from qcodes.instrument import InstrumentBaseKWArgs
     from qcodes.instrument_drivers.Keysight.keysightb1500.KeysightB1500_base import (
         KeysightB1500,
     )
 
 
-class KeysightB1530A(B1500Module):
+class KeysightB1530A(KeysightB1500Module):
     """
     Driver for Keysight B1530A Waveform Generator/Fast Measurement Unit
     module for B1500 Semiconductor Parameter Analyzer.
@@ -24,14 +27,15 @@ class KeysightB1530A(B1500Module):
             class.
         slot_nr: Slot number of this module (not channel number)
     """
+
     MODULE_KIND = ModuleKind.WGFMU
 
     def __init__(
         self,
         parent: "KeysightB1500",
-        name: Optional[str],
+        name: str | None,
         slot_nr: int,
-        **kwargs: Any,
+        **kwargs: "Unpack[InstrumentBaseKWArgs]",
     ):
         super().__init__(parent, name, slot_nr, **kwargs)
 

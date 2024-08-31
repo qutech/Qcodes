@@ -7,7 +7,7 @@ attributes on QCoDeS instruments."""
 
 import functools
 import inspect
-from typing import Any, Optional, Union
+from typing import Any
 
 import parso
 import parso.python
@@ -22,7 +22,6 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ParameterProxy:
-
     """
     An object that acts as a proxy for documenting containing
     a repr that can be set from a string.
@@ -46,8 +45,7 @@ def find_class(
     nodes = []
     for child in node.children:
         if (
-            isinstance(child, parso.python.tree.Class)
-            and child.name.value == classname  # pyright: ignore
+            isinstance(child, parso.python.tree.Class) and child.name.value == classname  # pyright: ignore
         ):
             nodes.append(child)
         elif isinstance(child, parso.tree.Node):
@@ -74,11 +72,10 @@ def find_init_func(
 
 def parse_init_function_from_str(
     code: str, classname: str
-) -> Optional[parso.python.tree.Function]:
+) -> parso.python.tree.Function | None:
     module = parso.parse(code)
     classes = find_class(module, classname)
     if len(classes) > 1:
-
         LOGGER.warning(
             f"Found more than one class definition for {classname}: Found {classes}"
         )
@@ -132,7 +129,7 @@ def eval_params_from_code(code: str, classname: str) -> dict[str, ParameterProxy
 
 def extract_code_as_repr(
     stm: parso.python.tree.ExprStmt,
-) -> Optional[tuple[str, ParameterProxy]]:
+) -> tuple[str, ParameterProxy] | None:
     lhs = stm.children[0]
     rhs = stm.get_rhs()
 
@@ -211,7 +208,7 @@ def qcodes_parameter_attr_getter(
     return attr
 
 
-def setup(app: Any) -> dict[str, Union[str, bool]]:
+def setup(app: Any) -> dict[str, str | bool]:
     """Called by sphinx to setup the extension."""
     app.setup_extension("sphinx.ext.autodoc")  # Require autodoc extension
 

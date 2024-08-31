@@ -8,7 +8,7 @@ from typing import Any, TypedDict
 
 import numpy as np
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis.strategies import floats, tuples
 from pytest import FixtureRequest, LogCaptureFixture
 
@@ -18,8 +18,12 @@ from qcodes.instrument_drivers.american_magnetics import (
     AMIModel430,
     AMIModel4303D,
 )
-from qcodes.instrument_drivers.american_magnetics.AMI430_visa import AMI430, AMI430_3D
+from qcodes.instrument_drivers.american_magnetics.AMI430_visa import (
+    AMI430,  # pyright: ignore[reportDeprecated]
+    AMI430_3D,  # pyright: ignore[reportDeprecated]
+)
 from qcodes.math_utils import FieldVector
+from qcodes.utils import QCoDeSDeprecationWarning
 from qcodes.utils.types import (
     numpy_concrete_floats,
     numpy_concrete_ints,
@@ -129,7 +133,7 @@ def test_instantiation_from_names(
     names as opposed from their instances.
     """
     mag_x, mag_y, mag_z = magnet_axes_instances
-    request.addfinalizer(AMIModel4303D.close_all)
+    request.addfinalizer(Instrument.close_all)
 
     driver = AMIModel4303D("AMI430_3D", mag_x.name, mag_y.name, mag_z.name, field_limit)
 
@@ -142,19 +146,31 @@ def test_instantiation_compat_classes(request: FixtureRequest) -> None:
     """
     Test that we can instantiate drivers using the old names
     """
-    request.addfinalizer(AMIModel4303D.close_all)
-    request.addfinalizer(AMI430_3D.close_all)
-    mag_x = AMI430(
-        "x", address="GPIB::1::INSTR", pyvisa_sim_file="AMI430.yaml", terminator="\n"
-    )
-    mag_y = AMI430(
-        "y", address="GPIB::2::INSTR", pyvisa_sim_file="AMI430.yaml", terminator="\n"
-    )
-    mag_z = AMI430(
-        "z", address="GPIB::3::INSTR", pyvisa_sim_file="AMI430.yaml", terminator="\n"
-    )
+    request.addfinalizer(Instrument.close_all)
 
-    driver = AMI430_3D("AMI430_3D", mag_x.name, mag_y.name, mag_z.name, field_limit)
+    with pytest.warns(QCoDeSDeprecationWarning):
+        mag_x = AMI430(  # pyright: ignore[reportDeprecated]
+            "x",
+            address="GPIB::1::INSTR",
+            pyvisa_sim_file="AMI430.yaml",
+            terminator="\n",
+        )
+        mag_y = AMI430(  # pyright: ignore[reportDeprecated]
+            "y",
+            address="GPIB::2::INSTR",
+            pyvisa_sim_file="AMI430.yaml",
+            terminator="\n",
+        )
+        mag_z = AMI430(  # pyright: ignore[reportDeprecated]
+            "z",
+            address="GPIB::3::INSTR",
+            pyvisa_sim_file="AMI430.yaml",
+            terminator="\n",
+        )
+
+        driver = AMI430_3D(  # pyright: ignore[reportDeprecated]
+            "AMI430_3D", mag_x.name, mag_y.name, mag_z.name, field_limit
+        )
 
     assert driver._instrument_x is mag_x
     assert driver._instrument_y is mag_y
@@ -165,7 +181,7 @@ def test_visa_interaction(request: FixtureRequest) -> None:
     """
     Test that closing one instrument we can still use the other simulated instruments.
     """
-    request.addfinalizer(AMIModel4303D.close_all)
+    request.addfinalizer(Instrument.close_all)
     mag_x = AMIModel430(
         "x", address="GPIB::1::INSTR", pyvisa_sim_file="AMI430.yaml", terminator="\n"
     )
@@ -201,7 +217,7 @@ def test_sim_visa_reset_on_fully_closed(request: FixtureRequest) -> None:
     Test that closing all instruments defined in a yaml file will reset the
     state of all the instruments.
     """
-    request.addfinalizer(AMIModel4303D.close_all)
+    request.addfinalizer(Instrument.close_all)
     mag_x = AMIModel430(
         "x", address="GPIB::1::INSTR", pyvisa_sim_file="AMI430.yaml", terminator="\n"
     )
@@ -250,7 +266,7 @@ def test_instantiation_from_name_of_nonexistent_ami_instrument(
     magnet_axes_instances, request: FixtureRequest
 ) -> None:
     mag_x, mag_y, mag_z = magnet_axes_instances
-    request.addfinalizer(AMIModel4303D.close_all)
+    request.addfinalizer(Instrument.close_all)
 
     non_existent_instrument = mag_y.name + "foo"
 
@@ -266,7 +282,7 @@ def test_instantiation_from_name_of_existing_non_ami_instrument(
     magnet_axes_instances, request: FixtureRequest
 ) -> None:
     mag_x, mag_y, mag_z = magnet_axes_instances
-    request.addfinalizer(AMIModel4303D.close_all)
+    request.addfinalizer(Instrument.close_all)
 
     non_ami_existing_instrument = Instrument("foo")
 
@@ -291,7 +307,7 @@ def test_instantiation_from_badly_typed_argument(
     magnet_axes_instances, request: FixtureRequest
 ) -> None:
     mag_x, mag_y, mag_z = magnet_axes_instances
-    request.addfinalizer(AMIModel4303D.close_all)
+    request.addfinalizer(Instrument.close_all)
 
     badly_typed_instrument_z_argument = 123
 
@@ -374,6 +390,10 @@ def test_cylindrical_sanity(current_driver, set_target) -> None:
     assert np.allclose(set_target, [rho, phi, z])
 
 
+# add some examples where floating point math results
+# in z > r due to round off errors and ensure
+# we handle them correctly
+@example((0, 0, 3.729170476738041e-155))
 @given(set_target=random_coordinates["cartesian"])
 @settings(
     max_examples=10,
@@ -425,6 +445,10 @@ def test_spherical_setpoints(current_driver, set_target) -> None:
     assert set_vector.is_equal(get_vector)
 
 
+# add some examples where floating point math results
+# in z > r due to round off errors and ensure
+# we handle them correctly
+@example((0, 0, 3.729170476738041e-155))
 @given(set_target=random_coordinates["cylindrical"])
 @settings(
     max_examples=10,
@@ -545,7 +569,7 @@ def test_ramp_down_first(current_driver, caplog: LogCaptureFixture) -> None:
             # get the order in which the ramps down occur
             order = get_ramp_down_order(messages)
             # the first one should be the one for which delta < 0
-            assert order[0][0] == names[count]
+            assert order[0][0] == ramp_down_name
 
 
 def test_field_limit_exception(current_driver) -> None:
@@ -661,7 +685,6 @@ def test_simultaneous_ramp_mode_does_not_reset_individual_axis_ramp_rates_if_non
     ami3d.vector_ramp_rate(0.05)
 
     with caplog.at_level(logging.DEBUG, logger=LOG_NAME):
-
         # Initiate the simultaneous ramp
         ami3d.cartesian((0.5, 0.5, 0.5))
 
@@ -747,7 +770,6 @@ def test_simultaneous_ramp_mode_resets_individual_axis_ramp_rates_if_blocking_ra
     restore_parameters_stack.enter_context(ami3d.block_during_ramp.set_to(True))
 
     with caplog.at_level(logging.DEBUG, logger=LOG_NAME):
-
         # Set individual ramp rates to known values
         ami3d._instrument_x.ramp_rate(0.09)
         ami3d._instrument_y.ramp_rate(0.10)
@@ -885,7 +907,6 @@ def test_reducing_current_ramp_limit_keeps_a_lower_ramp_rate_as_is(ami430) -> No
 
 
 def test_blocking_ramp_parameter(current_driver, caplog: LogCaptureFixture) -> None:
-
     assert current_driver.block_during_ramp() is True
 
     with caplog.at_level(logging.DEBUG, logger=LOG_NAME):
@@ -1280,8 +1301,13 @@ def test_change_field_units_parameter(ami430, new_value, unit_string) -> None:
     ami430.field_units("tesla")
 
 
-def test_switch_heater_enabled(ami430) -> None:
+def test_switch_heater_enabled(ami430, caplog) -> None:
     assert ami430.switch_heater.enabled() is False
+    # make sure that getting snapshot with heater disabled works without warning
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger=ami430.log.name):
+        ami430.snapshot(update=True)
+    assert len(caplog.records) == 0
     ami430.switch_heater.enabled(True)
     assert ami430.switch_heater.enabled() is True
     ami430.switch_heater.enabled(False)

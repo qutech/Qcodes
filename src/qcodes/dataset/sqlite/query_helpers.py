@@ -2,11 +2,12 @@
 This module provides a number of convenient general-purpose functions that
 are useful for building more database-specific queries out of them.
 """
+
 from __future__ import annotations
 
 import itertools
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy import ndarray
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     import sqlite3
 
 # represent the type of  data we can/want map to sqlite column
-VALUE = Union[str, complex, list, ndarray, bool, None]
+VALUE = str | complex | list | ndarray | bool | None
 VALUES = Sequence[VALUE]
 
 
@@ -198,11 +199,16 @@ def _massage_dict(metadata: Mapping[str, Any]) -> tuple[str, list[Any]]:
     for key, value in metadata.items():
         template.append(f"{key} = ?")
         values.append(value)
-    return ','.join(template), values
+    return ",".join(template), values
 
 
-def update_where(conn: ConnectionPlus, table: str,
-                 where_column: str, where_value: Any, **updates: Any) -> None:
+def update_where(
+    conn: ConnectionPlus,
+    table: str,
+    where_column: str,
+    where_value: Any,
+    **updates: Any,
+) -> None:
     _updates, values = _massage_dict(updates)
     query = f"""
     UPDATE
@@ -241,11 +247,12 @@ def insert_values(
     return return_value
 
 
-def insert_many_values(conn: ConnectionPlus,
-                       formatted_name: str,
-                       columns: Sequence[str],
-                       values: Sequence[VALUES],
-                       ) -> int:
+def insert_many_values(
+    conn: ConnectionPlus,
+    formatted_name: str,
+    columns: Sequence[str],
+    values: Sequence[VALUES],
+) -> int:
     """
     Inserts many values for the specified columns.
 
@@ -258,9 +265,11 @@ def insert_many_values(conn: ConnectionPlus,
     # We demand that all values have the same length
     lengths = [len(val) for val in values]
     if len(np.unique(lengths)) > 1:
-        raise ValueError('Wrong input format for values. Must specify the '
-                         'same number of values for all columns. Received'
-                         f' lengths {lengths}.')
+        raise ValueError(
+            "Wrong input format for values. Must specify the "
+            "same number of values for all columns. Received"
+            f" lengths {lengths}."
+        )
     no_of_rows = len(lengths)
     no_of_columns = lengths[0]
 
@@ -278,14 +287,14 @@ def insert_many_values(conn: ConnectionPlus,
     if version.parse(str(version_str)) <= version.parse("3.8.2"):
         max_var = SQLiteSettings.limits["MAX_COMPOUND_SELECT"]
     else:
-        max_var = SQLiteSettings.limits['MAX_VARIABLE_NUMBER']
-    rows_per_transaction = int(int(max_var)/no_of_columns)
+        max_var = SQLiteSettings.limits["MAX_VARIABLE_NUMBER"]
+    rows_per_transaction = int(int(max_var) / no_of_columns)
 
     _columns = ",".join(columns)
     _values = "(" + ",".join(["?"] * len(values[0])) + ")"
 
     a, b = divmod(no_of_rows, rows_per_transaction)
-    chunks = a*[rows_per_transaction] + [b]
+    chunks = a * [rows_per_transaction] + [b]
     if chunks[-1] == 0:
         chunks.pop()
 
@@ -293,7 +302,7 @@ def insert_many_values(conn: ConnectionPlus,
     stop = 0
 
     return_value = None
-    with atomic(conn) as conn:
+    with atomic(conn) as atomic_conn:
         for ii, chunk in enumerate(chunks):
             _values_x_params = ",".join([_values] * chunk)
 
@@ -304,10 +313,9 @@ def insert_many_values(conn: ConnectionPlus,
                      """
             stop += chunk
             # we need to make values a flat list from a list of list
-            flattened_values = list(
-                itertools.chain.from_iterable(values[start:stop]))
+            flattened_values = list(itertools.chain.from_iterable(values[start:stop]))
 
-            c = transaction(conn, query, *flattened_values)
+            c = transaction(atomic_conn, query, *flattened_values)
 
             if ii == 0:
                 return_value = c.lastrowid
@@ -318,9 +326,7 @@ def insert_many_values(conn: ConnectionPlus,
     return return_value
 
 
-def length(conn: ConnectionPlus,
-           formatted_name: str
-           ) -> int:
+def length(conn: ConnectionPlus, formatted_name: str) -> int:
     """
     Return the length of the table
 
@@ -365,14 +371,14 @@ def insert_column(
     if name in [col[description["name"]] for col in columns]:
         return
 
-    with atomic(conn) as conn:
+    with atomic(conn) as atomic_conn:
         if paramtype:
-            transaction(conn,
-                        f'ALTER TABLE "{table}" ADD COLUMN "{name}" '
-                        f'{paramtype}')
+            transaction(
+                atomic_conn,
+                f'ALTER TABLE "{table}" ADD COLUMN "{name}" {paramtype}',
+            )
         else:
-            transaction(conn,
-                        f'ALTER TABLE "{table}" ADD COLUMN "{name}"')
+            transaction(atomic_conn, f'ALTER TABLE "{table}" ADD COLUMN "{name}"')
 
 
 def is_column_in_table(conn: ConnectionPlus, table: str, column: str) -> bool:
@@ -400,4 +406,4 @@ def sql_placeholder_string(n: int) -> str:
     Return an SQL value placeholder string for n values.
     Example: sql_placeholder_string(5) returns '(?,?,?,?,?)'
     """
-    return '(' + ','.join('?'*n) + ')'
+    return "(" + ",".join("?" * n) + ")"

@@ -1,10 +1,13 @@
-from typing import Any, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from qcodes import validators as vals
-from qcodes.instrument import VisaInstrument
+from qcodes.instrument import VisaInstrument, VisaInstrumentKWArgs
 from qcodes.parameters import DelegateParameter, Parameter
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
 
 
 class BaselSP983a(VisaInstrument):
@@ -19,22 +22,24 @@ class BaselSP983a(VisaInstrument):
             user's responsibility to ensure this. This source parameter is
             used to set offset voltage parameter of the preamp and the
             source parameter should represent a voltage source that is
-            connected to the "Offset Input Volgate" connector of the SP983C.
+            connected to the "Offset Input Voltage" connector of the SP983C.
+        **kwargs: Forwarded to base class.
     """
+
+    default_terminator = "\r\n"
 
     def __init__(
         self,
         name: str,
         address: str,
-        input_offset_voltage: Optional[Parameter] = None,
-        terminator: str = "\r\n",
-        **kwargs: Any,
+        input_offset_voltage: Parameter | None = None,
+        **kwargs: "Unpack[VisaInstrumentKWArgs]",
     ) -> None:
-        super().__init__(name, address, terminator=terminator, **kwargs)
+        super().__init__(name, address, **kwargs)
 
         self.connect_message()
 
-        self.add_parameter(
+        self.gain: Parameter = self.add_parameter(
             "gain",
             label="Gain",
             unit="V/A",
@@ -42,7 +47,8 @@ class BaselSP983a(VisaInstrument):
             get_cmd=self._get_gain,
             vals=vals.Enum(1e5, 1e6, 1e7, 1e8, 1e9),
         )
-        self.add_parameter(
+        """Parameter gain"""
+        self.fcut: Parameter = self.add_parameter(
             "fcut",
             unit="Hz",
             label="Filter Cut-Off Frequency",
@@ -61,11 +67,13 @@ class BaselSP983a(VisaInstrument):
                 1e6: "FULL",
             },
         )
-        self.add_parameter(
+        """Parameter fcut"""
+        self.overload_status: Parameter = self.add_parameter(
             "overload_status", label="Overload Status", set_cmd=False, get_cmd="GET O"
         )
+        """Parameter overload_status"""
 
-        self.add_parameter(
+        self.offset_voltage: DelegateParameter = self.add_parameter(
             "offset_voltage",
             label="Offset Voltage for SP983C",
             unit="V",
@@ -74,8 +82,9 @@ class BaselSP983a(VisaInstrument):
             source=input_offset_voltage,
             parameter_class=DelegateParameter,
         )
+        """Parameter offset_voltage"""
 
-    def get_idn(self) -> dict[str, Optional[str]]:
+    def get_idn(self) -> dict[str, str | None]:
         vendor = "Physics Basel"
         model = "SP 983A"
         serial = None

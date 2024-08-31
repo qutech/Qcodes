@@ -1,8 +1,15 @@
-from typing import Optional, Union
+from typing import TYPE_CHECKING
 
-from qcodes.instrument import InstrumentChannel, VisaInstrument
+from typing_extensions import deprecated
+
+from qcodes.instrument import InstrumentBaseKWArgs, InstrumentChannel, VisaInstrument
+from qcodes.utils import QCoDeSDeprecationWarning
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
 
 
+@deprecated("Unused module", category=QCoDeSDeprecationWarning)
 class KeysightSubModule(InstrumentChannel):
     """
     A base class for submodules for the 34980A systems.
@@ -12,22 +19,40 @@ class KeysightSubModule(InstrumentChannel):
         name: user defined name for the module
         slot: the slot the module is installed
     """
-    def __init__(
-            self,
-            parent: Union[VisaInstrument, InstrumentChannel],
-            name: str,
-            slot: int
-    ) -> None:
 
-        super().__init__(parent, name)
+    def __init__(
+        self,
+        parent: VisaInstrument | InstrumentChannel,
+        name: str,
+        slot: int,
+        **kwargs: "Unpack[InstrumentBaseKWArgs]",
+    ) -> None:
+        super().__init__(parent, name, **kwargs)
 
         self.slot = slot
 
 
-class Keysight34980ASwitchMatrixSubModule(KeysightSubModule):
-    """
-    A base class for **Switch Matrix** submodules for the 34980A systems.
-    """
+class Keysight34980ASwitchMatrixSubModule(InstrumentChannel):
+    def __init__(
+        self,
+        parent: VisaInstrument | InstrumentChannel,
+        name: str,
+        slot: int,
+        **kwargs: "Unpack[InstrumentBaseKWArgs]",
+    ) -> None:
+        """
+        A base class for **Switch Matrix** submodules for the 34980A systems.
+
+        Args:
+            parent: the system which the module is installed on
+            name: user defined name for the module
+            slot: the slot the module is installed
+            **kwargs: Forwarded to base class.
+        """
+        super().__init__(parent, name, **kwargs)
+
+        self.slot = slot
+
     def validate_value(self, row: int, column: int) -> None:
         """
         to check if the row and column number is within the range of the module
@@ -40,7 +65,7 @@ class Keysight34980ASwitchMatrixSubModule(KeysightSubModule):
         raise NotImplementedError("Please subclass this")
 
     def to_channel_list(
-        self, paths: list[tuple[int, int]], wiring_config: Optional[str] = None
+        self, paths: list[tuple[int, int]], wiring_config: str | None = None
     ) -> str:
         """
         convert the (row, column) pair to a 4-digit channel number 'sxxx', where
@@ -73,7 +98,7 @@ class Keysight34980ASwitchMatrixSubModule(KeysightSubModule):
         """
         self.validate_value(row, column)
         channel = self.to_channel_list([(row, column)])
-        message = self.ask(f'ROUT:OPEN? {channel}')
+        message = self.ask(f"ROUT:OPEN? {channel}")
         return bool(int(message))
 
     def is_closed(self, row: int, column: int) -> bool:
@@ -90,7 +115,7 @@ class Keysight34980ASwitchMatrixSubModule(KeysightSubModule):
         """
         self.validate_value(row, column)
         channel = self.to_channel_list([(row, column)])
-        message = self.ask(f'ROUT:CLOSe? {channel}')
+        message = self.ask(f"ROUT:CLOSe? {channel}")
         return bool(int(message))
 
     def connect(self, row: int, column: int) -> None:
@@ -103,7 +128,7 @@ class Keysight34980ASwitchMatrixSubModule(KeysightSubModule):
         """
         self.validate_value(row, column)
         channel = self.to_channel_list([(row, column)])
-        self.write(f'ROUT:CLOSe {channel}')
+        self.write(f"ROUT:CLOSe {channel}")
 
     def disconnect(self, row: int, column: int) -> None:
         """
@@ -115,7 +140,7 @@ class Keysight34980ASwitchMatrixSubModule(KeysightSubModule):
         """
         self.validate_value(row, column)
         channel = self.to_channel_list([(row, column)])
-        self.write(f'ROUT:OPEN {channel}')
+        self.write(f"ROUT:OPEN {channel}")
 
     def connect_paths(self, paths: list[tuple[int, int]]) -> None:
         """
@@ -157,7 +182,7 @@ class Keysight34980ASwitchMatrixSubModule(KeysightSubModule):
             self.validate_value(row, column)
         channel_list_str = self.to_channel_list(paths)
         messages = self.ask(f"ROUTe:CLOSe? {channel_list_str}")
-        return [bool(int(message)) for message in messages.split(',')]
+        return [bool(int(message)) for message in messages.split(",")]
 
     def are_open(self, paths: list[tuple[int, int]]) -> list[bool]:
         """
@@ -175,7 +200,11 @@ class Keysight34980ASwitchMatrixSubModule(KeysightSubModule):
             self.validate_value(row, column)
         channel_list_str = self.to_channel_list(paths)
         messages = self.ask(f"ROUTe:OPEN? {channel_list_str}")
-        return [bool(int(message)) for message in messages.split(',')]
+        return [bool(int(message)) for message in messages.split(",")]
 
 
-KeysightSwitchMatrixSubModule = Keysight34980ASwitchMatrixSubModule
+@deprecated(
+    "Use Keysight34980ASwitchMatrixSubModule", category=QCoDeSDeprecationWarning
+)
+class KeysightSwitchMatrixSubModule(Keysight34980ASwitchMatrixSubModule):
+    pass

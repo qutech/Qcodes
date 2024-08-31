@@ -1,6 +1,7 @@
 """
 Tests for `qcodes.utils.logger`.
 """
+
 import logging
 import os
 from copy import copy
@@ -142,9 +143,8 @@ def test_start_logger_twice() -> None:
     logger.start_logger()
     logger.start_logger()
     handlers = root_logger.handlers
-    # there is one or two loggers registered from pytest
-    # depending on the version
-    # and the telemetry logger is always off in the tests
+    # we expect there to be two log handlers file+console
+    # plus the existing ones from pytest
     assert len(handlers) == 2 + NUM_PYTEST_LOGGERS
 
 
@@ -156,6 +156,7 @@ def test_set_level_without_starting_raises() -> None:
 
 
 def test_handler_level() -> None:
+    logger.start_logger()
     with logger.LogCapture(level=logging.INFO) as logs:
         logging.debug(TEST_LOG_MESSAGE)
     assert logs.value == ""
@@ -168,7 +169,7 @@ def test_handler_level() -> None:
 
 
 def test_filter_instrument(
-    AMI430_3D: tuple[AMIModel4303D, AMIModel430, AMIModel430, AMIModel430]
+    AMI430_3D: tuple[AMIModel4303D, AMIModel430, AMIModel430, AMIModel430],
 ) -> None:
     driver, mag_x, mag_y, mag_z = AMI430_3D
 
@@ -207,7 +208,7 @@ def test_filter_instrument(
 
 
 def test_filter_without_started_logger_raises(
-    AMI430_3D: tuple[AMIModel4303D, AMIModel430, AMIModel430, AMIModel430]
+    AMI430_3D: tuple[AMIModel4303D, AMIModel430, AMIModel430, AMIModel430],
 ) -> None:
     driver, mag_x, mag_y, mag_z = AMI430_3D
 
@@ -247,10 +248,9 @@ def test_channels(model372: Model_372_Mock) -> None:
     # reset without capturing
     inst.sample_heater.set_range_from_temperature(1)
     # rerun with instrument filter
-    with logger.LogCapture(
-        level=logging.DEBUG
-    ) as logs_filtered, logger.filter_instrument(
-        inst, handler=logs_filtered.string_handler
+    with (
+        logger.LogCapture(level=logging.DEBUG) as logs_filtered,
+        logger.filter_instrument(inst, handler=logs_filtered.string_handler),
     ):
         inst.sample_heater.set_range_from_temperature(0.1)
 
@@ -274,8 +274,9 @@ def test_channels_nomessages(model372: Model_372_Mock) -> None:
     # test with wrong instrument
     mock = Instrument("mock")
     inst.sample_heater.set_range_from_temperature(1)
-    with logger.LogCapture(level=logging.DEBUG) as logs, logger.filter_instrument(
-        mock, handler=logs.string_handler
+    with (
+        logger.LogCapture(level=logging.DEBUG) as logs,
+        logger.filter_instrument(mock, handler=logs.string_handler),
     ):
         inst.sample_heater.set_range_from_temperature(0.1)
     logs_2 = [log for log in logs.value.splitlines() if "[lakeshore" in log]

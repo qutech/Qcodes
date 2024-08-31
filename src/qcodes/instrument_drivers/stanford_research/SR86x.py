@@ -1,16 +1,26 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
-from qcodes.instrument import ChannelList, InstrumentChannel, VisaInstrument
+from qcodes.instrument import (
+    ChannelList,
+    InstrumentBaseKWArgs,
+    InstrumentChannel,
+    VisaInstrument,
+    VisaInstrumentKWArgs,
+)
 from qcodes.parameters import ArrayParameter
 from qcodes.validators import ComplexNumbers, Enum, Ints, Numbers
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
+
+    from typing_extensions import Unpack
+
+    from qcodes.parameters import Parameter
 
 log = logging.getLogger(__name__)
 
@@ -26,21 +36,21 @@ class SR86xBufferReadout(ArrayParameter):
     """
 
     def __init__(self, name: str, instrument: SR86x, **kwargs: Any) -> None:
-
         unit = "deg"
         if name in ["X", "Y", "R"]:
             unit = "V"
 
-        super().__init__(name,
-                         shape=(1,),  # dummy initial shape
-                         unit=unit,
-                         setpoint_names=('Time',),
-                         setpoint_labels=('Time',),
-                         setpoint_units=('s',),
-                         instrument=instrument,
-                         docstring='Holds an acquired (part of the) data '
-                                   'buffer of one channel.',
-                         **kwargs)
+        super().__init__(
+            name,
+            shape=(1,),  # dummy initial shape
+            unit=unit,
+            setpoint_names=("Time",),
+            setpoint_labels=("Time",),
+            setpoint_units=("s",),
+            instrument=instrument,
+            docstring="Holds an acquired (part of the) data buffer of one channel.",
+            **kwargs,
+        )
 
         self._capture_data: np.ndarray | None = None
 
@@ -55,9 +65,9 @@ class SR86xBufferReadout(ArrayParameter):
 
         data_len = len(capture_data)
         self.shape = (data_len,)
-        self.setpoint_units = ('',)
-        self.setpoint_names = ('sample_nr',)
-        self.setpoint_labels = ('Sample number',)
+        self.setpoint_units = ("",)
+        self.setpoint_names = ("sample_nr",)
+        self.setpoint_labels = ("Sample number",)
         self.setpoints = (tuple(np.arange(0, data_len)),)
 
     def get_raw(self) -> np.ndarray:
@@ -65,10 +75,12 @@ class SR86xBufferReadout(ArrayParameter):
         Public method to access the capture data
         """
         if self._capture_data is None:
-            raise ValueError(f"Cannot return data for parameter {self.name}. "
-                             f"Please prepare for readout by calling "
-                             f"'get_capture_data' with appropriate "
-                             f"configuration settings")
+            raise ValueError(
+                f"Cannot return data for parameter {self.name}. "
+                f"Please prepare for readout by calling "
+                f"'get_capture_data' with appropriate "
+                f"configuration settings"
+            )
 
         return self._capture_data
 
@@ -82,85 +94,98 @@ class SR86xBuffer(InstrumentChannel):
     manual: http://thinksrs.com/downloads/PDFs/Manuals/SR860m.pdf
     """
 
-    def __init__(self, parent: SR86x, name: str) -> None:
-        super().__init__(parent, name)
+    def __init__(
+        self, parent: SR86x, name: str, **kwargs: Unpack[InstrumentBaseKWArgs]
+    ) -> None:
+        super().__init__(parent, name, **kwargs)
 
-        self.add_parameter(
+        self.capture_length_in_kb: Parameter = self.add_parameter(
             "capture_length_in_kb",
             label="get/set capture length",
             get_cmd="CAPTURELEN?",
             set_cmd="CAPTURELEN {}",
             set_parser=self._set_capture_len_parser,
             get_parser=int,
-            unit="kB"
+            unit="kB",
         )
+        """Parameter capture_length_in_kb"""
         self.bytes_per_sample = 4
         self.min_capture_length_in_kb = 1  # i.e. minimum buffer size
         self.max_capture_length_in_kb = 4096  # i.e. maximum buffer size
         # Maximum amount of kB that can be read per single CAPTUREGET command
         self.max_size_per_reading_in_kb = 64
 
-        self.add_parameter(  # Configure which parameters we want to capture
-            "capture_config",
-            label="capture configuration",
-            get_cmd="CAPTURECFG?",
-            set_cmd="CAPTURECFG {}",
-            val_mapping={"X": "0", "X,Y": "1", "R,T": "2", "X,Y,R,T": "3"}
+        self.capture_config: Parameter = (
+            self.add_parameter(  # Configure which parameters we want to capture
+                "capture_config",
+                label="capture configuration",
+                get_cmd="CAPTURECFG?",
+                set_cmd="CAPTURECFG {}",
+                val_mapping={"X": "0", "X,Y": "1", "R,T": "2", "X,Y,R,T": "3"},
+            )
         )
+        """Parameter capture_config"""
 
-        self.add_parameter(
+        self.capture_rate_max: Parameter = self.add_parameter(
             "capture_rate_max",
             label="capture rate maximum",
             get_cmd="CAPTURERATEMAX?",
-            get_parser=float
+            get_parser=float,
         )
+        """Parameter capture_rate_max"""
 
-        self.add_parameter(
+        self.capture_rate: Parameter = self.add_parameter(
             "capture_rate",
             label="capture rate raw",
             get_cmd="CAPTURERATE?",
             set_cmd="CAPTURERATE {}",
             get_parser=float,
-            set_parser=self._set_capture_rate_parser
+            set_parser=self._set_capture_rate_parser,
         )
+        """Parameter capture_rate"""
 
         max_rate = self.capture_rate_max()
-        self.available_frequencies = [max_rate / 2 ** i for i in range(20)]
+        self.available_frequencies = [max_rate / 2**i for i in range(20)]
 
-        self.add_parameter(  # Are we capturing at the moment?
-            "capture_status",
-            label="capture status",
-            get_cmd="CAPTURESTAT?"
+        self.capture_status: Parameter = (
+            self.add_parameter(  # Are we capturing at the moment?
+                "capture_status", label="capture status", get_cmd="CAPTURESTAT?"
+            )
         )
+        """Parameter capture_status"""
 
-        self.add_parameter(
+        self.count_capture_bytes: Parameter = self.add_parameter(
             "count_capture_bytes",
             label="captured bytes",
             get_cmd="CAPTUREBYTES?",
             unit="B",
             get_parser=int,
             docstring="Number of bytes captured so far in the buffer. Can be "
-                      "used to track live progress."
+            "used to track live progress.",
         )
+        """Number of bytes captured so far in the buffer. Can be used to track live progress."""
 
-        self.add_parameter(
+        self.count_capture_kilobytes: Parameter = self.add_parameter(
             "count_capture_kilobytes",
             label="captured kilobytes",
             get_cmd="CAPTUREPROG?",
             unit="kB",
             docstring="Number of kilobytes captured so far in the buffer, "
-                      "rounded-up to 2 kilobyte chunks. Capture must be "
-                      "stopped before requesting the value of this "
-                      "parameter. If the acquisition wrapped during operating "
-                      "in Continuous mode, then the returned value is "
-                      "simply equal to the current capture length."
+            "rounded-up to 2 kilobyte chunks. Capture must be "
+            "stopped before requesting the value of this "
+            "parameter. If the acquisition wrapped during operating "
+            "in Continuous mode, then the returned value is "
+            "simply equal to the current capture length.",
         )
+        """
+        Number of kilobytes captured so far in the buffer, rounded-up to 2 kilobyte chunks.
+        Capture must be stopped before requesting the value of this parameter.
+        If the acquisition wrapped during operating in Continuous mode,
+        then the returned value is simply equal to the current capture length.
+        """
 
         for parameter_name in ["X", "Y", "R", "T"]:
-            self.add_parameter(
-                parameter_name,
-                parameter_class=SR86xBufferReadout
-            )
+            self.add_parameter(parameter_name, parameter_class=SR86xBufferReadout)
 
     def snapshot_base(
         self,
@@ -174,7 +199,7 @@ class SR86xBuffer(InstrumentChannel):
         # timeout otherwise when the snapshot is updated, e.g. at
         # station creation time
         params_to_skip_update = list(params_to_skip_update)
-        params_to_skip_update.append('count_capture_kilobytes')
+        params_to_skip_update.append("count_capture_kilobytes")
 
         snapshot = super().snapshot_base(update, params_to_skip_update)
         return snapshot
@@ -194,12 +219,16 @@ class SR86xBuffer(InstrumentChannel):
         if capture_length_in_kb % 2:
             raise ValueError("The capture length should be an even number")
 
-        if not self.min_capture_length_in_kb \
-                <= capture_length_in_kb \
-                <= self.max_capture_length_in_kb:
-            raise ValueError(f"The capture length should be between "
-                             f"{self.min_capture_length_in_kb} and "
-                             f"{self.max_capture_length_in_kb}")
+        if (
+            not self.min_capture_length_in_kb
+            <= capture_length_in_kb
+            <= self.max_capture_length_in_kb
+        ):
+            raise ValueError(
+                f"The capture length should be between "
+                f"{self.min_capture_length_in_kb} and "
+                f"{self.max_capture_length_in_kb}"
+            )
 
         return capture_length_in_kb
 
@@ -232,11 +261,13 @@ class SR86xBuffer(InstrumentChannel):
         n_round = int(round(n))
 
         if not 0 <= n_round <= 20:
-            raise ValueError(f"The chosen frequency is invalid. Please "
-                             f"consult the SR860 manual at page 136. "
-                             f"The maximum capture rate is {max_rate}")
+            raise ValueError(
+                f"The chosen frequency is invalid. Please "
+                f"consult the SR860 manual at page 136. "
+                f"The maximum capture rate is {max_rate}"
+            )
 
-        nearest_valid_rate = max_rate / 2 ** n_round
+        nearest_valid_rate = max_rate / 2**n_round
         if abs(capture_rate_hz - nearest_valid_rate) > 1:
             available_frequencies = ", ".join(
                 str(f) for f in self.available_frequencies
@@ -257,12 +288,12 @@ class SR86xBuffer(InstrumentChannel):
         """
 
         if acquisition_mode not in ["ONE", "CONT"]:
-            raise ValueError(
-                "The acquisition mode needs to be either 'ONE' or 'CONT'")
+            raise ValueError("The acquisition mode needs to be either 'ONE' or 'CONT'")
 
         if trigger_mode not in ["IMM", "TRIG", "SAMP"]:
             raise ValueError(
-                "The trigger mode needs to be either 'IMM', 'TRIG' or 'SAMP'")
+                "The trigger mode needs to be either 'IMM', 'TRIG' or 'SAMP'"
+            )
 
         cmd_str = f"CAPTURESTART {acquisition_mode}, {trigger_mode}"
         self.write(cmd_str)
@@ -381,9 +412,11 @@ class SR86xBuffer(InstrumentChannel):
         """
         current_capture_length = self.capture_length_in_kb()
         if size_in_kb > current_capture_length:
-            raise ValueError(f"The size of the requested data ({size_in_kb}kB) "
-                             f"is larger than current capture length of the "
-                             f"buffer ({current_capture_length}kB).")
+            raise ValueError(
+                f"The size of the requested data ({size_in_kb}kB) "
+                f"is larger than current capture length of the "
+                f"buffer ({current_capture_length}kB)."
+            )
 
         values: np.ndarray = np.array([])
         data_size_to_read_in_kb = size_in_kb
@@ -398,8 +431,8 @@ class SR86xBuffer(InstrumentChannel):
                 size_of_this_reading = data_size_to_read_in_kb
 
             data_from_this_reading = self._get_raw_capture_data_block(
-                size_of_this_reading,
-                offset_in_kb=offset)
+                size_of_this_reading, offset_in_kb=offset
+            )
             values = np.append(values, data_from_this_reading)
 
             data_size_to_read_in_kb -= size_of_this_reading
@@ -407,10 +440,9 @@ class SR86xBuffer(InstrumentChannel):
 
         return values
 
-    def _get_raw_capture_data_block(self,
-                                    size_in_kb: int,
-                                    offset_in_kb: int = 0
-                                    ) -> np.ndarray:
+    def _get_raw_capture_data_block(
+        self, size_in_kb: int, offset_in_kb: int = 0
+    ) -> np.ndarray:
         """
         Read data from the buffer. The maximum amount of data that can be
         read with this function (size_in_kb) is 64kB (this limitation comes
@@ -438,9 +470,11 @@ class SR86xBuffer(InstrumentChannel):
             mentioned in the capture config.
         """
         if size_in_kb > self.max_size_per_reading_in_kb:
-            raise ValueError(f"The size of the requested data ({size_in_kb}kB) "
-                             f"is larger than maximum size that can be read "
-                             f"at once ({self.max_size_per_reading_in_kb}kB).")
+            raise ValueError(
+                f"The size of the requested data ({size_in_kb}kB) "
+                f"is larger than maximum size that can be read "
+                f"at once ({self.max_size_per_reading_in_kb}kB)."
+            )
 
         # Calculate the size of the data captured so far, in kB, rounded up
         # to 2kB chunks
@@ -449,32 +483,35 @@ class SR86xBuffer(InstrumentChannel):
         )
 
         if size_in_kb > size_of_currently_captured_data:
-            raise ValueError(f"The size of the requested data ({size_in_kb}kB) "
-                             f"cannot be larger than the size of currently "
-                             f"captured data rounded up to 2kB chunks "
-                             f"({size_of_currently_captured_data}kB)")
+            raise ValueError(
+                f"The size of the requested data ({size_in_kb}kB) "
+                f"cannot be larger than the size of currently "
+                f"captured data rounded up to 2kB chunks "
+                f"({size_of_currently_captured_data}kB)"
+            )
 
         if offset_in_kb > size_of_currently_captured_data:
-            raise ValueError(f"The offset for reading the requested data "
-                             f"({offset_in_kb}kB) cannot be larger than the "
-                             f"size of currently captured data rounded up to "
-                             f"2kB chunks "
-                             f"({size_of_currently_captured_data}kB)")
+            raise ValueError(
+                f"The offset for reading the requested data "
+                f"({offset_in_kb}kB) cannot be larger than the "
+                f"size of currently captured data rounded up to "
+                f"2kB chunks "
+                f"({size_of_currently_captured_data}kB)"
+            )
 
         values = self._parent.visa_handle.query_binary_values(
             f"CAPTUREGET? {offset_in_kb}, {size_in_kb}",
-            datatype='f',
+            datatype="f",
             is_big_endian=False,
-            expect_termination=False)
+            expect_termination=False,
+        )
         # the sr86x does not include an extra termination char on binary
         # messages so we set expect_termination to False
 
         return np.array(values)
 
     def capture_one_sample_per_trigger(
-            self,
-            trigger_count: int,
-            start_triggers_pulsetrain: Callable[..., Any]
+        self, trigger_count: int, start_triggers_pulsetrain: Callable[..., Any]
     ) -> dict[str, np.ndarray]:
         """
         Capture one sample per each trigger, and return when the specified
@@ -582,14 +619,15 @@ class SR86xDataChannel(InstrumentChannel):
         cmd_id: str,
         cmd_id_name: str | None = None,
         color: str | None = None,
+        **kwargs: Unpack[InstrumentBaseKWArgs],
     ) -> None:
-        super().__init__(parent, name)
+        super().__init__(parent, name, **kwargs)
 
         self._cmd_id = cmd_id
         self._cmd_id_name = cmd_id_name
         self._color = color
 
-        self.add_parameter(
+        self.assigned_parameter: Parameter = self.add_parameter(
             "assigned_parameter",
             label=f"Data channel {cmd_id} parameter",
             docstring=f"Allows to set and get the "
@@ -599,6 +637,7 @@ class SR86xDataChannel(InstrumentChannel):
             get_cmd=f"CDSP? {cmd_id}",
             val_mapping=self.parent.PARAMETER_NAMES,
         )
+        """Allows to set and get the parameter that is assigned to the channel"""
 
     @property
     def cmd_id(self) -> str:
@@ -615,7 +654,8 @@ class SR86xDataChannel(InstrumentChannel):
 
 class SR86x(VisaInstrument):
     """
-    This is the code for Stanford_SR865 Lock-in Amplifier
+    Base class for Stanford SR86x Lock-in Amplifier drivers. This class should not
+    be instantiated directly instead one of the model specific sub classes should be used.
     """
 
     _VOLT_TO_N: ClassVar[dict[int | float, int]] = {
@@ -686,179 +726,233 @@ class SR86x(VisaInstrument):
     _CURR_ENUM = Enum(*_CURR_TO_N.keys())
 
     _INPUT_SIGNAL_TO_N: ClassVar[dict[str, int]] = {
-        'voltage': 0,
-        'current': 1,
+        "voltage": 0,
+        "current": 1,
     }
     _N_TO_INPUT_SIGNAL: ClassVar[dict[int, str]] = {
         v: k for k, v in _INPUT_SIGNAL_TO_N.items()
     }
 
     PARAMETER_NAMES: ClassVar[dict[str, str]] = {
-                'X': '0',   # X output, 'X'
-                'Y': '1',   # Y output, 'Y'
-                'R': '2',   # R output, 'R'
-                'P': '3',   # theta output, 'THeta'
-          'aux_in1': '4',   # Aux In 1, 'IN1'
-          'aux_in2': '5',   # Aux In 2, 'IN2'
-          'aux_in3': '6',   # Aux In 3, 'IN3'
-          'aux_in4': '7',   # Aux In 4, 'IN4'
-           'Xnoise': '8',   # X noise, 'XNOise'
-           'Ynoise': '9',   # Y noise, 'YNOise'
-         'aux_out1': '10',  # Aux Out 1, 'OUT1'
-         'aux_out2': '11',  # Aux Out 2, 'OUT2'
-            'phase': '12',  # Reference Phase, 'PHAse'
-        'amplitude': '13',  # Sine Out Amplitude, 'SAMp'
-       'sine_outdc': '14',  # DC Level, 'LEVel'
-        'frequency': '15',  # Int. Ref. Frequency, 'FInt'
-    'frequency_ext': '16',  # Ext. Ref. Frequency, 'FExt'
+        "X": "0",  # X output, 'X'
+        "Y": "1",  # Y output, 'Y'
+        "R": "2",  # R output, 'R'
+        "P": "3",  # theta output, 'THeta'
+        "aux_in1": "4",  # Aux In 1, 'IN1'
+        "aux_in2": "5",  # Aux In 2, 'IN2'
+        "aux_in3": "6",  # Aux In 3, 'IN3'
+        "aux_in4": "7",  # Aux In 4, 'IN4'
+        "Xnoise": "8",  # X noise, 'XNOise'
+        "Ynoise": "9",  # Y noise, 'YNOise'
+        "aux_out1": "10",  # Aux Out 1, 'OUT1'
+        "aux_out2": "11",  # Aux Out 2, 'OUT2'
+        "phase": "12",  # Reference Phase, 'PHAse'
+        "amplitude": "13",  # Sine Out Amplitude, 'SAMp'
+        "sine_outdc": "14",  # DC Level, 'LEVel'
+        "frequency": "15",  # Int. Ref. Frequency, 'FInt'
+        "frequency_ext": "16",  # Ext. Ref. Frequency, 'FExt'
     }
 
     _N_DATA_CHANNELS = 4
 
+    default_terminator = "\n"
+
     def __init__(
-            self,
-            name: str,
-            address: str,
-            max_frequency: float,
-            reset: bool = False,
-            **kwargs: Any):
-        super().__init__(name, address, terminator='\n', **kwargs)
+        self,
+        name: str,
+        address: str,
+        max_frequency: float,
+        reset: bool = False,
+        **kwargs: Unpack[VisaInstrumentKWArgs],
+    ):
+        super().__init__(name, address, **kwargs)
         self._max_frequency = max_frequency
         # Reference commands
-        self.add_parameter(name='frequency',
-                           label='Frequency',
-                           unit='Hz',
-                           get_cmd='FREQ?',
-                           set_cmd='FREQ {}',
-                           get_parser=float,
-                           vals=Numbers(
-                               min_value=1e-3,
-                               max_value=self._max_frequency)
-                           )
-        self.add_parameter(name='sine_outdc',
-                           label='Sine out dc level',
-                           unit='V',
-                           get_cmd='SOFF?',
-                           set_cmd='SOFF {}',
-                           get_parser=float,
-                           vals=Numbers(min_value=-5, max_value=5))
-        self.add_parameter(name='amplitude',
-                           label='Amplitude',
-                           unit='V',
-                           get_cmd='SLVL?',
-                           set_cmd='SLVL {}',
-                           get_parser=float,
-                           vals=Numbers(min_value=0, max_value=2))
-        self.add_parameter(name='harmonic',
-                           label='Harmonic',
-                           get_cmd='HARM?',
-                           get_parser=int,
-                           set_cmd='HARM {:d}',
-                           vals=Ints(min_value=1, max_value=99))
-        self.add_parameter(name='phase',
-                           label='Phase',
-                           unit='deg',
-                           get_cmd='PHAS?',
-                           set_cmd='PHAS {}',
-                           get_parser=float,
-                           vals=Numbers(min_value=-3.6e5, max_value=3.6e5))
+        self.frequency: Parameter = self.add_parameter(
+            name="frequency",
+            label="Frequency",
+            unit="Hz",
+            get_cmd="FREQ?",
+            set_cmd="FREQ {}",
+            get_parser=float,
+            vals=Numbers(min_value=1e-3, max_value=self._max_frequency),
+        )
+        """Parameter frequency"""
+        self.sine_outdc: Parameter = self.add_parameter(
+            name="sine_outdc",
+            label="Sine out dc level",
+            unit="V",
+            get_cmd="SOFF?",
+            set_cmd="SOFF {}",
+            get_parser=float,
+            vals=Numbers(min_value=-5, max_value=5),
+        )
+        """Parameter sine_outdc"""
+        self.amplitude: Parameter = self.add_parameter(
+            name="amplitude",
+            label="Amplitude",
+            unit="V",
+            get_cmd="SLVL?",
+            set_cmd="SLVL {}",
+            get_parser=float,
+            vals=Numbers(min_value=0, max_value=2),
+        )
+        """Parameter amplitude"""
+        self.harmonic: Parameter = self.add_parameter(
+            name="harmonic",
+            label="Harmonic",
+            get_cmd="HARM?",
+            get_parser=int,
+            set_cmd="HARM {:d}",
+            vals=Ints(min_value=1, max_value=99),
+        )
+        """Parameter harmonic"""
+        self.phase: Parameter = self.add_parameter(
+            name="phase",
+            label="Phase",
+            unit="deg",
+            get_cmd="PHAS?",
+            set_cmd="PHAS {}",
+            get_parser=float,
+            vals=Numbers(min_value=-3.6e5, max_value=3.6e5),
+        )
+        """Parameter phase"""
         # Signal commands
-        self.add_parameter(name='sensitivity',
-                           label='Sensitivity',
-                           get_cmd='SCAL?',
-                           set_cmd='SCAL {:d}',
-                           get_parser=self._get_sensitivity,
-                           set_parser=self._set_sensitivity
-                           )
-        self.add_parameter(name='filter_slope',
-                           label='Filter slope',
-                           unit='dB/oct',
-                           get_cmd='OFSL?',
-                           set_cmd='OFSL {}',
-                           val_mapping={6: 0,
-                                        12: 1,
-                                        18: 2,
-                                        24: 3})
-        self.add_parameter(name='sync_filter',
-                           label='Sync filter',
-                           get_cmd='SYNC?',
-                           set_cmd='SYNC {}',
-                           val_mapping={'OFF': 0,
-                                        'ON': 1})
-        self.add_parameter(name='noise_bandwidth',
-                           label='Noise bandwidth',
-                           unit='Hz',
-                           get_cmd='ENBW?',
-                           get_parser=float)
-        self.add_parameter(name='signal_strength',
-                           label='Signal strength indicator',
-                           get_cmd='ILVL?',
-                           get_parser=int)
-        self.add_parameter(name='signal_input',
-                           label='Signal input',
-                           get_cmd='IVMD?',
-                           get_parser=self._get_input_config,
-                           set_cmd='IVMD {}',
-                           set_parser=self._set_input_config,
-                           vals=Enum(*self._INPUT_SIGNAL_TO_N.keys()))
-        self.add_parameter(name='input_range',
-                           label='Input range',
-                           unit='V',
-                           get_cmd='IRNG?',
-                           set_cmd='IRNG {}',
-                           val_mapping={1: 0,
-                                        300e-3: 1,
-                                        100e-3: 2,
-                                        30e-3: 3,
-                                        10e-3: 4})
-        self.add_parameter(name='input_config',
-                           label='Input configuration',
-                           get_cmd='ISRC?',
-                           set_cmd='ISRC {}',
-                           val_mapping={'a': 0,
-                                        'a-b': 1})
-        self.add_parameter(name='input_shield',
-                           label='Input shield',
-                           get_cmd='IGND?',
-                           set_cmd='IGND {}',
-                           val_mapping={'float': 0,
-                                        'ground': 1})
-        self.add_parameter(name='input_gain',
-                           label='Input gain',
-                           unit='ohm',
-                           get_cmd='ICUR?',
-                           set_cmd='ICUR {}',
-                           val_mapping={1e6: 0,
-                                        100e6: 1})
-        self.add_parameter(name='adv_filter',
-                           label='Advanced filter',
-                           get_cmd='ADVFILT?',
-                           set_cmd='ADVFILT {}',
-                           val_mapping={'OFF': 0,
-                                        'ON': 1})
-        self.add_parameter(name='input_coupling',
-                           label='Input coupling',
-                           get_cmd='ICPL?',
-                           set_cmd='ICPL {}',
-                           val_mapping={'ac': 0, 'dc': 1})
-        self.add_parameter(name='time_constant',
-                           label='Time constant',
-                           unit='s',
-                           get_cmd='OFLT?',
-                           set_cmd='OFLT {}',
-                           val_mapping={1e-6: 0, 3e-6: 1,
-                                        10e-6: 2, 30e-6: 3,
-                                        100e-6: 4, 300e-6: 5,
-                                        1e-3: 6, 3e-3: 7,
-                                        10e-3: 8, 30e-3: 9,
-                                        100e-3: 10, 300e-3: 11,
-                                        1: 12, 3: 13,
-                                        10: 14, 30: 15,
-                                        100: 16, 300: 17,
-                                        1e3: 18, 3e3: 19,
-                                        10e3: 20, 30e3: 21})
+        self.sensitivity: Parameter = self.add_parameter(
+            name="sensitivity",
+            label="Sensitivity",
+            get_cmd="SCAL?",
+            set_cmd="SCAL {:d}",
+            get_parser=self._get_sensitivity,
+            set_parser=self._set_sensitivity,
+        )
+        """Parameter sensitivity"""
+        self.filter_slope: Parameter = self.add_parameter(
+            name="filter_slope",
+            label="Filter slope",
+            unit="dB/oct",
+            get_cmd="OFSL?",
+            set_cmd="OFSL {}",
+            val_mapping={6: 0, 12: 1, 18: 2, 24: 3},
+        )
+        """Parameter filter_slope"""
+        self.sync_filter: Parameter = self.add_parameter(
+            name="sync_filter",
+            label="Sync filter",
+            get_cmd="SYNC?",
+            set_cmd="SYNC {}",
+            val_mapping={"OFF": 0, "ON": 1},
+        )
+        """Parameter sync_filter"""
+        self.noise_bandwidth: Parameter = self.add_parameter(
+            name="noise_bandwidth",
+            label="Noise bandwidth",
+            unit="Hz",
+            get_cmd="ENBW?",
+            get_parser=float,
+        )
+        """Parameter noise_bandwidth"""
+        self.signal_strength: Parameter = self.add_parameter(
+            name="signal_strength",
+            label="Signal strength indicator",
+            get_cmd="ILVL?",
+            get_parser=int,
+        )
+        """Parameter signal_strength"""
+        self.signal_input: Parameter = self.add_parameter(
+            name="signal_input",
+            label="Signal input",
+            get_cmd="IVMD?",
+            get_parser=self._get_input_config,
+            set_cmd="IVMD {}",
+            set_parser=self._set_input_config,
+            vals=Enum(*self._INPUT_SIGNAL_TO_N.keys()),
+        )
+        """Parameter signal_input"""
+        self.input_range: Parameter = self.add_parameter(
+            name="input_range",
+            label="Input range",
+            unit="V",
+            get_cmd="IRNG?",
+            set_cmd="IRNG {}",
+            val_mapping={1: 0, 300e-3: 1, 100e-3: 2, 30e-3: 3, 10e-3: 4},
+        )
+        """Parameter input_range"""
+        self.input_config: Parameter = self.add_parameter(
+            name="input_config",
+            label="Input configuration",
+            get_cmd="ISRC?",
+            set_cmd="ISRC {}",
+            val_mapping={"a": 0, "a-b": 1},
+        )
+        """Parameter input_config"""
+        self.input_shield: Parameter = self.add_parameter(
+            name="input_shield",
+            label="Input shield",
+            get_cmd="IGND?",
+            set_cmd="IGND {}",
+            val_mapping={"float": 0, "ground": 1},
+        )
+        """Parameter input_shield"""
+        self.input_gain: Parameter = self.add_parameter(
+            name="input_gain",
+            label="Input gain",
+            unit="ohm",
+            get_cmd="ICUR?",
+            set_cmd="ICUR {}",
+            val_mapping={1e6: 0, 100e6: 1},
+        )
+        """Parameter input_gain"""
+        self.adv_filter: Parameter = self.add_parameter(
+            name="adv_filter",
+            label="Advanced filter",
+            get_cmd="ADVFILT?",
+            set_cmd="ADVFILT {}",
+            val_mapping={"OFF": 0, "ON": 1},
+        )
+        """Parameter adv_filter"""
+        self.input_coupling: Parameter = self.add_parameter(
+            name="input_coupling",
+            label="Input coupling",
+            get_cmd="ICPL?",
+            set_cmd="ICPL {}",
+            val_mapping={"ac": 0, "dc": 1},
+        )
+        """Parameter input_coupling"""
+        self.time_constant: Parameter = self.add_parameter(
+            name="time_constant",
+            label="Time constant",
+            unit="s",
+            get_cmd="OFLT?",
+            set_cmd="OFLT {}",
+            val_mapping={
+                1e-6: 0,
+                3e-6: 1,
+                10e-6: 2,
+                30e-6: 3,
+                100e-6: 4,
+                300e-6: 5,
+                1e-3: 6,
+                3e-3: 7,
+                10e-3: 8,
+                30e-3: 9,
+                100e-3: 10,
+                300e-3: 11,
+                1: 12,
+                3: 13,
+                10: 14,
+                30: 15,
+                100: 16,
+                300: 17,
+                1e3: 18,
+                3e3: 19,
+                10e3: 20,
+                30e3: 21,
+            },
+        )
+        """Parameter time_constant"""
 
-        self.add_parameter(
+        self.external_reference_trigger: Parameter = self.add_parameter(
             name="external_reference_trigger",
             label="External reference trigger mode",
             get_cmd="RTRG?",
@@ -871,144 +965,168 @@ class SR86x(VisaInstrument):
                 "NEGTTL": 2,
             },
             docstring="The triggering mode for synchronization of the "
-                      "internal reference signal with the externally provided "
-                      "one"
+            "internal reference signal with the externally provided "
+            "one",
         )
+        """The triggering mode for synchronization of the internal reference signal with the externally provided one"""
 
-        self.add_parameter(
+        self.reference_source: Parameter = self.add_parameter(
             name="reference_source",
             label="Reference source",
             get_cmd="RSRC?",
             set_cmd="RSRC {}",
-            val_mapping={
-                "INT": 0,
-                "EXT": 1,
-                "DUAL": 2,
-                "CHOP": 3
-            },
-            docstring="The source of the reference signal"
+            val_mapping={"INT": 0, "EXT": 1, "DUAL": 2, "CHOP": 3},
+            docstring="The source of the reference signal",
         )
+        """The source of the reference signal"""
 
-        self.add_parameter(
-            name="external_reference_trigger_input_resistance",
-            label="External reference trigger input resistance",
-            get_cmd="REFZ?",
-            set_cmd="REFZ {}",
-            val_mapping={
-                "50": 0,
-                "50OHMS": 0,
-                0: 0,
-                "1M": 1,
-                "1MEG": 1,
-                1: 1,
-            },
-            docstring="Input resistance of the input for the external "
-                      "reference signal"
+        self.external_reference_trigger_input_resistance: Parameter = (
+            self.add_parameter(
+                name="external_reference_trigger_input_resistance",
+                label="External reference trigger input resistance",
+                get_cmd="REFZ?",
+                set_cmd="REFZ {}",
+                val_mapping={
+                    "50": 0,
+                    "50OHMS": 0,
+                    0: 0,
+                    "1M": 1,
+                    "1MEG": 1,
+                    1: 1,
+                },
+                docstring="Input resistance of the input for the external "
+                "reference signal",
+            )
         )
+        """Input resistance of the input for the external reference signal"""
 
         # Auto functions
-        self.add_function('auto_range', call_cmd='ARNG')
-        self.add_function('auto_scale', call_cmd='ASCL')
-        self.add_function('auto_phase', call_cmd='APHS')
+        self.add_function("auto_range", call_cmd="ARNG")
+        self.add_function("auto_scale", call_cmd="ASCL")
+        self.add_function("auto_phase", call_cmd="APHS")
 
         # Data transfer
         # first 4 parameters from a list of 16 below.
-        self.add_parameter('X',
-                           label='In-phase Magnitude',
-                           get_cmd='OUTP? 0',
-                           get_parser=float,
-                           unit='V')
-        self.add_parameter('Y',
-                           label='Out-phase Magnitude',
-                           get_cmd='OUTP? 1',
-                           get_parser=float,
-                           unit='V')
-        self.add_parameter('R',
-                           label='Magnitude',
-                           get_cmd='OUTP? 2',
-                           get_parser=float,
-                           unit='V')
-        self.add_parameter('P',
-                           label='Phase',
-                           get_cmd='OUTP? 3',
-                           get_parser=float,
-                           unit='deg')
-        self.add_parameter('complex_voltage',
-                           label='Voltage',
-                           get_cmd=self._get_complex_voltage,
-                           unit='V',
-                           vals=ComplexNumbers())
+        self.X: Parameter = self.add_parameter(
+            "X",
+            label="In-phase Magnitude",
+            get_cmd="OUTP? 0",
+            get_parser=float,
+            unit="V",
+        )
+        """Parameter X"""
+        self.Y: Parameter = self.add_parameter(
+            "Y",
+            label="Out-phase Magnitude",
+            get_cmd="OUTP? 1",
+            get_parser=float,
+            unit="V",
+        )
+        """Parameter Y"""
+        self.R: Parameter = self.add_parameter(
+            "R", label="Magnitude", get_cmd="OUTP? 2", get_parser=float, unit="V"
+        )
+        """Parameter R"""
+        self.P: Parameter = self.add_parameter(
+            "P", label="Phase", get_cmd="OUTP? 3", get_parser=float, unit="deg"
+        )
+        """Parameter P"""
+        self.complex_voltage: Parameter = self.add_parameter(
+            "complex_voltage",
+            label="Voltage",
+            get_cmd=self._get_complex_voltage,
+            unit="V",
+            vals=ComplexNumbers(),
+        )
+        """Parameter complex_voltage"""
 
         # CH1/CH2 Output Commands
-        self.add_parameter('X_offset',
-                           label='X offset ',
-                           unit='%',
-                           get_cmd='COFP? 0',
-                           set_cmd='COFP 0, {}',
-                           get_parser=float,
-                           vals=Numbers(min_value=-999.99, max_value=999.99))
-        self.add_parameter('Y_offset',
-                           label='Y offset',
-                           unit='%',
-                           get_cmd='COFP? 1',
-                           set_cmd='COFP 1, {}',
-                           get_parser=float,
-                           vals=Numbers(min_value=-999.99, max_value=999.99))
-        self.add_parameter('R_offset',
-                           label='R offset',
-                           unit='%',
-                           get_cmd='COFP? 2',
-                           set_cmd='COFP 2, {}',
-                           get_parser=float,
-                           vals=Numbers(min_value=-999.99, max_value=999.99))
-        self.add_parameter('X_expand',
-                           label='X expand multiplier',
-                           get_cmd='CEXP? 0',
-                           set_cmd='CEXP 0, {}',
-                           val_mapping={'OFF': '0',
-                                        'X10': '1',
-                                        'X100': '2'})
-        self.add_parameter('Y_expand',
-                           label='Y expand multiplier',
-                           get_cmd='CEXP? 1',
-                           set_cmd='CEXP 1, {}',
-                           val_mapping={'OFF': 0,
-                                        'X10': 1,
-                                        'X100': 2})
-        self.add_parameter('R_expand',
-                           label='R expand multiplier',
-                           get_cmd='CEXP? 2',
-                           set_cmd='CEXP 2, {}',
-                           val_mapping={'OFF': 0,
-                                        'X10': 1,
-                                        'X100': 2})
+        self.X_offset: Parameter = self.add_parameter(
+            "X_offset",
+            label="X offset ",
+            unit="%",
+            get_cmd="COFP? 0",
+            set_cmd="COFP 0, {}",
+            get_parser=float,
+            vals=Numbers(min_value=-999.99, max_value=999.99),
+        )
+        """Parameter X_offset"""
+        self.Y_offset: Parameter = self.add_parameter(
+            "Y_offset",
+            label="Y offset",
+            unit="%",
+            get_cmd="COFP? 1",
+            set_cmd="COFP 1, {}",
+            get_parser=float,
+            vals=Numbers(min_value=-999.99, max_value=999.99),
+        )
+        """Parameter Y_offset"""
+        self.R_offset: Parameter = self.add_parameter(
+            "R_offset",
+            label="R offset",
+            unit="%",
+            get_cmd="COFP? 2",
+            set_cmd="COFP 2, {}",
+            get_parser=float,
+            vals=Numbers(min_value=-999.99, max_value=999.99),
+        )
+        """Parameter R_offset"""
+        self.X_expand: Parameter = self.add_parameter(
+            "X_expand",
+            label="X expand multiplier",
+            get_cmd="CEXP? 0",
+            set_cmd="CEXP 0, {}",
+            val_mapping={"OFF": "0", "X10": "1", "X100": "2"},
+        )
+        """Parameter X_expand"""
+        self.Y_expand: Parameter = self.add_parameter(
+            "Y_expand",
+            label="Y expand multiplier",
+            get_cmd="CEXP? 1",
+            set_cmd="CEXP 1, {}",
+            val_mapping={"OFF": 0, "X10": 1, "X100": 2},
+        )
+        """Parameter Y_expand"""
+        self.R_expand: Parameter = self.add_parameter(
+            "R_expand",
+            label="R expand multiplier",
+            get_cmd="CEXP? 2",
+            set_cmd="CEXP 2, {}",
+            val_mapping={"OFF": 0, "X10": 1, "X100": 2},
+        )
+        """Parameter R_expand"""
 
         # Aux input/output
         for i in [0, 1, 2, 3]:
-            self.add_parameter(f'aux_in{i}',
-                               label=f'Aux input {i}',
-                               get_cmd=f'OAUX? {i}',
-                               get_parser=float,
-                               unit='V')
-            self.add_parameter(f'aux_out{i}',
-                               label=f'Aux output {i}',
-                               get_cmd=f'AUXV? {i}',
-                               get_parser=float,
-                               set_cmd=f'AUXV {i}, {{}}',
-                               unit='V')
+            self.add_parameter(
+                f"aux_in{i}",
+                label=f"Aux input {i}",
+                get_cmd=f"OAUX? {i}",
+                get_parser=float,
+                unit="V",
+            )
+            self.add_parameter(
+                f"aux_out{i}",
+                label=f"Aux output {i}",
+                get_cmd=f"AUXV? {i}",
+                get_parser=float,
+                set_cmd=f"AUXV {i}, {{}}",
+                unit="V",
+            )
 
         # Data channels:
         # 'DAT1' (green), 'DAT2' (blue), 'DAT3' (yellow), 'DAT4' (orange)
-        data_channels = ChannelList(self, "data_channels", SR86xDataChannel,
-                                    snapshotable=False)
-        for num, color in zip(range(self._N_DATA_CHANNELS),
-                              ('green', 'blue', 'yellow', 'orange')):
+        data_channels = ChannelList(
+            self, "data_channels", SR86xDataChannel, snapshotable=False
+        )
+        for num, color in zip(
+            range(self._N_DATA_CHANNELS), ("green", "blue", "yellow", "orange")
+        ):
             cmd_id = f"{num}"
             cmd_id_name = f"DAT{num + 1}"
             ch_name = f"data_channel_{num + 1}"
 
-            data_channel = SR86xDataChannel(
-                self, ch_name, cmd_id, cmd_id_name, color)
+            data_channel = SR86xDataChannel(self, ch_name, cmd_id, cmd_id_name, color)
 
             data_channels.append(data_channel)
             self.add_submodule(ch_name, data_channel)
@@ -1016,10 +1134,10 @@ class SR86x(VisaInstrument):
         self.add_submodule("data_channels", data_channels.to_channel_tuple())
 
         # Interface
-        self.add_function('reset', call_cmd='*RST')
+        self.add_function("reset", call_cmd="*RST")
 
-        self.add_function('disable_front_panel', call_cmd='OVRM 0')
-        self.add_function('enable_front_panel', call_cmd='OVRM 1')
+        self.add_function("disable_front_panel", call_cmd="OVRM 0")
+        self.add_function("enable_front_panel", call_cmd="OVRM 1")
 
         buffer = SR86xBuffer(self, f"{self.name}_buffer")
         self.add_submodule("buffer", buffer)
@@ -1032,39 +1150,39 @@ class SR86x(VisaInstrument):
             param.unit = unit
 
     def _get_complex_voltage(self) -> complex:
-        x, y = self.get_values('X', 'Y')
-        return x + 1.0j*y
+        x, y = self.get_values("X", "Y")
+        return x + 1.0j * y
 
     def _get_input_config(self, s: int) -> str:
         mode = self._N_TO_INPUT_SIGNAL[int(s)]
 
-        if mode == 'voltage':
+        if mode == "voltage":
             self.sensitivity.vals = self._VOLT_ENUM
-            self._set_units('V')
+            self._set_units("V")
         else:
             self.sensitivity.vals = self._CURR_ENUM
-            self._set_units('A')
+            self._set_units("A")
 
         return mode
 
     def _set_input_config(self, s: str) -> int:
-        if s == 'voltage':
+        if s == "voltage":
             self.sensitivity.vals = self._VOLT_ENUM
-            self._set_units('V')
+            self._set_units("V")
         else:
             self.sensitivity.vals = self._CURR_ENUM
-            self._set_units('A')
+            self._set_units("A")
 
         return self._INPUT_SIGNAL_TO_N[s]
 
     def _get_sensitivity(self, s: int) -> float:
-        if self.signal_input() == 'voltage':
+        if self.signal_input() == "voltage":
             return self._N_TO_VOLT[int(s)]
         else:
             return self._N_TO_CURR[int(s)]
 
     def _set_sensitivity(self, s: float) -> int:
-        if self.signal_input() == 'voltage':
+        if self.signal_input() == "voltage":
             return self._VOLT_TO_N[s]
         else:
             return self._CURR_TO_N[s]
@@ -1087,18 +1205,21 @@ class SR86x(VisaInstrument):
         """
         if not 2 <= len(parameter_names) <= 3:
             raise KeyError(
-                'It is only possible to request values of 2 or 3 parameters '
-                'at a time.')
+                "It is only possible to request values of 2 or 3 parameters "
+                "at a time."
+            )
 
         for name in parameter_names:
             if name not in self.PARAMETER_NAMES:
-                raise KeyError(f'{name} is not a valid parameter name. Refer '
-                               f'to `PARAMETER_NAMES` for a list of valid '
-                               f'parameter names')
+                raise KeyError(
+                    f"{name} is not a valid parameter name. Refer "
+                    f"to `PARAMETER_NAMES` for a list of valid "
+                    f"parameter names"
+                )
 
         p_ids = [self.PARAMETER_NAMES[name] for name in parameter_names]
         output = self.ask(f'SNAP? {",".join(p_ids)}')
-        return tuple(float(val) for val in output.split(','))
+        return tuple(float(val) for val in output.split(","))
 
     def get_data_channels_values(self) -> tuple[float, ...]:
         """
@@ -1107,8 +1228,8 @@ class SR86x(VisaInstrument):
         Returns:
             tuple of 4 values of the data channels
         """
-        output = self.ask('SNAPD?')
-        return tuple(float(val) for val in output.split(','))
+        output = self.ask("SNAPD?")
+        return tuple(float(val) for val in output.split(","))
 
     def get_data_channels_parameters(
         self, query_instrument: bool = True
@@ -1126,13 +1247,12 @@ class SR86x(VisaInstrument):
             a tuple of 4 strings of parameter names
         """
         if query_instrument:
-            method_name = 'get'
+            method_name = "get"
         else:
-            method_name = 'get_latest'
+            method_name = "get_latest"
 
         return tuple(
-            getattr(getattr(self.data_channels[i], 'assigned_parameter'),
-                    method_name)()
+            getattr(getattr(self.data_channels[i], "assigned_parameter"), method_name)()
             for i in range(self._N_DATA_CHANNELS)
         )
 

@@ -5,7 +5,6 @@ import warnings
 from contextlib import contextmanager
 from io import StringIO
 from pathlib import Path
-from typing import Optional
 
 import pytest
 from ruamel.yaml import YAML
@@ -449,7 +448,7 @@ def test_simple_mock_load_instrument(simple_mock_station) -> None:
 
 
 def test_enable_force_reconnect() -> None:
-    def get_instrument_config(enable_forced_reconnect: Optional[bool]) -> str:
+    def get_instrument_config(enable_forced_reconnect: bool | None) -> str:
         return f"""
 instruments:
   mock:
@@ -462,8 +461,8 @@ instruments:
 
     def assert_on_reconnect(
         *,
-        use_user_cfg: Optional[bool],
-        use_instr_cfg: Optional[bool],
+        use_user_cfg: bool | None,
+        use_instr_cfg: bool | None,
         expect_failure: bool,
     ) -> None:
         qcodes.config["station"]["enable_forced_reconnect"] = use_user_cfg
@@ -526,13 +525,12 @@ instruments:
     mock = st.load_instrument("mock")
     for ch in ["ch1", "ch2"]:
         assert ch in mock.parameters.keys()
-    assert len(mock.parameters) == 3  # there is also IDN
+    assert len(mock.parameters) == 4  # there is also IDN and a fixed param
 
     # Overwrite parameter
     mock = st.load_instrument("mock", gates=["TestGate"])
     assert "TestGate" in mock.parameters.keys()
-    assert len(mock.parameters) == 2  # there is also IDN
-
+    assert len(mock.parameters) == 3  # there is also IDN and a fixed param
     # test address
     sims_path = get_qcodes_path("instrument", "sims")
     st = station_from_config_str(

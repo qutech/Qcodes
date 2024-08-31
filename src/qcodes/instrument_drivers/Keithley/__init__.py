@@ -1,6 +1,8 @@
-from typing import Union
-
-from ._Keithley_2600 import Keithley2600MeasurementStatus
+from ._Keithley_2600 import (
+    Keithley2600,
+    Keithley2600Channel,
+    Keithley2600MeasurementStatus,
+)
 from .Keithley_2000 import Keithley2000
 from .Keithley_2400 import Keithley2400
 from .Keithley_2450 import (
@@ -37,20 +39,21 @@ from .Keithley_s46 import (
     KeithleyS46RelayLock,
 )
 
-Keithley26xx = Union[
-    Keithley2601B,
-    Keithley2602A,
-    Keithley2602B,
-    Keithley2604B,
-    Keithley2611B,
-    Keithley2612B,
-    Keithley2614B,
-    Keithley2634B,
-    Keithley2635B,
-    Keithley2636B,
-]
+Keithley26xx = (
+    Keithley2601B
+    | Keithley2602A
+    | Keithley2602B
+    | Keithley2604B
+    | Keithley2611B
+    | Keithley2612B
+    | Keithley2614B
+    | Keithley2634B
+    | Keithley2635B
+    | Keithley2636B
+)
+
 """
-All Keithley 26xx SMUs supported by QCoDeS.
+Type alias for all Keithley 26xx SMUs supported by QCoDeS.
 """
 
 __all__ = [
@@ -61,7 +64,9 @@ __all__ = [
     "Keithley2450Sense",
     "Keithley2450Source",
     "Keithley2600MeasurementStatus",
+    "Keithley2600",
     "Keithley26xx",
+    "Keithley2600Channel",
     "Keithley2601B",
     "Keithley2602A",
     "Keithley2602B",

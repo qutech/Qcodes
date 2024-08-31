@@ -1,23 +1,34 @@
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from qcodes import validators as vals
-from qcodes.instrument import ChannelList, InstrumentChannel, VisaInstrument
+from qcodes.instrument import (
+    ChannelList,
+    InstrumentBaseKWArgs,
+    InstrumentChannel,
+    VisaInstrument,
+    VisaInstrumentKWArgs,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from typing_extensions import Unpack
+
+    from qcodes.parameters import Parameter
 
 
 class RigolDP8xxChannel(InstrumentChannel):
     def __init__(
         self,
-        parent: "_RigolDP8xx",
+        parent: "RigolDP8xxBase",
         name: str,
         channel: int,
         ch_range: tuple[float, float],
         ovp_range: tuple[float, float],
         ocp_range: tuple[float, float],
+        **kwargs: "Unpack[InstrumentBaseKWArgs]",
     ):
-        super().__init__(parent, name)
+        super().__init__(parent, name, **kwargs)
 
         self.vmax = ch_range[0]
         self.imax = ch_range[1]
@@ -29,7 +40,7 @@ class RigolDP8xxChannel(InstrumentChannel):
         def strstrip(s: str) -> str:
             return str(s).strip()
 
-        self.add_parameter(
+        self.set_voltage: Parameter = self.add_parameter(
             "set_voltage",
             label="Target voltage output",
             set_cmd="{} :SOURce:VOLTage:LEVel:IMMediate:AMPLitude {}".format(
@@ -40,7 +51,8 @@ class RigolDP8xxChannel(InstrumentChannel):
             unit="V",
             vals=vals.Numbers(min(0, self.vmax), max(0, self.vmax)),
         )
-        self.add_parameter(
+        """Parameter set_voltage"""
+        self.set_current: Parameter = self.add_parameter(
             "set_current",
             label="Target current output",
             set_cmd="{} :SOURce:CURRent:LEVel:IMMediate:AMPLitude {}".format(
@@ -51,7 +63,8 @@ class RigolDP8xxChannel(InstrumentChannel):
             unit="A",
             vals=vals.Numbers(0, self.imax),
         )
-        self.add_parameter(
+        """Parameter set_current"""
+        self.state: Parameter = self.add_parameter(
             "state",
             label="Output enabled",
             set_cmd="{} :OUTPut:STATe {}".format(select_cmd, "{}"),
@@ -59,7 +72,8 @@ class RigolDP8xxChannel(InstrumentChannel):
             get_parser=strstrip,
             vals=vals.OnOff(),
         )
-        self.add_parameter(
+        """Parameter state"""
+        self.mode: Parameter = self.add_parameter(
             "mode",
             label="Get the output mode",
             get_cmd=f"{select_cmd} :OUTPut:MODE?",
@@ -70,28 +84,32 @@ class RigolDP8xxChannel(InstrumentChannel):
                 "Unregulated": "UR",
             },
         )
-        self.add_parameter(
+        """Parameter mode"""
+        self.voltage: Parameter = self.add_parameter(
             "voltage",
             label="Measured voltage",
             get_cmd=f"{select_cmd} :MEASure:VOLTage:DC?",
             get_parser=float,
             unit="V",
         )
-        self.add_parameter(
+        """Parameter voltage"""
+        self.current: Parameter = self.add_parameter(
             "current",
             label="Measured current",
             get_cmd=f"{select_cmd} :MEASure:CURRent:DC?",
             get_parser=float,
             unit="A",
         )
-        self.add_parameter(
+        """Parameter current"""
+        self.power: Parameter = self.add_parameter(
             "power",
             label="Measured power",
             get_cmd=f"{select_cmd} :MEASure:POWer?",
             get_parser=float,
             unit="W",
         )
-        self.add_parameter(
+        """Parameter power"""
+        self.ovp_value: Parameter = self.add_parameter(
             "ovp_value",
             label="Over Voltage Protection value",
             set_cmd="{} :VOLTage:PROTection:LEVel {}".format(select_cmd, "{}"),
@@ -100,7 +118,8 @@ class RigolDP8xxChannel(InstrumentChannel):
             unit="V",
             vals=vals.Numbers(self.ovp_range[0], self.ovp_range[1]),
         )
-        self.add_parameter(
+        """Parameter ovp_value"""
+        self.ovp_state: Parameter = self.add_parameter(
             "ovp_state",
             label="Over Voltage Protection status",
             set_cmd="{} :VOLTage:PROTection:STATe {}".format(select_cmd, "{}"),
@@ -108,7 +127,8 @@ class RigolDP8xxChannel(InstrumentChannel):
             get_parser=strstrip,
             vals=vals.OnOff(),
         )
-        self.add_parameter(
+        """Parameter ovp_state"""
+        self.ocp_value: Parameter = self.add_parameter(
             "ocp_value",
             label="Over Current Protection value",
             set_cmd="{} :CURRent:PROTection:LEVel {}".format(select_cmd, "{}"),
@@ -117,7 +137,8 @@ class RigolDP8xxChannel(InstrumentChannel):
             unit="A",
             vals=vals.Numbers(self.ocp_range[0], self.ocp_range[1]),
         )
-        self.add_parameter(
+        """Parameter ocp_value"""
+        self.ocp_state: Parameter = self.add_parameter(
             "ocp_state",
             label="Over Current Protection status",
             set_cmd="{} :CURRent:PROTection:STATe {}".format(select_cmd, "{}"),
@@ -125,14 +146,16 @@ class RigolDP8xxChannel(InstrumentChannel):
             get_parser=strstrip,
             vals=vals.OnOff(),
         )
+        """Parameter ocp_state"""
 
 
-class _RigolDP8xx(VisaInstrument):
+class RigolDP8xxBase(VisaInstrument):
     """
     This is the general DP8xx Power Supply driver class that implements shared parameters and functionality
-    among all similar power supply from Rigole.
+    among all similar power supply from Rigol.
 
-    This driver was written to be inherited from by a specific driver (e.g. DP832).
+    This driver was written to be inherited from by a specific driver (e.g. RigolDP832). This baseClass should not
+    be instantiated directly.
     """
 
     def __init__(
@@ -146,13 +169,13 @@ class _RigolDP8xx(VisaInstrument):
         ocp_ranges: tuple[
             "Sequence[tuple[float, float]]", "Sequence[tuple[float, float]]"
         ],
-        **kwargs: Any,
+        **kwargs: "Unpack[VisaInstrumentKWArgs]",
     ):
         super().__init__(name, address, **kwargs)
 
         # Check if precision extension has been installed
         opt = self.installed_options()
-        if 'DP8-ACCURACY' in opt:
+        if "DP8-ACCURACY" in opt:
             ovp_ranges_selected = ovp_ranges[1]
             ocp_ranges_selected = ocp_ranges[1]
         else:
@@ -160,7 +183,9 @@ class _RigolDP8xx(VisaInstrument):
             ocp_ranges_selected = ocp_ranges[0]
 
         # channel-specific parameters
-        channels = ChannelList(self, "SupplyChannel", RigolDP8xxChannel, snapshotable=False)
+        channels = ChannelList(
+            self, "SupplyChannel", RigolDP8xxChannel, snapshotable=False
+        )
         for ch_num, channel_range in enumerate(channels_ranges):
             ch_name = f"ch{ch_num + 1}"
             channel = RigolDP8xxChannel(
@@ -169,7 +194,7 @@ class _RigolDP8xx(VisaInstrument):
                 ch_num + 1,
                 channel_range,
                 ovp_ranges_selected[ch_num],
-                ocp_ranges_selected[ch_num]
+                ocp_ranges_selected[ch_num],
             )
             channels.append(channel)
             self.add_submodule(ch_name, channel)
@@ -181,6 +206,6 @@ class _RigolDP8xx(VisaInstrument):
         """Return the installed options"""
 
         opt = self.ask("*OPT?")
-        optl = opt.strip().split(',')
-        optl_clean = [x for x in optl if x != '0']
+        optl = opt.strip().split(",")
+        optl_clean = [x for x in optl if x != "0"]
         return optl_clean

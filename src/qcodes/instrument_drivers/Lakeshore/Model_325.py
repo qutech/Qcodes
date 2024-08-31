@@ -6,9 +6,14 @@ It will eventually be deprecated and removed
 from collections.abc import Iterable
 from enum import IntFlag
 from itertools import takewhile
-from typing import Any, Optional, TextIO, cast
+from typing import TYPE_CHECKING, Any, Optional, TextIO, cast
 
-from qcodes.instrument import ChannelList, InstrumentChannel, VisaInstrument
+from qcodes.instrument import (
+    ChannelList,
+    InstrumentChannel,
+    VisaInstrument,
+    VisaInstrumentKWArgs,
+)
 from qcodes.parameters import Group, GroupParameter
 from qcodes.validators import Enum, Numbers
 
@@ -19,38 +24,41 @@ from .Lakeshore_model_325 import LakeshoreModel325Status as Status
 from .Lakeshore_model_325 import _get_sanitize_data as get_sanitize_data
 from .Lakeshore_model_325 import _read_curve_file as read_curve_file
 
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
 
 class Model_325(VisaInstrument):
     """
     Lakeshore Model 325 Temperature Controller Driver
     """
 
-    def __init__(self, name: str, address: str, **kwargs: Any) -> None:
-        super().__init__(name, address, terminator="\r\n", **kwargs)
+    default_terminator = "\r\n"
 
-        sensors = ChannelList(
-            self, "sensor", Model_325_Sensor, snapshotable=False)
+    def __init__(
+        self, name: str, address: str, **kwargs: "Unpack[VisaInstrumentKWArgs]"
+    ) -> None:
+        super().__init__(name, address, **kwargs)
+
+        sensors = ChannelList(self, "sensor", Model_325_Sensor, snapshotable=False)
 
         for inp in ["A", "B"]:
             sensor = Model_325_Sensor(self, f"sensor_{inp}", inp)  # type: ignore[arg-type]
             sensors.append(sensor)
-            self.add_submodule(f'sensor_{inp}', sensor)
+            self.add_submodule(f"sensor_{inp}", sensor)
 
         self.add_submodule("sensor", sensors.to_channel_tuple())
 
-        heaters = ChannelList(
-            self, "heater", Model_325_Heater, snapshotable=False)
+        heaters = ChannelList(self, "heater", Model_325_Heater, snapshotable=False)
 
         for loop in [1, 2]:
             heater = Model_325_Heater(self, f"heater_{loop}", loop)  # type: ignore[arg-type]
             heaters.append(heater)
-            self.add_submodule(f'heater_{loop}', heater)
+            self.add_submodule(f"heater_{loop}", heater)
 
         self.add_submodule("heater", heaters.to_channel_tuple())
 
-        curves = ChannelList(
-            self, "curve", Model_325_Curve, snapshotable=False
-        )
+        curves = ChannelList(self, "curve", Model_325_Curve, snapshotable=False)
 
         for curve_index in range(1, 35):
             curve = Model_325_Curve(self, curve_index)  # type: ignore[arg-type]

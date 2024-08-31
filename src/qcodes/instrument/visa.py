@@ -1,10 +1,11 @@
 """Visa instrument driver based on pyvisa."""
+
 from __future__ import annotations
 
 import logging
 import warnings
 from importlib.resources import as_file, files
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 from weakref import finalize
 
 import pyvisa
@@ -17,12 +18,14 @@ from qcodes.logger import get_instrument_logger
 from qcodes.utils import DelayedKeyboardInterrupt
 
 from .instrument import Instrument
-from .instrument_base import InstrumentBase
+from .instrument_base import InstrumentBase, InstrumentBaseKWArgs
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
-VISA_LOGGER = '.'.join((InstrumentBase.__module__, 'com', 'visa'))
+    from typing_extensions import NotRequired, Unpack
+
+VISA_LOGGER = ".".join((InstrumentBase.__module__, "com", "visa"))
 
 log = logging.getLogger(__name__)
 
@@ -45,16 +48,52 @@ def _close_visa_handle(
         # the resource is already closed
         pass
 
-class VisaInstrument(Instrument):
 
+class VisaInstrumentKWArgs(TypedDict):
+    """
+    This TypedDict defines the type of the kwargs that can be passed to the VisaInstrument class.
+    A subclass of VisaInstrument should take ``**kwargs: Unpack[VisaInstrumentKWArgs]`` as input
+    and forward this to the super class to ensure that it can accept all the arguments defined here.
+
+    Consult the documentation of :class:`.VisaInstrument` for more information on the arguments.
+    """
+
+    metadata: NotRequired[Mapping[Any, Any] | None]
+    """
+    Additional static metadata to add to this instrument's JSON snapshot.
+    """
+    label: NotRequired[str | None]
+    """
+    Nicely formatted name of the instrument; if None,
+    the ``name`` is used.
+    """
+    terminator: NotRequired[str | None]
+    """Read and write termination character(s)."""
+    timeout: NotRequired[float]
+    "Seconds to allow for responses."
+    device_clear: NotRequired[bool]
+    "Perform a device clear."
+    visalib: NotRequired[str | None]
+    """
+    Visa backend to use when connecting to this instrument.
+    """
+    pyvisa_sim_file: NotRequired[str | None]
+    """
+    Name of a pyvisa-sim yaml file used to simulate the instrument.
+    """
+
+
+class VisaInstrument(Instrument):
     """
     Base class for all instruments using visa connections.
 
     Args:
         name: What this instrument is called locally.
         address: The visa resource name to use to connect.
-        timeout: seconds to allow for responses. Default 5.
+        timeout: seconds to allow for responses.  If "unset" will read the value from
+           `self.default_timeout`. None means wait forever. Default 5.
         terminator: Read and write termination character(s).
+            If unset will use `self.default_terminator`.
             If None the terminator will not be set and we
             rely on the defaults from PyVisa. Default None.
         device_clear: Perform a device clear. Default True.
@@ -75,23 +114,39 @@ class VisaInstrument(Instrument):
             ``qcodes.instruments.sims:AimTTi_PL601P.yaml`` in which case it is loaded
             from the supplied module. Note that it is an error to pass both
             ``pyvisa_sim_file`` and ``visalib``.
+        **kwargs: Other kwargs are forwarded to the baseclass.
 
     See help for :class:`.Instrument` for additional information on writing
     instrument subclasses.
 
     """
 
+    default_terminator: str | None = None
+    """
+    The default terminator to use if the terminator is not specified when creating the instrument.
+    None means use the default terminator from PyVisa.
+    """
+    default_timeout: float | None = 5
+    """
+    The default timeout in seconds if the timeout is not specified when creating the instrument.
+    None means no timeout e.g. wait forever.
+    """
+
     def __init__(
         self,
         name: str,
         address: str,
-        timeout: float = 5,
-        terminator: str | None = None,
+        timeout: float | None | Literal["Unset"] = "Unset",
+        terminator: str | None | Literal["Unset"] = "Unset",
         device_clear: bool = True,
         visalib: str | None = None,
         pyvisa_sim_file: str | None = None,
-        **kwargs: Any,
+        **kwargs: Unpack[InstrumentBaseKWArgs],
     ):
+        if terminator == "Unset":
+            terminator = self.default_terminator
+        if timeout == "Unset":
+            timeout = self.default_timeout
 
         super().__init__(name, **kwargs)
         self.visa_log = get_instrument_logger(self, VISA_LOGGER)
@@ -168,7 +223,6 @@ class VisaInstrument(Instrument):
     def _open_resource(
         self, address: str, visalib: str | None
     ) -> tuple[pyvisa.resources.MessageBasedResource, str, pyvisa.ResourceManager]:
-
         # in case we're changing the address - close the old handle first
         if getattr(self, "visa_handle", None):
             self.visa_handle.close()
@@ -219,12 +273,12 @@ class VisaInstrument(Instrument):
         # SCPI commands.
 
         # Simulated instruments do not support a handle clear
-        if self.visabackend == 'sim':
+        if self.visabackend == "sim":
             return
 
         flush_operation = (
-                vi_const.BufferOperation.discard_read_buffer_no_io |
-                vi_const.BufferOperation.discard_write_buffer
+            vi_const.BufferOperation.discard_read_buffer_no_io
+            | vi_const.BufferOperation.discard_write_buffer
         )
 
         if isinstance(self.visa_handle, pyvisa.resources.SerialInstrument):
@@ -250,13 +304,12 @@ class VisaInstrument(Instrument):
         # both float('+inf') and None are accepted as meaning infinite timeout
         # however None does not pass the typechecking in 1.11.1
         if timeout is None:
-            self.visa_handle.timeout = float('+inf')
+            self.visa_handle.timeout = float("+inf")
         else:
             # pyvisa uses milliseconds but we use seconds
             self.visa_handle.timeout = timeout * 1000.0
 
     def _get_visa_timeout(self) -> float | None:
-
         timeout_ms = self.visa_handle.timeout
         if timeout_ms is None:
             return None
@@ -266,7 +319,7 @@ class VisaInstrument(Instrument):
 
     def close(self) -> None:
         """Disconnect and irreversibly tear down the instrument."""
-        if getattr(self, 'visa_handle', None):
+        if getattr(self, "visa_handle", None):
             self.visa_handle.close()
 
         if getattr(self, "visabackend", None) == "sim" and getattr(
@@ -310,7 +363,9 @@ class VisaInstrument(Instrument):
         Args:
             cmd: The command to send to the instrument.
         """
-        with DelayedKeyboardInterrupt():
+        with DelayedKeyboardInterrupt(
+            context={"instrument": self.name, "reason": "Visa Instrument write"}
+        ):
             self.visa_log.debug(f"Writing: {cmd}")
             self.visa_handle.write(cmd)
 
@@ -324,7 +379,9 @@ class VisaInstrument(Instrument):
         Returns:
             str: The instrument's response.
         """
-        with DelayedKeyboardInterrupt():
+        with DelayedKeyboardInterrupt(
+            context={"instrument": self.name, "reason": "Visa Instrument ask"}
+        ):
             self.visa_log.debug(f"Querying: {cmd}")
             response = self.visa_handle.query(cmd)
             self.visa_log.debug(f"Response: {response}")
@@ -355,8 +412,9 @@ class VisaInstrument(Instrument):
         Returns:
             dict: base snapshot
         """
-        snap = super().snapshot_base(update=update,
-                                     params_to_skip_update=params_to_skip_update)
+        snap = super().snapshot_base(
+            update=update, params_to_skip_update=params_to_skip_update
+        )
 
         snap["address"] = self._address
         snap["terminator"] = self.visa_handle.read_termination

@@ -30,15 +30,15 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12"]
         min-version: [false]
         include:
           - os: ubuntu-latest
-            python-version: "3.9"
+            python-version: "3.10"
             min-version: true
         exclude:
           - os: ubuntu-latest
-            python-version: "3.9"
+            python-version: "3.10"
           - os: windows-latest
             python-version: "3.11"
           - os: windows-latest
@@ -50,17 +50,17 @@ jobs:
     steps:
 
     - name: Harden Runner
-      uses: step-security/harden-runner@a4aa98b93cab29d9b1101a6143fb8bce00e2eac4 # v2.7.1
+      uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
       with:
         egress-policy: audit
 
-    - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       with:
         submodules: true
         # we need full history with tags for the version number
         fetch-depth: '0'
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
+      uses: actions/setup-python@f677139bbe7f9c59b41e40162b753c062f5d49a3 # v5.2.0
       with:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
@@ -76,10 +76,12 @@ jobs:
         uv pip compile pyproject.toml --extra test --resolution=lowest-direct --output-file min-requirements.txt
         pip install -r min-requirements.txt
         pip install .[test]
+        echo "PYTEST_OPT=-Wignore" >> $GITHUB_ENV
       if: ${{ matrix.min-version }}
     - name: install qcodes
       run: |
         pip install .[test] -c requirements.txt
+        echo "PYTEST_OPT=" >> $GITHUB_ENV
       if: ${{ !matrix.min-version }}
     - name: Get Pyright Version
       id: pyright-version
@@ -89,7 +91,7 @@ jobs:
         echo "version=$PYRIGHT_VERSION" >> $GITHUB_OUTPUT
       working-directory: .github
       shell: bash
-    - uses: jakebailey/pyright-action@3bdde3b31d26f0f1f5de051b1fbd7a536a9a4e7f # v2.3.1
+    - uses: jakebailey/pyright-action@b5d50e5cde6547546a5c4ac92e416a8c2c1a1dfe # v2.3.2
       with:
         version: ${{ steps.pyright-version.outputs.version }}
       if: ${{ !matrix.min-version }}
@@ -98,13 +100,13 @@ jobs:
       if: ${{ !matrix.min-version }}
     - name: Run parallel tests
       run: |
-        pytest -m "not serial" --cov=qcodes --cov-report xml --hypothesis-profile ci  --durations=20 tests
+        pytest -m "not serial" --cov=qcodes --cov-report xml --hypothesis-profile ci  --durations=20 $PYTEST_OPT tests
 # a subset of the tests fails when run in parallel on Windows so run those in serial here
     - name: Run serial tests
       run: |
-        pytest -m "serial" -n 0 --dist no --cov=qcodes --cov-report xml --cov-append --hypothesis-profile ci tests
+        pytest -m "serial" -n 0 --dist no --cov=qcodes --cov-report xml --cov-append --hypothesis-profile ci $PYTEST_OPT tests
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@84508663e988701840491b86de86b666e8a86bed # v4.3.0
+      uses: codecov/codecov-action@e28ff129e5465c2c0dcc6f003fc735cb6ae0c673 # v4.5.0
       with:
         file: ./coverage.xml
         env_vars: OS,PYTHON

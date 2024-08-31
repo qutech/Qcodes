@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Callable, Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import pytest
@@ -9,6 +9,9 @@ import pytest
 from qcodes.validators import Multiples
 
 from .conftest import AClass, a_func
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 divisors = (3, 7, 11, 13)
 not_divisors: tuple[
@@ -121,7 +124,7 @@ def test_divisors() -> None:
             n = Multiples(divisor=dd)  # type:ignore[arg-type]
 
     n = Multiples(divisor=3, min_value=1, max_value=10)
-    assert repr(n) == '<Ints 1<=v<=10, Multiples of 3>'
+    assert repr(n) == "<Ints 1<=v<=10, Multiples of 3>"
 
 
 def test_valid_values() -> None:

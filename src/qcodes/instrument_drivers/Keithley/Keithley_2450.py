@@ -1,10 +1,11 @@
-from typing import TYPE_CHECKING, Any, ClassVar, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Optional, cast
 
 import numpy as np
-from typing_extensions import TypedDict
+from typing_extensions import TypedDict, Unpack
 
-from qcodes.instrument import InstrumentChannel, VisaInstrument
+from qcodes.instrument import InstrumentChannel, VisaInstrument, VisaInstrumentKWArgs
 from qcodes.parameters import (
+    Parameter,
     ParameterWithSetpoints,
     create_on_off_val_mapping,
     invert_val_mapping,
@@ -37,9 +38,9 @@ class ParameterWithSetpointsCustomized(ParameterWithSetpoints):
     This customized class is used for the "sweep" parameter.
     """
 
-    _user_selected_data: Optional[list[Any]] = None
+    _user_selected_data: list[Any] | None = None
 
-    def get_selected(self) -> Optional[list[Any]]:
+    def get_selected(self) -> list[Any] | None:
         return self._user_selected_data
 
 
@@ -73,7 +74,7 @@ class Keithley2450Buffer(InstrumentChannel):
         self,
         parent: "Keithley2450",
         name: str,
-        size: Optional[int] = None,
+        size: int | None = None,
         style: str = "",
     ) -> None:
         super().__init__(parent, name)
@@ -94,22 +95,24 @@ class Keithley2450Buffer(InstrumentChannel):
                 f"{self.buffer_name} size to {self._size}."
             )
 
-        self.add_parameter(
+        self.size: Parameter = self.add_parameter(
             "size",
             get_cmd=f":TRACe:POINts? '{self.buffer_name}'",
             set_cmd=f":TRACe:POINts {{}}, '{self.buffer_name}'",
             get_parser=int,
             docstring="The number of readings a buffer can store.",
         )
+        """The number of readings a buffer can store."""
 
-        self.add_parameter(
+        self.number_of_readings: Parameter = self.add_parameter(
             "number_of_readings",
             get_cmd=f":TRACe:ACTual? '{self.buffer_name}'",
             get_parser=int,
             docstring="To get the number of readings in the reading buffer.",
         )
+        """To get the number of readings in the reading buffer."""
 
-        self.add_parameter(
+        self.elements: Parameter = self.add_parameter(
             "elements",
             get_cmd=None,
             get_parser=self.from_scpi_to_name,
@@ -118,6 +121,7 @@ class Keithley2450Buffer(InstrumentChannel):
             vals=Lists(Enum(*list(self.buffer_elements.keys()))),
             docstring="List of buffer elements to read.",
         )
+        """List of buffer elements to read."""
 
     def from_name_to_scpi(self, element_names: list[str]) -> list[str]:
         return [self.buffer_elements[element] for element in element_names]
@@ -132,8 +136,8 @@ class Keithley2450Buffer(InstrumentChannel):
 
     def __exit__(
         self,
-        exception_type: Optional[type[BaseException]],
-        value: Optional[BaseException],
+        exception_type: type[BaseException] | None,
+        value: BaseException | None,
         traceback: Optional["TracebackType"],
     ) -> None:
         self.delete()
@@ -207,6 +211,7 @@ class _FunctionMode(TypedDict):
     unit: str
     range_vals: Numbers
 
+
 class Keithley2450Sense(InstrumentChannel):
     """
     The sense module of the Keithley 2450 SMU.
@@ -240,14 +245,15 @@ class Keithley2450Sense(InstrumentChannel):
 
         self.function = self.parent.sense_function
 
-        self.add_parameter(
+        self.four_wire_measurement: Parameter = self.add_parameter(
             "four_wire_measurement",
             set_cmd=f":SENSe:{self._proper_function}:RSENse {{}}",
             get_cmd=f":SENSe:{self._proper_function}:RSENse?",
             val_mapping=create_on_off_val_mapping(on_val="1", off_val="0"),
         )
+        """Parameter four_wire_measurement"""
 
-        self.add_parameter(
+        self.range: Parameter = self.add_parameter(
             "range",
             set_cmd=f":SENSe:{self._proper_function}:RANGe {{}}",
             get_cmd=f":SENSe:{self._proper_function}:RANGe?",
@@ -255,13 +261,15 @@ class Keithley2450Sense(InstrumentChannel):
             get_parser=float,
             unit=unit,
         )
+        """Parameter range"""
 
-        self.add_parameter(
+        self.auto_range: Parameter = self.add_parameter(
             "auto_range",
             set_cmd=f":SENSe:{self._proper_function}:RANGe:AUTO {{}}",
             get_cmd=f":SENSe:{self._proper_function}:RANGe:AUTO?",
             val_mapping=create_on_off_val_mapping(on_val="1", off_val="0"),
         )
+        """Parameter auto_range"""
 
         self.add_parameter(
             self._proper_function,
@@ -271,7 +279,7 @@ class Keithley2450Sense(InstrumentChannel):
             snapshot_value=False,
         )
 
-        self.add_parameter(
+        self.sweep: ParameterWithSetpointsCustomized = self.add_parameter(
             "sweep",
             label=self._proper_function,
             get_cmd=self._measure_sweep,
@@ -279,50 +287,57 @@ class Keithley2450Sense(InstrumentChannel):
             vals=Arrays(shape=(self.parent.npts,)),
             parameter_class=ParameterWithSetpointsCustomized,
         )
+        """Parameter sweep"""
 
-        self.add_parameter(
+        self.nplc: Parameter = self.add_parameter(
             "nplc",
             get_cmd=f":SENSe:{self._proper_function}:NPLCycles?",
             set_cmd=f":SENSe:{self._proper_function}:NPLCycles {{}}",
             vals=Numbers(0.001, 10),
         )
+        """Parameter nplc"""
 
-        self.add_parameter("user_number", get_cmd=None, set_cmd=None, vals=Ints(1, 5))
+        self.user_number: Parameter = self.add_parameter(
+            "user_number", get_cmd=None, set_cmd=None, vals=Ints(1, 5)
+        )
+        """Parameter user_number"""
 
-        self.add_parameter(
+        self.user_delay: Parameter = self.add_parameter(
             "user_delay",
             get_cmd=self._get_user_delay,
             set_cmd=self._set_user_delay,
             get_parser=float,
             vals=Numbers(0, 1e4),
         )
+        """Parameter user_delay"""
 
-        self.add_parameter(
+        self.auto_zero_enabled: Parameter = self.add_parameter(
             "auto_zero_enabled",
             get_cmd=f":SENSe:{self._proper_function}:AZERo?",
             set_cmd=f":SENSe:{self._proper_function}:AZERo {{}}",
             val_mapping=create_on_off_val_mapping(on_val="1", off_val="0"),
-            docstring="This command enables or disables automatic updates to"
-            "the internal reference measurements (autozero) of the"
+            docstring="This command enables or disables automatic updates to "
+            "the internal reference measurements (autozero) of the "
             "instrument.",
         )
+        """This command enables or disables automatic updates to the internal reference measurements (autozero) of the instrument."""
 
-        self.add_parameter(
+        self.count: Parameter = self.add_parameter(
             "count",
             get_cmd=":SENSe:COUNt?",
             set_cmd=":SENSe:COUNt {}",
             docstring="The number of measurements to make when a measurement "
             "is requested.",
         )
+        """The number of measurements to make when a measurement is requested."""
 
-    def _measure(self) -> Union[float, str]:
+    def _measure(self) -> float | str:
         if not self.parent.output_enabled():
             raise RuntimeError("Output needs to be on for a measurement")
         buffer_name = self.parent.buffer_name()
         return float(self.ask(f":MEASure? '{buffer_name}'"))
 
     def _measure_sweep(self) -> np.ndarray:
-
         source = cast(Keithley2450Source, self.parent.source)
         source.sweep_start()
         buffer_name = self.parent.buffer_name()
@@ -389,9 +404,9 @@ class Keithley2450Source(InstrumentChannel):
         unit = self.function_modes[self._proper_function]["unit"]
 
         self.function = self.parent.source_function
-        self._sweep_arguments: Optional[_SweepDict] = None
+        self._sweep_arguments: _SweepDict | None = None
 
-        self.add_parameter(
+        self.range: Parameter = self.add_parameter(
             "range",
             set_cmd=f":SOUR:{self._proper_function}:RANGe {{}}",
             get_cmd=f":SOUR:{self._proper_function}:RANGe?",
@@ -399,28 +414,32 @@ class Keithley2450Source(InstrumentChannel):
             get_parser=float,
             unit=unit,
         )
+        """Parameter range"""
 
-        self.add_parameter(
+        self.auto_range: Parameter = self.add_parameter(
             "auto_range",
             set_cmd=f":SOURce:{self._proper_function}:RANGe:AUTO {{}}",
             get_cmd=f":SOURce:{self._proper_function}:RANGe:AUTO?",
             val_mapping=create_on_off_val_mapping(on_val="1", off_val="0"),
         )
+        """Parameter auto_range"""
 
         limit_cmd = {"current": "VLIM", "voltage": "ILIM"}[self._proper_function]
-        self.add_parameter(
+        self.limit: Parameter = self.add_parameter(
             "limit",
             set_cmd=f"SOUR:{self._proper_function}:{limit_cmd} {{}}",
             get_cmd=f"SOUR:{self._proper_function}:{limit_cmd}?",
             get_parser=float,
             unit=unit,
         )
+        """Parameter limit"""
 
-        self.add_parameter(
+        self.limit_tripped: Parameter = self.add_parameter(
             "limit_tripped",
             get_cmd=f":SOUR:{self._proper_function}:{limit_cmd}:TRIPped?",
             val_mapping={True: 1, False: 0},
         )
+        """Parameter limit_tripped"""
 
         self.add_parameter(
             self._proper_function,
@@ -431,38 +450,45 @@ class Keithley2450Source(InstrumentChannel):
             snapshot_value=False,
         )
 
-        self.add_parameter(
+        self.sweep_axis: Parameter = self.add_parameter(
             "sweep_axis",
             label=self._proper_function,
             get_cmd=self.get_sweep_axis,
             vals=Arrays(shape=(self.parent.npts,)),
             unit=unit,
         )
+        """Parameter sweep_axis"""
 
-        self.add_parameter(
+        self.delay: Parameter = self.add_parameter(
             "delay",
             get_cmd=f":SOURce:{self._proper_function}:DELay?",
             set_cmd=f":SOURce:{self._proper_function}:DELay {{}}",
             vals=Numbers(0, 1e4),
         )
+        """Parameter delay"""
 
-        self.add_parameter("user_number", get_cmd=None, set_cmd=None, vals=Ints(1, 5))
+        self.user_number: Parameter = self.add_parameter(
+            "user_number", get_cmd=None, set_cmd=None, vals=Ints(1, 5)
+        )
+        """Parameter user_number"""
 
-        self.add_parameter(
+        self.user_delay: Parameter = self.add_parameter(
             "user_delay",
             get_cmd=self._get_user_delay,
             set_cmd=self._set_user_delay,
             vals=Numbers(0, 1e4),
         )
+        """Parameter user_delay"""
 
-        self.add_parameter(
+        self.auto_delay: Parameter = self.add_parameter(
             "auto_delay",
             get_cmd=f":SOURce:{self._proper_function}:DELay:AUTO?",
             set_cmd=f":SOURce:{self._proper_function}:DELay:AUTO {{}}",
             val_mapping=create_on_off_val_mapping(on_val="1", off_val="0"),
         )
+        """Parameter auto_delay"""
 
-        self.add_parameter(
+        self.read_back_enabled: Parameter = self.add_parameter(
             "read_back_enabled",
             get_cmd=f":SOURce:{self._proper_function}:READ:BACK?",
             set_cmd=f":SOURce:{self._proper_function}:READ:BACK {{}}",
@@ -471,8 +497,9 @@ class Keithley2450Source(InstrumentChannel):
             "measured source value or the configured source value "
             "when making a measurement.",
         )
+        """This command determines if the instrument records the measured source value or the configured source value when making a measurement."""
 
-        self.add_parameter(
+        self.block_during_ramp: Parameter = self.add_parameter(
             "block_during_ramp",
             initial_value=False,
             get_cmd=None,
@@ -482,6 +509,7 @@ class Keithley2450Source(InstrumentChannel):
             "execution of subsequent code. This parameter allows _proper_function"
             "to either block or not.",
         )
+        """Setting the source output level alone cannot block the execution of subsequent code. This parameter allows _proper_functionto either block or not."""
 
     def _set_proper_function(self, value: float) -> None:
         self.write(f"SOUR:{self._proper_function} {value}")
@@ -511,7 +539,6 @@ class Keithley2450Source(InstrumentChannel):
         dual: str = "OFF",
         buffer_name: str = "defbuffer1",
     ) -> None:
-
         self._sweep_arguments = _SweepDict(
             start=start,
             stop=stop,
@@ -564,9 +591,12 @@ class Keithley2450(VisaInstrument):
     The QCoDeS driver for the Keithley 2450 SMU
     """
 
-    def __init__(self, name: str, address: str, **kwargs: Any) -> None:
+    default_terminator = "\n"
 
-        super().__init__(name, address, terminator="\n", **kwargs)
+    def __init__(
+        self, name: str, address: str, **kwargs: Unpack[VisaInstrumentKWArgs]
+    ) -> None:
+        super().__init__(name, address, **kwargs)
 
         if not self._has_correct_language_mode():
             self.log.warning(
@@ -578,7 +608,7 @@ class Keithley2450(VisaInstrument):
             )
             return
 
-        self.add_parameter(
+        self.source_function: Parameter = self.add_parameter(
             "source_function",
             set_cmd=self._set_source_function,
             get_cmd=":SOUR:FUNC?",
@@ -587,8 +617,9 @@ class Keithley2450(VisaInstrument):
                 for key, value in Keithley2450Source.function_modes.items()
             },
         )
+        """Parameter source_function"""
 
-        self.add_parameter(
+        self.sense_function: Parameter = self.add_parameter(
             "sense_function",
             set_cmd=self._set_sense_function,
             get_cmd=":SENS:FUNC?",
@@ -597,35 +628,40 @@ class Keithley2450(VisaInstrument):
                 for key, value in Keithley2450Sense.function_modes.items()
             },
         )
+        """Parameter sense_function"""
 
-        self.add_parameter(
+        self.terminals: Parameter = self.add_parameter(
             "terminals",
             set_cmd="ROUTe:TERMinals {}",
             get_cmd="ROUTe:TERMinals?",
             vals=Enum("rear", "front"),
         )
+        """Parameter terminals"""
 
-        self.add_parameter(
+        self.output_enabled: Parameter = self.add_parameter(
             "output_enabled",
             set_cmd=":OUTP {}",
             get_cmd=":OUTP?",
             val_mapping=create_on_off_val_mapping(on_val="1", off_val="0"),
         )
+        """Parameter output_enabled"""
 
-        self.add_parameter(
+        self.line_frequency: Parameter = self.add_parameter(
             "line_frequency",
             get_cmd=":SYSTem:LFRequency?",
             unit="Hz",
             docstring="returns the power line frequency setting that is used "
             "for NPLC calculations",
         )
+        """returns the power line frequency setting that is used for NPLC calculations"""
 
-        self.add_parameter(
+        self.buffer_name: Parameter = self.add_parameter(
             "buffer_name",
             get_cmd=None,
             set_cmd=None,
             docstring="name of the reading buffer in using",
         )
+        """name of the reading buffer in using"""
 
         # Make a source module for every source function ('current' and 'voltage')
         for proper_source_function in Keithley2450Source.function_modes:
@@ -661,6 +697,7 @@ class Keithley2450(VisaInstrument):
         self.write(
             f":SENS:FUNC {value}",
         )
+        assert self.sense_function.inverse_val_mapping is not None
         sense_function = self.sense_function.inverse_val_mapping[value]
         sense = self.submodules[f"_sense_{sense_function}"]
         if not isinstance(sense, Keithley2450Sense):
@@ -691,8 +728,9 @@ class Keithley2450(VisaInstrument):
             )
 
         self.write(f":SOUR:FUNC {value}")
+        assert self.source_function.inverse_val_mapping is not None
         source_function = self.source_function.inverse_val_mapping[value]
-        source = self.submodules[f"_source_{source_function}"]
+        source = cast(Keithley2450Source, self.submodules[f"_source_{source_function}"])
         self.sense.sweep.setpoints = (source.sweep_axis,)
         if not isinstance(source, Keithley2450Source):
             raise RuntimeError(
@@ -728,7 +766,7 @@ class Keithley2450(VisaInstrument):
         return cast(Keithley2450Sense, submodule)
 
     def buffer(
-        self, name: str, size: Optional[int] = None, style: str = ""
+        self, name: str, size: int | None = None, style: str = ""
     ) -> Keithley2450Buffer:
         self.buffer_name(name)
         if f"_buffer_{name}" in self.submodules:

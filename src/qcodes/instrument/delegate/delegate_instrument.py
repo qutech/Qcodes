@@ -42,12 +42,14 @@ class _DelegateMixin:
         setters: Mapping[str, MutableMapping[str, Any]] | None = None,
         units: Mapping[str, str] | None = None,
         metadata: Mapping[Any, Any] | None = None,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(*args, metadata=metadata, **kwargs)
         if parameters is not None:
             if grouped_parameter_names is None:
-                grouped_parameter_names = {param_name: None for param_name in parameters}
+                grouped_parameter_names = {
+                    param_name: None for param_name in parameters
+                }
             self._create_and_add_parameters(
                 station=station,
                 parameters=parameters,
@@ -81,6 +83,7 @@ class _DelegateMixin:
             parent: Measurement station
             path: Relative path to parse
         """
+
         def _parse_path(parent: Any, elem: Sequence[str]) -> Any:
             child = getattr(parent, elem[0])
             if len(elem) == 1:
@@ -110,8 +113,7 @@ class _DelegateMixin:
                         name = path.split(".")[-1]
                         parent_path = ".".join(path.split(".")[:-1])
                         parent = self.parse_instrument_path(
-                            parent=self,
-                            path=parent_path
+                            parent=self, path=parent_path
                         )
                     else:
                         parent, name = self, path
@@ -131,22 +133,27 @@ class _DelegateMixin:
     ) -> None:
         """Add parameters to delegate instrument based on specified aliases,
         endpoints and setter methods"""
-        for (param_name, paths), (_, names) in zip(parameters.items(),
-                                                   grouped_parameter_names.items()):
+        for (param_name, paths), (_, names) in zip(
+            parameters.items(), grouped_parameter_names.items()
+        ):
             if isinstance(paths, str):
                 path_list: Sequence[str] = [paths]
             elif isinstance(paths, abc.Sequence):
                 path_list = paths
             else:
-                raise ValueError("Parameter paths should be either a string "
-                                 "or Sequence of strings.")
+                raise ValueError(
+                    "Parameter paths should be either a string "
+                    "or Sequence of strings."
+                )
             if isinstance(names, str):
                 name_list: Sequence[str] = [names]
             elif isinstance(names, (Sequence, type(None))):
                 name_list = names
             else:
-                raise ValueError("Parameter names should be either a string "
-                                 "or Sequence of strings.")
+                raise ValueError(
+                    "Parameter names should be either a string "
+                    "or Sequence of strings."
+                )
 
             self._create_and_add_parameter(
                 group_name=param_name,
@@ -156,7 +163,7 @@ class _DelegateMixin:
                 grouped_parameter_class=grouped_parameter_class,
                 setter=setters.get(param_name),
                 unit=units.get(param_name),
-                **grouped_parameter_kwargs
+                **grouped_parameter_kwargs,
             )
 
     @staticmethod
@@ -164,9 +171,7 @@ class _DelegateMixin:
         """Get the endpoint names"""
         parameter_names = [_e.name for _e in parameters]
         if len(parameter_names) != len(set(parameter_names)):
-            parameter_names = [
-                f"{_e}{n}" for n, _e in enumerate(parameter_names)
-            ]
+            parameter_names = [f"{_e}{n}" for n, _e in enumerate(parameter_names)]
         return parameter_names
 
     def _add_parameter(
@@ -200,7 +205,7 @@ class _DelegateMixin:
         getter: Callable[..., Any] | None = None,
         formatter: Callable[..., Any] | None = None,
         unit: str | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> None:
         """Create delegate parameter that links to a given set of paths
         (e.g. my_instrument.my_param) on the station"""
@@ -212,9 +217,7 @@ class _DelegateMixin:
 
         setter_fn = None
         if setter is not None:
-            setter_method = self.parse_instrument_path(
-                station, setter.pop("method")
-            )
+            setter_method = self.parse_instrument_path(station, setter.pop("method"))
             setter_fn = partial(setter_method, **setter)
 
         if len(source_parameters) > 1 or setter is not None:
@@ -229,7 +232,7 @@ class _DelegateMixin:
                 parameter_names=names,
                 setter=setter_fn,
                 getter=getter,
-                formatter=formatter
+                formatter=formatter,
             )
 
             self.add_parameter(
@@ -237,7 +240,7 @@ class _DelegateMixin:
                 parameter_class=grouped_parameter_class,
                 group=group,
                 unit=unit,
-                **kwargs
+                **kwargs,
             )
         else:
             self.add_parameter(
@@ -245,7 +248,7 @@ class _DelegateMixin:
                 source=source_parameters[0],
                 parameter_class=DelegateParameter,
                 unit=unit,
-                **kwargs
+                **kwargs,
             )
 
     def _create_and_add_channels(
@@ -257,12 +260,9 @@ class _DelegateMixin:
         channel_wrapper = None
         chnnls_dict: dict[str, str | Mapping[str, Any]] = dict(channels)
         channel_type_global = chnnls_dict.pop("type", None)
-        if channel_type_global is not None and \
-                not isinstance(channel_type_global, str):
+        if channel_type_global is not None and not isinstance(channel_type_global, str):
             raise ValueError("Wrong channel type.")
-        channel_wrapper_global = _get_channel_wrapper_class(
-            channel_type_global
-        )
+        channel_wrapper_global = _get_channel_wrapper_class(channel_type_global)
 
         for channel_name, input_params in chnnls_dict.items():
             if isinstance(input_params, Mapping):
@@ -302,15 +302,11 @@ class _DelegateMixin:
                 raise ValueError(msg) from v_err
 
         elif isinstance(input_params, Mapping) and channel_wrapper is not None:
-            channel = self.parse_instrument_path(
-                station, input_params["channel"]
-            )
+            channel = self.parse_instrument_path(station, input_params["channel"])
             wrapper_kwargs = dict(**kwargs, **input_params)
 
             channel = channel_wrapper(
-                parent=channel.parent,
-                name=channel_name,
-                **wrapper_kwargs
+                parent=channel.parent, name=channel_name, **wrapper_kwargs
             )
         else:
             raise ValueError(
@@ -405,11 +401,12 @@ class DelegateInstrument(_DelegateMixin, InstrumentBase):
 
 
 class DelegateInstrumentChannel(_DelegateMixin, InstrumentChannel):
-
     def __repr__(self) -> str:
         params = ", ".join(self.parameters.keys())
-        return (f"{self.__class__.__name__}(name={self.name}, parent={self.parent}, "
-                f"parameters={params})")
+        return (
+            f"{self.__class__.__name__}(name={self.name}, parent={self.parent}, "
+            f"parameters={params})"
+        )
 
 
 def _get_channel_wrapper_class(

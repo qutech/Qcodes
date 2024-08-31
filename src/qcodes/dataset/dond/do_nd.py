@@ -3,10 +3,10 @@ from __future__ import annotations
 import itertools
 import logging
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Union, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from opentelemetry import trace
@@ -88,7 +88,7 @@ class _Sweeper:
     ) -> tuple[tuple[tuple[SweepVarType, ...] | SweepVarType, ...], ...]:
         sweeps = tuple(sweep.get_setpoints() for sweep in self._sweeps)
         return cast(
-            tuple[tuple[Union[tuple[SweepVarType, ...], SweepVarType], ...], ...],
+            tuple[tuple[tuple[SweepVarType, ...] | SweepVarType, ...], ...],
             tuple(itertools.product(*sweeps)),
         )
 
@@ -710,7 +710,11 @@ def dond(
         [], KeyboardInterrupt | BreakConditionInterrupt | None
     ] = lambda: None
     try:
-        with catch_interrupts() as interrupted, ExitStack() as stack, params_meas_caller as call_params_meas:
+        with (
+            catch_interrupts() as interrupted,
+            ExitStack() as stack,
+            params_meas_caller as call_params_meas,
+        ):
             datasavers = [
                 stack.enter_context(
                     group.measurement_cxt.run(in_memory_cache=in_memory_cache)
