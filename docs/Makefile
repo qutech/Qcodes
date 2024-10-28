@@ -17,22 +17,16 @@ help:
 
 .PHONY: help Makefile clean genapi htmlfast
 
+# we remove a few extra directories that we used to generate
+# in case this is being executed from an older build
 clean:
 	rm -rf $(BUILDDIR)/*
 	rm -rf _auto
 	rm -rf api/generated
 	@$(SPHINXBUILD) -M clean "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
-# generate api docs for instruments automatically
-genapi:
-	sphinx-apidoc  -o  _auto  -d 10 ../qcodes \
-		../qcodes/instrument_drivers/keysight \
-		../qcodes/instrument_drivers/QuantumDesign/DynaCoolPPMS/private/*
-	mkdir -p api/generated/
-	cp _auto/qcodes.instrument_drivers.* api/generated/
-
 # faster build by skipping execution of all notebooks
-htmlfast: genapi
+htmlfast:
 	@$(SPHINXBUILD) -M html "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O) -D nbsphinx_execute=never
 
 # this is only left for backwards compatibility.
@@ -45,5 +39,5 @@ htmlapi: html
 
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
-%: Makefile genapi
+%: Makefile
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)

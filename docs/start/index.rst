@@ -10,11 +10,11 @@ Getting Started
 Requirements
 ------------
 
-You need a working python 3.7 installation, as the minimum Python version, to be able to
+You need a working python 3.9 installation, as the minimum Python version, to be able to
 use QCoDeS. We highly recommend installing Miniconda, which takes care of installing Python
 and managing packages. In the following it will be assumed that you use Miniconda.
 Download and install it from `here <https://docs.conda.io/en/latest/miniconda.html>`_. Make
-sure to download the latest version with python 3.7 or newer.
+sure to download the latest version with python 3.9 or newer.
 
 Once you download, install Miniconda according to the instructions on screen,
 choosing the single user installation option.
@@ -45,10 +45,9 @@ Here type in the prompt:
     conda activate qcodes
     pip install qcodes
 
-The first line creates a new conda environment that is called *qcodes*
-with python 3.9 (QCoDeS also supports 3.7 and 3.8). The second line activates
-this freshly created environment, so that the command in the third line will
-install qcodes for this environment.
+The first line creates a new conda environment that is called *qcodes* with
+python 3.9. The second line activates this freshly created environment, so that
+the command in the third line will install qcodes for this environment.
 
 Installing the latest QCoDeS release with conda
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -76,12 +75,11 @@ Finally we install QCoDeS into this environment.
 
 Installing QCoDeS from GitHub
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Clone the QCoDeS repository from GitHub from https://github.com/QCoDeS/Qcodes
+Clone the QCoDeS repository and submodules from GitHub from https://github.com/QCoDeS/Qcodes
 
 .. code:: bash
 
-    conda create qcodesdev python=3.9
-    conda activate qcodesdev
+    git clone --recurse-submodules https://github.com/QCoDeS/Qcodes <path-to-repository>
 
 Finally install QCoDeS add the repository via
 
@@ -98,6 +96,27 @@ dependencies. This can be done by installing QCoDeS using the `test` extra targe
 .. code:: bash
 
     pip install -e <path-to-repository>[test]
+
+Installing QCoDeS from a Forked GitHub Repository
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you've forked the QCoDeS repository, make sure to also fetch the tags from the upstream repository for accurate versioning, especially if you wish to install with test dependencies. Not doing so may result in version conflicts.
+
+.. code:: bash
+
+    # Add the original QCoDeS repository as the 'upstream' remote
+    git remote add upstream https://github.com/QCoDeS/Qcodes.git
+
+    # Fetch all tags from the 'upstream' repository
+    git fetch --tags upstream
+
+After fetching the tags, proceed with the installation as usual:
+
+.. code:: bash
+
+    pip install -e <path-to-forked-repository>
+    # Or with test dependencies
+    pip install -e <path-to-forked-repository>[test]
 
 Other dependencies
 ~~~~~~~~~~~~~~~~~~

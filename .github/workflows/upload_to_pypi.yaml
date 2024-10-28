@@ -5,17 +5,27 @@ on:
     tags:
       - v*
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
 
     runs-on: ubuntu-latest
-
+    environment: pypi-release-env
+    permissions:
+      id-token: write
     steps:
-    - uses: actions/checkout@v3.0.2
-    - name: Set up Python
-      uses: actions/setup-python@v3.1.2
+    - name: Harden Runner
+      uses: step-security/harden-runner@91182cccc01eb5e619899d80e4e971d6181294a7 # v2.10.1
       with:
-        python-version: '3.7'
+        egress-policy: audit
+
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+    - name: Set up Python
+      uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+      with:
+        python-version: '3.10'
     - name: Install build deps
       run: pip install --upgrade pip setuptools wheel build
     - name: Build
@@ -23,9 +33,5 @@ jobs:
         python -m build
     - name: Install Twine
       run: pip install twine
-    - name: Publish
-      env:
-        TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
-        TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
-      run: |
-        twine upload dist/*
+    - name: Publish to pypi
+      uses: pypa/gh-action-pypi-publish@f7600683efdcb7656dec5b29656edb7bc586e597 # release/v1

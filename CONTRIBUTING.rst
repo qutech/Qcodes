@@ -4,6 +4,19 @@ Contributing
 Hi, thanks for your interest in the project! We, the development team, welcome all pull requests
 from developers of any skill level.
 
+This project welcomes contributions and suggestions. Most contributions require you to
+agree to a Contributor License Agreement (CLA) declaring that you have the right to,
+and actually do, grant us the rights to use your contribution. For details, visit
+https://cla.microsoft.com.
+
+When you submit a pull request, a CLA-bot will automatically determine whether you need
+to provide a CLA and decorate the PR appropriately (e.g., label, comment). Simply follow the
+instructions provided by the bot. You will only need to do this once across all repositories using our CLA.
+
+This project has adopted the `Microsoft Open Source Code of Conduct <https://opensource.microsoft.com/codeofconduct/>`__.
+For more information see the `Code of Conduct FAQ <https://opensource.microsoft.com/codeofconduct/faq/>`__
+or contact `opencode@microsoft.com <mailto:opencode@microsoft.com>`__ with any additional questions or comments.
+
 Who are we?
 Jens H. Nielsen, William H.P Nielsen, Mikhail Astafev and Trevor Morgan
 are the current maintainers, or core developers, of QCoDeS.
@@ -15,6 +28,14 @@ While we strive for perfect documentation, we recommend any help requests be put
 so that the team and community can provide a solution.
 
 .. contents::
+
+Announcements
+-------------
+
+New releases of QCoDeS and other bigger news will be announced in
+`Github Discussions <https://github.com/QCoDeS/Qcodes/discussions>`__
+under the `Announcements <https://github.com/QCoDeS/Qcodes/discussions/categories/announcements>`__
+category.
 
 QCoDeS Community Drivers
 ------------------------
@@ -67,8 +88,8 @@ Development
 Setup
 ~~~~~
 
--  Clone and register the package for development as described in the
-   `README <README.md#installation>`__
+-  Clone and register the package for development as described
+   `here <http://microsoft.github.io/Qcodes/start/index.html#installation>`__
 -  Run tests
 -  Ready to hack
 
@@ -77,32 +98,34 @@ Setup
 Running Tests
 ~~~~~~~~~~~~~
 
-We don't want to reinvent the wheel, and thus use py.test.
+We don't want to reinvent the wheel, and thus use `pytest <https://docs.pytest.org/>`_.
 It's easy to install:
 
 ::
 
-    pip install -r test_requirements.txt
+    pip install .[test] -c requirements.txt
+
+(for editable install feel free to add `-e` flag to this call).
 
 Then to test and view the coverage:
 
 ::
 
-    pytest --cov=qcodes --cov-report xml --cov-config=setup.cfg
+    pytest --cov=qcodes --cov-report xml --cov-config=pyproject.toml
 
 To test and see the coverage (with missing lines) of a single module:
 
 ::
 
-    pytest --cov=qcodes.module.submodule --cov-report=term-missing qcodes/tests/test_file.py
+    pytest --cov=qcodes.module.submodule --cov-report=term-missing tests/test_file.py
 
 You can also run single tests with something like:
 
 ::
 
-    pytest.exe .\qcodes\tests\test_config.py
+    pytest.exe .\tests\test_config.py
     # or
-    pytest.exe .\qcodes\tests\test_config.py::test_add_and_describe
+    pytest.exe .\tests\test_config.py::test_add_and_describe
 
 
 If the tests pass, you should be ready to start developing!
@@ -270,12 +293,14 @@ Pull requests
 -  Document your changes so everyone can see that they are part of the next release:
    We are using `TownCrier <https://pypi.org/project/towncrier/>`__ to automatically
    generate a changelog from a set of individual files with one file per pull request.
-   Please create a file in the format ``number.categoryofcontribution`` in ``docs\changes\newsfragments``.
-   Here the number should either be the number of the pull request. To get the number of the pull request one must
-   first the pull request and then subsequently update the number. The category of contribution should be
-   one of ``breaking``, ``new``, ``improved``, ``new_driver`` ``improved_driver``, ``underthehood``.
-   The file should contain a small description of what is changed. If you have contributed documentation or an example
-   the file can also contain a link to this.
+   Please create a file with a name in the format ``number.categoryofcontribution`` in
+   ``docs\changes\newsfragments``. Here the number should be the number of the pull request.
+   To get the number of the pull request one must first open the pull request and then
+   subsequently take the number that GitHub assigned to the opened pull request.
+   The category of contribution should be one of ``breaking``, ``new``, ``improved``,
+   ``new_driver`` ``improved_driver``, ``underthehood``.
+   The file should contain a small description of what has changed.
+   If you have contributed documentation or an example the file can also contain a link to this.
 
 Automatic Testing (CI)
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -298,9 +323,9 @@ Our required checks consists of a number of jobs that performs the following act
 on Linux and on Windows.
 
 - Run our test suite using pytest as described above.
-- Perform type checking of the code in QCoDeS using MyPy. For many of the modules we enforce that the code must be
+- Perform type checking of the code in QCoDeS using MyPy and Pyright. For many of the modules we enforce that the code must be
   type annotated. We encourage all contributors to type annotate any contribution to QCoDeS. If you need help with this
-  please feel free to reach out.
+  please feel free to reach out. Pyright typechecks can be performed inline within VC-code using the Pylance extension.
 - Build the documentation using Sphinx with Sphinx warnings as errors. This includes execution of all example notebooks
   that are not explicitly marked as not to be executed. Please see here_ for information on how to disable execution of a
   notebook.
@@ -311,10 +336,8 @@ on Linux and on Windows.
     - Check that YAML, JSON and Python files are syntactically valid.
     - Check that there are no trailing whitespace or blank lines at the end of python files.
     - Check that all files uses the correct line endings (``\n`` for all files except ``.bat``)
-    - Run `pyupgrade  <https://github.com/asottile/pyupgrade>`_ on all python files.
-    - Run `Darker <https://github.com/akaihola/darker/>`_. This will enforce `Black <https://github.com/psf/black>`_
-      formatting and sorting of imports using `isort <https://pycqa.github.io/isort/>`_ on all new and changed code.
-      We do not format the entire codebase to not lose change history.
+    - Run `ruff <https://github.com/charliermarsh/ruff>`_  check and ruff format to check for comon style
+      issues in python code and format the code.
 
 
 Furthermore we also run our test suite with the minimum requirements stated to ensure that QCoDeS does work
@@ -326,9 +349,6 @@ Optional checks
 In addition to the required checks we perform two optional checks that can be regarded as guidelines rather than
 requirements.
 
-- We use Codacy to perform a number of style checks using `Pylint` and `Pydocstyle` among others. Please
-  adapt your changes to these recommendations as you see fit. It is not a requirement that all Codacy warnings and
-  errors are fixed. Do not insert comments to disable these warnings.
 - We measure code coverage using `Codecov`. This measures if a line of code is executed as part of a test.
   As much as possible we would encourage you to add tests to cover all changes. However, this may not always be
   possible especially when writing instrument drivers.
