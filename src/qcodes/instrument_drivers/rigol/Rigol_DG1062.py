@@ -171,6 +171,7 @@ class RigolDG1062Channel(InstrumentChannel):
             name: Name of the channel.
             channel: Number of the channel.
             **kwargs: Forwarded to base class.
+
         """
 
         super().__init__(parent, name, **kwargs)
@@ -323,7 +324,7 @@ class RigolDG1062Channel(InstrumentChannel):
         current_waveform = self.waveform_translate[parts[0]]
         param_vals: list[str | float] = [current_waveform]
         param_vals += [to_float(i) for i in parts[1:]]
-        param_names = ["waveform"] + list(self.waveform_params[current_waveform])
+        param_names = ["waveform", *list(self.waveform_params[current_waveform])]
         params_dict = dict(zip(param_names, param_vals))
 
         return params_dict

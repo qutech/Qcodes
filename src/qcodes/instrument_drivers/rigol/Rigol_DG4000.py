@@ -1,5 +1,5 @@
 from functools import partial
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from qcodes.instrument import VisaInstrument, VisaInstrumentKWArgs
 from qcodes.validators import Anything, Enum, Ints, MultiType, Numbers
@@ -34,6 +34,11 @@ def clean_string(s: str) -> str:
     s = s.lower()
 
     return s
+
+
+def _parse_string_strip(s: str) -> str:
+    """Parse an output of the VISA instrument, remove redundant terminators like \n"""
+    return s.strip()
 
 
 def parse_string_output(s: str) -> float | str:
@@ -238,13 +243,15 @@ class RigolDG4000(VisaInstrument):
                 ch + "output_polarity",
                 get_cmd=output + "POL?",
                 set_cmd=output + "POL {}",
-                val_mapping={"normal": "NORM", "inverted": "INV"},
+                get_parser=_parse_string_strip,
+                val_mapping={"normal": "NORMAL", "inverted": "INVERTED"},
             )
 
             self.add_parameter(
                 ch + "output_enabled",
                 get_cmd=output + "STAT?",
                 set_cmd=output + "STAT {}",
+                get_parser=_parse_string_strip,
                 val_mapping=on_off_map,
             )
 
@@ -738,7 +745,7 @@ class RigolDG4000(VisaInstrument):
 
         self.connect_message()
 
-    def _upload_data(self, data: Union["Sequence[float]", "np.ndarray"]) -> None:
+    def _upload_data(self, data: "Sequence[float] | np.ndarray") -> None:
         """
         Upload data to the AWG memory.
 

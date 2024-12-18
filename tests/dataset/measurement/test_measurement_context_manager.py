@@ -566,7 +566,7 @@ def test_subscribers_called_at_exiting_context_if_queue_is_not_empty(
         # we exit the "run()" context.
         ds = datasaver.dataset
         assert isinstance(ds, DataSet)
-        subscriber = list(ds.subscribers.values())[0]
+        subscriber = next(iter(ds.subscribers.values()))
         subscriber.min_queue_length = int(len(given_x_vals) + 1)
 
         for x in given_x_vals:
@@ -1709,7 +1709,7 @@ def test_datasaver_complex_array_parameters_array(
 
 
 @pytest.mark.parametrize("bg_writing", [True, False])
-def test_datasaver_multidim_array(experiment, bg_writing) -> None:  # noqa: F811
+def test_datasaver_multidim_array(experiment, bg_writing) -> None:
     """
     Test that inserting multidim parameters as arrays works as expected
     """

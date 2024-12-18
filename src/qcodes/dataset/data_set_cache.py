@@ -83,6 +83,7 @@ class DataSetCache(Generic[DatasetType_co]):
 
         Returns:
             The cached dataset.
+
         """
         if not self.live:
             self.load_data_from_db()
@@ -140,6 +141,7 @@ class DataSetCache(Generic[DatasetType_co]):
         Returns:
             A dict from parameter name to Pandas Dataframes. Each dataframe
             represents one parameter tree.
+
         """
         data = self.data()
         return load_to_dataframe_dict(data)
@@ -152,13 +154,14 @@ class DataSetCache(Generic[DatasetType_co]):
         Returns:
             A dict from parameter name to Pandas Dataframes. Each dataframe
             represents one parameter tree.
+
         """
         data = self.data()
         return load_to_concatenated_dataframe(data)
 
     def to_xarray_dataarray_dict(
         self, *, use_multi_index: Literal["auto", "always", "never"] = "auto"
-    ) -> dict[str, xr.DataArray]:  # noqa: F821
+    ) -> dict[str, xr.DataArray]:
         """
         Returns the values stored in the :class:`.dataset.data_set.DataSet` as a dict of
         :py:class:`xr.DataArray` s
@@ -260,6 +263,7 @@ def append_shaped_parameter_data_to_existing_arrays(
 
     Returns:
         Updated write and read status, and the updated ``data``
+
     """
     parameters = tuple(ps.name for ps in rundescriber.interdeps.non_dependencies)
     merged_data = {}

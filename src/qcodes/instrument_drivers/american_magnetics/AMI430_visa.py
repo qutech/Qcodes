@@ -137,6 +137,7 @@ class AMI430SwitchHeater(InstrumentChannel):
     @deprecated(
         "Use enabled parameter to enable/disable the switch heater.",
         category=QCoDeSDeprecationWarning,
+        stacklevel=2,
     )
     def disable(self) -> None:
         self._disable()
@@ -144,6 +145,7 @@ class AMI430SwitchHeater(InstrumentChannel):
     @deprecated(
         "Use enabled parameter to enable/disable the switch heater.",
         category=QCoDeSDeprecationWarning,
+        stacklevel=2,
     )
     def enable(self) -> None:
         self._enable()
@@ -154,6 +156,7 @@ class AMI430SwitchHeater(InstrumentChannel):
     @deprecated(
         "Use enabled parameter to inspect switch heater status.",
         category=QCoDeSDeprecationWarning,
+        stacklevel=2,
     )
     def check_enabled(self) -> bool:
         return self._check_enabled()
@@ -167,6 +170,7 @@ class AMI430SwitchHeater(InstrumentChannel):
     @deprecated(
         "Use state parameter to turn on the switch heater.",
         category=QCoDeSDeprecationWarning,
+        stacklevel=2,
     )
     def on(self) -> None:
         self._on()
@@ -180,6 +184,7 @@ class AMI430SwitchHeater(InstrumentChannel):
     @deprecated(
         "Use state parameter to turn off the switch heater.",
         category=QCoDeSDeprecationWarning,
+        stacklevel=2,
     )
     def off(self) -> None:
         self._off()
@@ -192,6 +197,7 @@ class AMI430SwitchHeater(InstrumentChannel):
     @deprecated(
         "Use state parameter to inspect if switch heater is on.",
         category=QCoDeSDeprecationWarning,
+        stacklevel=2,
     )
     def check_state(self) -> bool:
         return self._check_state()
@@ -234,6 +240,7 @@ class AMIModel430(VisaInstrument):
             reset: Should the reset method be called on the instrument at init time
             current_ramp_limit: A current ramp limit, in units of A/s
             **kwargs: Additional kwargs are passed to the base class
+
         """
         if "has_current_rating" in kwargs.keys():
             warnings.warn(
@@ -455,6 +462,7 @@ class AMIModel430(VisaInstrument):
             perform_safety_check: Whether to set the field via a parent
                 driver (if present), which might perform additional safety
                 checks.
+
         """
         # Check we aren't violating field limits
         field_lim = float(self.ask("COIL?")) * self.current_limit()
@@ -642,6 +650,7 @@ class AMIModel430(VisaInstrument):
 @deprecated(
     "Use qcodes.instrument_drivers.american_magnetics.AMIModel430 instead.",
     category=QCoDeSDeprecationWarning,
+    stacklevel=2,
 )
 class AMI430(AMIModel430):
     pass
@@ -677,6 +686,7 @@ class AMIModel4303D(Instrument):
                 iterable of callable field limit functions that define
                 region(s) of allowed values in 3D magnetic field space
             **kwargs: kwargs are forwarded to base class.
+
         """
         super().__init__(name, **kwargs)
 
@@ -1055,8 +1065,8 @@ class AMIModel4303D(Instrument):
                 f"{ramp_rate_units_of_instruments}"
             )
 
-        common_field_units = tuple(field_units_of_instruments.keys())[0]
-        common_ramp_rate_units = tuple(ramp_rate_units_of_instruments.keys())[0]
+        common_field_units = next(iter(field_units_of_instruments.keys()))
+        common_ramp_rate_units = next(iter(ramp_rate_units_of_instruments.keys()))
 
         return common_field_units, common_ramp_rate_units
 
@@ -1080,6 +1090,7 @@ class AMIModel4303D(Instrument):
 
         Args:
             values: a tuple of cartesian coordinates (x, y, z).
+
         """
         self.log.debug("Checking whether fields can be set")
 
@@ -1312,6 +1323,7 @@ class AMIModel4303D(Instrument):
 @deprecated(
     "Use qcodes.instrument_drivers.american_magnetics.AMIModel4303D instead.",
     category=QCoDeSDeprecationWarning,
+    stacklevel=2,
 )
 class AMI430_3D(AMIModel4303D):
     pass

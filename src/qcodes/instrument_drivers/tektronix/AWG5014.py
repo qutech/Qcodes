@@ -165,6 +165,7 @@ class TektronixAWG5014(VisaInstrument):
             address: GPIB or ethernet address as used by VISA
             num_channels: number of channels on the device
             **kwargs: kwargs are forwarded to base class.
+
         """
         super().__init__(name, address, **kwargs)
 
@@ -235,7 +236,7 @@ class TektronixAWG5014(VisaInstrument):
                                action cannot be undone so exercise
                                necessary caution. Also note that
                                passing a value less than the
-                               sequence’s current length will cause
+                               sequence's current length will cause
                                some sequence elements to be deleted at
                                the end of the sequence. For example if
                                self.get_sq_length returns 200 and you
@@ -255,7 +256,7 @@ class TektronixAWG5014(VisaInstrument):
                                action cannot be undone so exercise
                                necessary caution. Also note that
                                passing a value less than the
-                               sequence’s current length will cause
+                               sequence's current length will cause
                                some sequence elements to be deleted at
                                the end of the sequence. For example if
                                self.get_sq_length returns 200 and you
@@ -491,8 +492,8 @@ class TektronixAWG5014(VisaInstrument):
                     get_parser=float,
                 )
 
-        self.set("trigger_impedance", 50)
-        if self.get("clock_freq") != 1e9:
+        self.trigger_impedance.set(50)
+        if self.clock_freq.get() != 1e9:
             log.info("AWG clock freq not set to 1GHz")
 
         self.connect_message()
@@ -523,6 +524,7 @@ class TektronixAWG5014(VisaInstrument):
 
         Raises:
             ValueError: if none of the three states above apply.
+
         """
         state = self.ask("AWGControl:RSTATe?")
         if state.startswith("0"):
@@ -547,6 +549,7 @@ class TektronixAWG5014(VisaInstrument):
 
         Returns:
             The output of self.get_state()
+
         """
         self.write("AWGControl:RUN")
         return self.get_state()
@@ -573,6 +576,7 @@ class TektronixAWG5014(VisaInstrument):
 
         Returns:
             str: A comma-seperated string of the folder contents.
+
         """
         contents = self.ask("MMEMory:CATalog?")
         if print_contents:
@@ -591,6 +595,7 @@ class TektronixAWG5014(VisaInstrument):
 
         Returns:
             A string with the full path of the current folder.
+
         """
         return self.ask("MMEMory:CDIRectory?")
 
@@ -606,6 +611,7 @@ class TektronixAWG5014(VisaInstrument):
 
         Returns:
             The number of bytes written to instrument
+
         """
         writecmd = 'MMEMory:CDIRectory "{}"'
         return self.visa_handle.write(writecmd.format(file_path))
@@ -634,6 +640,7 @@ class TektronixAWG5014(VisaInstrument):
 
         Returns:
             A comma-seperated string of the folder contents.
+
         """
 
         dircheck = f"{folder}, DIR"
@@ -657,12 +664,12 @@ class TektronixAWG5014(VisaInstrument):
         defined waveforms can be ON.
         """
         for i in range(1, self.num_channels + 1):
-            self.set(f"ch{i}_state", 1)
+            self.parameters[f"ch{i}_state"].set(1)
 
     def all_channels_off(self) -> None:
         """Set the state of all channels to be OFF."""
         for i in range(1, self.num_channels + 1):
-            self.set(f"ch{i}_state", 0)
+            self.parameters[f"ch{i}_state"].set(0)
 
     #####################
     # Sequences section #
@@ -687,13 +694,14 @@ class TektronixAWG5014(VisaInstrument):
     def set_sqel_event_target_index(self, element_no: int, index: int) -> None:
         """
         This command sets the target index for
-        the sequencer’s event jump operation. Note that this will take
+        the sequencer's event jump operation. Note that this will take
         effect only when the event jump target type is set to
         INDEX.
 
         Args:
             element_no: The sequence element number
             index: The index to set the target to
+
         """
         self.write(f"SEQuence:ELEMent{element_no}:JTARGet:INDex {index}")
 
@@ -729,6 +737,7 @@ class TektronixAWG5014(VisaInstrument):
             element_no: The sequence element number
             goto_state: The GOTO state of the sequencer. Must be either
                 0 (OFF) or 1 (ON).
+
         """
         allowed_states = [0, 1]
         if goto_state not in allowed_states:
@@ -750,6 +759,7 @@ class TektronixAWG5014(VisaInstrument):
             element_no (int): The sequence element number
             state (int): The infinite loop state. Must be either 0 (OFF) or
                 1 (ON).
+
         """
         allowed_states = [0, 1]
         if state not in allowed_states:
@@ -768,6 +778,7 @@ class TektronixAWG5014(VisaInstrument):
 
         Args:
             element_no: The sequence element number. Default: 1.
+
         """
         return self.ask(f"SEQuence:ELEMent{element_no}:LOOP:COUNt?")
 
@@ -780,6 +791,7 @@ class TektronixAWG5014(VisaInstrument):
             loopcount: The number of times the sequence is being output.
                 The maximal possible number is 65536, beyond that: infinity.
             element_no: The sequence element number. Default: 1.
+
         """
         self.write(f"SEQuence:ELEMent{element_no}:LOOP:COUNt {loopcount}")
 
@@ -795,6 +807,7 @@ class TektronixAWG5014(VisaInstrument):
                 list (either User Defined or Predefined).
             channel: The output channel (1-4)
             element_no: The sequence element number. Default: 1.
+
         """
         self.write(f'SEQuence:ELEMent{element_no}:WAVeform{channel} "{waveform_name}"')
 
@@ -809,6 +822,7 @@ class TektronixAWG5014(VisaInstrument):
 
         Returns:
             The name of the waveform.
+
         """
         return self.ask(f"SEQuence:ELEMent{element_no}:WAVeform{channel}?")
 
@@ -847,6 +861,7 @@ class TektronixAWG5014(VisaInstrument):
 
         Returns:
             The current state. Example: '1'.
+
         """
         return self.ask(f"SEQuence:ELEMent{element_no}:TWAit?")
 
@@ -872,6 +887,7 @@ class TektronixAWG5014(VisaInstrument):
             element_no: The sequence element number
             jtar_state: The jump target type. Must be either 'INDEX',
                 'NEXT', or 'OFF'.
+
         """
         self.write(f"SEQuence:ELEMent{element_no}:JTARget:TYPE {jtar_state}")
 
@@ -884,6 +900,7 @@ class TektronixAWG5014(VisaInstrument):
         Returns:
             str: Either 'HARD' or 'SOFT' indicating that the instrument is in\
               either hardware or software sequencer mode.
+
         """
         return self.ask("AWGControl:SEQuence:TYPE?")
 
@@ -914,6 +931,7 @@ class TektronixAWG5014(VisaInstrument):
             value: The value of that record.
             dtype: String specifying the data type of the record.
                 Allowed values: 'h', 'd', 's'.
+
         """
         if len(dtype) == 1:
             record_data = struct.pack("<" + dtype, value)
@@ -947,7 +965,7 @@ class TektronixAWG5014(VisaInstrument):
         log.info("Generating sequence_cfg")
 
         AWG_sequence_cfg = {
-            "SAMPLING_RATE": self.get("clock_freq"),
+            "SAMPLING_RATE": self.clock_freq.get(),
             "CLOCK_SOURCE": (
                 1 if self.clock_source().startswith("INT") else 2
             ),  # Internal | External
@@ -957,27 +975,27 @@ class TektronixAWG5014(VisaInstrument):
             "EXTERNAL_REFERENCE_TYPE": 1,  # Fixed | Variable
             "REFERENCE_CLOCK_FREQUENCY_SELECTION": 1,
             # 10 MHz | 20 MHz | 100 MHz
-            "TRIGGER_SOURCE": 1 if self.get("trigger_source").startswith("EXT") else 2,
+            "TRIGGER_SOURCE": 1 if self.trigger_source.get().startswith("EXT") else 2,
             # External | Internal
             "TRIGGER_INPUT_IMPEDANCE": (
-                1 if self.get("trigger_impedance") == 50.0 else 2
+                1 if self.trigger_impedance.get() == 50.0 else 2
             ),  # 50 ohm | 1 kohm
             "TRIGGER_INPUT_SLOPE": (
-                1 if self.get("trigger_slope").startswith("POS") else 2
+                1 if self.trigger_slope.get().startswith("POS") else 2
             ),  # Positive | Negative
             "TRIGGER_INPUT_POLARITY": (
                 1 if self.ask("TRIGger:POLarity?").startswith("POS") else 2
             ),  # Positive | Negative
-            "TRIGGER_INPUT_THRESHOLD": self.get("trigger_level"),  # V
+            "TRIGGER_INPUT_THRESHOLD": self.trigger_level.get(),  # V
             "EVENT_INPUT_IMPEDANCE": (
-                1 if self.get("event_impedance") == 50.0 else 2
+                1 if self.event_impedance.get() == 50.0 else 2
             ),  # 50 ohm | 1 kohm
             "EVENT_INPUT_POLARITY": (
-                1 if self.get("event_polarity").startswith("POS") else 2
+                1 if self.event_polarity.get().startswith("POS") else 2
             ),  # Positive | Negative
-            "EVENT_INPUT_THRESHOLD": self.get("event_level"),  # V
+            "EVENT_INPUT_THRESHOLD": self.event_level(),  # V
             "JUMP_TIMING": (
-                1 if self.get("event_jump_timing").startswith("SYNC") else 2
+                1 if self.event_jump_timing.get().startswith("SYNC") else 2
             ),  # Sync | Async
             "RUN_MODE": 4,  # Continuous | Triggered | Gated | Sequence
             "RUN_STATE": 0,  # On | Off
@@ -998,6 +1016,7 @@ class TektronixAWG5014(VisaInstrument):
             A dict with the current setting for each entry in
             AWG_FILE_FORMAT_HEAD iff this entry applies to the
             AWG5014 AND has been changed from its default value.
+
         """
         log.info("Getting channel configurations.")
 
@@ -1198,6 +1217,7 @@ class TektronixAWG5014(VisaInstrument):
 
         for info on filestructure and valid record names, see AWG Help,
         File and Record Format (Under 'Record Name List' in Help)
+
         """
         if preservechannelsettings:
             channel_settings = self.generate_channel_cfg()
@@ -1306,6 +1326,7 @@ class TektronixAWG5014(VisaInstrument):
                 Usually the output of self.make_awg_file.
             verbose: A boolean to allow/suppress printing of messages
                 about the status of the filw writing. Default: False.
+
         """
         if verbose:
             print(
@@ -1329,6 +1350,7 @@ class TektronixAWG5014(VisaInstrument):
 
         Args:
             filename: The filename of the .awg-file to load.
+
         """
         s = f'AWGControl:SREStore "{filename}"'
         b = s.encode(encoding="ASCII")
@@ -1392,6 +1414,7 @@ class TektronixAWG5014(VisaInstrument):
                 the .awg file. Else, channel settings are not written in the
                 file and will be reset to factory default when the file is
                 loaded. Default: True.
+
         """
         packed_wfs = {}
         waveform_names = []
@@ -1499,6 +1522,7 @@ class TektronixAWG5014(VisaInstrument):
                 settings are found from the parameter history and added to
                 the .awg file. Else, channel settings are reset to the factory
                 default values. Default: True.
+
         """
 
         # waveform names and the dictionary of packed waveforms
@@ -1585,6 +1609,7 @@ class TektronixAWG5014(VisaInstrument):
 
             filename: The full path of the .awg-file. Should end with the
                 .awg extension. Default: 'customawgfile.awg'
+
         """
         awg_file = self.make_awg_file(
             waveforms,
@@ -1608,6 +1633,7 @@ class TektronixAWG5014(VisaInstrument):
         Returns:
             String containing the error/event number, the error/event
             description.
+
         """
         return self.ask("SYSTEM:ERRor:NEXT?")
 
@@ -1636,6 +1662,7 @@ class TektronixAWG5014(VisaInstrument):
             Exception: if the lengths of w, m1, and m2 don't match
             TypeError: if the waveform contains values outside (-1, 1)
             TypeError: if the markers contain values that are not 0 or 1
+
         """
 
         # Input validation
@@ -1684,6 +1711,7 @@ class TektronixAWG5014(VisaInstrument):
         Returns:
             dict: A dictionary with keys 'w', 'm1', 'm2', 'clock_freq', and
                 'numpoints' and corresponding values.
+
         """
 
         outdict = {
@@ -1726,6 +1754,7 @@ class TektronixAWG5014(VisaInstrument):
             DC_channel_number (int): The channel number (1-4).
             set_level (float): The voltage level to set to (V).
             length (float): The time to wait before resetting (s).
+
         """
         DC_channel_number -= 1
         chandcs = [self.ch1_DC_out, self.ch2_DC_out, self.ch3_DC_out, self.ch4_DC_out]
@@ -1741,6 +1770,7 @@ class TektronixAWG5014(VisaInstrument):
 
         Returns:
             True, irrespective of anything.
+
         """
         try:
             self.ask("*OPC?")
@@ -1770,6 +1800,7 @@ class TektronixAWG5014(VisaInstrument):
             Exception: if the lengths of w, m1, and m2 don't match
             TypeError: if the waveform contains values outside (-1, 1)
             TypeError: if the markers contain values that are not 0 or 1
+
         """
         log.debug(f"Sending waveform {wfmname} to instrument")
         # Check for errors
@@ -1828,6 +1859,7 @@ class TektronixAWG5014(VisaInstrument):
         Args:
             verbose: If True, the read messages are printed.
                 Default: False.
+
         """
         original_timeout = self.visa_handle.timeout
         self.visa_handle.timeout = 1000  # 1 second as VISA counts in ms

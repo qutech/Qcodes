@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, ClassVar, Optional, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import numpy as np
 from typing_extensions import TypedDict, Unpack
@@ -138,7 +138,7 @@ class Keithley2450Buffer(InstrumentChannel):
         self,
         exception_type: type[BaseException] | None,
         value: BaseException | None,
-        traceback: Optional["TracebackType"],
+        traceback: "TracebackType | None",
     ) -> None:
         self.delete()
 
@@ -225,6 +225,7 @@ class Keithley2450Sense(InstrumentChannel):
             self.parent.sense_function.get() == self._proper_function. We
             ensure this through the 'sense' property on the main driver class
             which returns the proper submodule for any given function mode
+
     """
 
     function_modes: ClassVar[dict[str, _FunctionMode]] = {
@@ -390,6 +391,7 @@ class Keithley2450Source(InstrumentChannel):
             self.parent.source_function.get() == self._proper_function. We
             ensure this through the 'source' property on the main driver class
             which returns the proper submodule for any given function mode
+
     """
 
     function_modes: ClassVar[dict[str, _FunctionMode]] = {

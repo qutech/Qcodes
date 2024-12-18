@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from qcodes import validators
 
@@ -27,11 +27,12 @@ class Keysight34934A(Keysight34980ASwitchMatrixSubModule):
         parent: the system which the module is installed on
         name: user defined name for the module
         slot: the slot the module is installed
+
     """
 
     def __init__(
         self,
-        parent: Union["VisaInstrument", "InstrumentChannel"],
+        parent: "VisaInstrument | InstrumentChannel",
         name: str,
         slot: int,
         **kwargs: "Unpack[InstrumentBaseKWArgs]",
@@ -94,6 +95,7 @@ class Keysight34934A(Keysight34980ASwitchMatrixSubModule):
         Args:
             row: row value
             column: column value
+
         """
         if (row > self.row) or (column > self.column):
             raise ValueError("row/column value out of range")
@@ -120,6 +122,7 @@ class Keysight34934A(Keysight34980ASwitchMatrixSubModule):
         Returns:
             in the format of '(@sxxx, sxxx, sxxx, sxxx)', where sxxx is a
             4-digit channel number
+
         """
         numbering_function = self.get_numbering_function(
             self.row, self.column, wiring_config
@@ -151,6 +154,7 @@ class Keysight34934A(Keysight34980ASwitchMatrixSubModule):
         Returns:
             The numbering function to convert row and column in to a 3-digit
             number
+
         """
         layout = f"{rows}x{columns}"
         available_layouts = {

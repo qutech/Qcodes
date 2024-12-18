@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
 
 from qcodes.instrument import Instrument, InstrumentBase, InstrumentModule
-from qcodes.parameters import DelegateParameter, Parameter
+from qcodes.parameters import DelegateParameter, Parameter, ParameterBase
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
 DOES_NOT_EXIST = "Does not exist"
+
+C = TypeVar("C", bound=ParameterBase)
+TInstrument = TypeVar("TInstrument", bound=InstrumentBase)
 
 
 class InferError(AttributeError): ...
@@ -54,6 +57,7 @@ def get_root_parameter(
     Raises:
         InferError: If the linking parameters do not end with a non-linking parameter
         InferError: If the chain of linking parameters loops on itself
+
     """
 
     parameter_chain = get_parameter_chain(param, alt_source_attrs)
@@ -89,6 +93,7 @@ def infer_instrument(
         InferError: If the linking parameters do not end with a non-linking parameter
         InferError: If the instrument of the root parameter is None
         InferError: If the instrument of the root parameter is not an instance of Instrument
+
     """
     root_param = get_root_parameter(param, alt_source_attrs=alt_source_attrs)
     instrument = get_instrument_from_param(root_param)
@@ -115,6 +120,7 @@ def infer_instrument_module(
         InferError: If the linking parameters do not end with a non-linking parameter
         InferError: If the instrument module of the root parameter is None
         InferError: If the instrument module of the root parameter is not an instance of InstrumentModule
+
     """
     root_param = get_root_parameter(param, alt_source_attrs=alt_source_attrs)
     channel = get_instrument_from_param(root_param)
@@ -144,6 +150,7 @@ def get_instrument_from_param(
 
     Raises:
         InferError: If the parameter does not have an instrument
+
     """
     if param.instrument is not None:
         return param.instrument
@@ -170,6 +177,7 @@ def get_parameter_chain(
         param_chain: The initial linking parameter or a List linking parameters
             from which to return the chain
         alt_source_attrs: The attribute names for custom linking parameters
+
     """
 
     alt_source_attrs_set = _merge_user_and_class_attrs(alt_source_attrs)
@@ -215,3 +223,69 @@ def _merge_user_and_class_attrs(
         return set.union(set((alt_source_attrs,)), set(InferAttrs.known_attrs()))
     else:
         return set.union(set(alt_source_attrs), set(InferAttrs.known_attrs()))
+
+
+def get_chain_links_of_type(
+    link_param_type: type[C] | tuple[type[C], ...], parameter: Parameter
+) -> tuple[C, ...]:
+    """Gets all parameters in a chain of linked parameters that match a given type"""
+    chain_links: list[C] = [
+        cast(C, param)
+        for param in get_parameter_chain(parameter)
+        if isinstance(param, link_param_type)
+    ]
+    return tuple(chain_links)
+
+
+def get_sole_chain_link_of_type(
+    link_param_type: type[C] | tuple[type[C], ...], parameter: Parameter
+) -> C:
+    """Gets the one parameter in a chain of linked parameters that matches a given type"""
+
+    chain_links = get_chain_links_of_type(
+        link_param_type=link_param_type, parameter=parameter
+    )
+    if len(chain_links) != 1:
+        if isinstance(link_param_type, type):
+            error_msg_1 = f"Expected only a single chain link of type {link_param_type.__name__} but found {len(chain_links)}: \n"
+        elif isinstance(link_param_type, tuple):
+            type_strs = [link_type.__name__ for link_type in link_param_type]
+            error_msg_1 = f"Expected only a single chain link of types {type_strs} but found {len(chain_links)}: \n"
+
+        raise ValueError(error_msg_1 + f"{[link.name for link in chain_links]}")
+    return chain_links[0]
+
+
+def get_parent_instruments_from_chain_of_type(
+    instrument_type: type[TInstrument] | tuple[type[TInstrument], ...],
+    parameter: Parameter,
+) -> tuple[TInstrument, ...]:
+    """Gets all parent instruments in a chain of linked parameters that match a given type"""
+
+    param_chain = get_parameter_chain(parameter)
+    return tuple(
+        [
+            cast(TInstrument, param.instrument)
+            for param in param_chain
+            if isinstance(param.instrument, instrument_type)
+        ]
+    )
+
+
+def get_sole_parent_instrument_from_chain_of_type(
+    instrument_type: type[TInstrument] | tuple[type[TInstrument], ...],
+    parameter: Parameter,
+) -> TInstrument:
+    """Gets the one parent instruments in a chain of linked parameters that match a given type"""
+    instruments = get_parent_instruments_from_chain_of_type(
+        instrument_type=instrument_type, parameter=parameter
+    )
+    if len(instruments) != 1:
+        if isinstance(instrument_type, type):
+            error_msg_1 = f"Expected only a single instrument of type {instrument_type.__name__} but found {len(instruments)}: \n"
+        elif isinstance(instrument_type, tuple):
+            type_strs = [instr_type.__name__ for instr_type in instrument_type]
+            error_msg_1 = f"Expected only a single instrument of types {type_strs} but found {len(instruments)}: \n"
+
+        raise ValueError(f"{error_msg_1} {[instr.name for instr in instruments]}")
+    return instruments[0]

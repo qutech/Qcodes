@@ -114,6 +114,7 @@ class FixedFrequencyPointIQ(MultiParameter):
     Args:
         name: parameter name
         instrument: instrument the parameter belongs to
+
     """
 
     def __init__(
@@ -159,6 +160,7 @@ class FixedFrequencyPointMagPhase(MultiParameter):
     Args:
         name: parameter name
         instrument: instrument the parameter belongs to
+
     """
 
     def __init__(
@@ -396,6 +398,7 @@ class RohdeSchwarzZNBChannel(InstrumentChannel):
                 If supplied try to bind to an existing trace with this name
                 rather than creating a new trace.
             **kwargs: Forwarded to base class.
+
         """
         n = channel
         self._instrument_channel = channel
@@ -1025,6 +1028,7 @@ class RohdeSchwarzZNBBase(VisaInstrument):
 
     Todo:
         - check initialisation settings and test functions
+
     """
 
     CHANNEL_CLASS = ZNBChannel
@@ -1075,6 +1079,54 @@ class RohdeSchwarzZNBBase(VisaInstrument):
             val_mapping={True: "1\n", False: "0\n"},
         )
         """Parameter rf_power"""
+
+        self.ref_osc_source: Parameter = self.add_parameter(
+            name="ref_osc_source",
+            label="Reference oscillator source",
+            get_cmd="ROSC:SOUR?",
+            set_cmd="ROSC:SOUR {}",
+            # strip newline
+            get_parser=lambda s: s.rstrip(),
+            vals=vals.Enum("INT", "EXT", "int", "ext", "internal", "external"),
+        )
+        """Reference oscillator source"""
+
+        self.ref_osc_external_freq: Parameter = self.add_parameter(
+            name="ref_osc_external_freq",
+            label="Reference oscillator frequency",
+            docstring="Frequency of the external reference clock signal at REF IN",
+            get_cmd="ROSC:EXT:FREQ?",
+            set_cmd="ROSC:EXT:FREQ {}Hz",
+            # The response contains the unit (Hz), so we have to strip it
+            get_parser=lambda f: float(f.strip("Hz")),
+            unit="Hz",
+            # Data sheet: 1 MHz to 20 MHz, in steps of 1 MHz
+            vals=vals.Enum(*np.linspace(1e6, 20e6, 20)),
+        )
+        """Frequency of the external reference clock signal at REF IN"""
+
+        self.ref_osc_PLL_locked: Parameter = self.add_parameter(
+            name="ref_osc_PLL_locked",
+            label="Reference frequency PLL lock",
+            get_cmd=self._get_PLL_locked,
+            docstring="If an external reference signal or an internal high "
+            "precision clock (option B4) is used, the local oscillator is "
+            "phase locked to a reference signal. This parameter will be "
+            "False if the phase locked loop (PLL) fails. "
+            "\n"
+            "For external reference: check frequency and level of the "
+            "supplied reference signal.",
+        )
+        """
+        If an external reference signal or an internal high precision clock
+        (option B4) is used, the local oscillator is phase locked to a
+        reference signal. This parameter will be False if the phase locked loop
+        (PLL) fails.
+
+        For external reference: check frequency and level of the supplied
+        reference signal.
+        """
+
         self.add_function("reset", call_cmd="*RST")
         self.add_function("tooltip_on", call_cmd="SYST:ERR:DISP ON")
         self.add_function("tooltip_off", call_cmd="SYST:ERR:DISP OFF")
@@ -1115,6 +1167,13 @@ class RohdeSchwarzZNBBase(VisaInstrument):
             self.rf_off()
         self.connect_message()
 
+    def _get_PLL_locked(self) -> bool:
+        # query the bits of the "questionable hardware integrity" register
+        hw_integrity_bits = int(self.ask("STATus:QUEStionable:INTegrity:HARDware?"))
+        # if bit number 1 is set, the PLL locking has failed
+        pll_lock_failed = bool(hw_integrity_bits & 0b10)
+        return not pll_lock_failed
+
     def display_grid(self, rows: int, cols: int) -> None:
         """
         Display a grid of channels rows by columns.
@@ -1151,6 +1210,7 @@ class RohdeSchwarzZNBBase(VisaInstrument):
 @deprecated(
     "The ZNB base class has been renamed RohdeSchwarzZNBBase",
     category=QCoDeSDeprecationWarning,
+    stacklevel=2,
 )
 class ZNB(RohdeSchwarzZNBBase):
     pass

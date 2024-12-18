@@ -40,6 +40,7 @@ class MiniCircuitsSPDTSwitchChannelBase(InstrumentChannel):
             name: the name of the channel
             channel_letter: channel letter ['a', 'b', 'c' or 'd'])
             **kwargs: Forwarded to base class.
+
         """
 
         super().__init__(parent, name, **kwargs)
@@ -75,6 +76,7 @@ class MiniCircuitsSPDTSwitchChannelBase(InstrumentChannel):
 @deprecated(
     "Deprecated alias, use MiniCircuitsSPDTSwitchChannelBase.",
     category=QCoDeSDeprecationWarning,
+    stacklevel=2,
 )
 class SwitchChannelBase(MiniCircuitsSPDTSwitchChannelBase):
     pass
@@ -141,6 +143,7 @@ class MiniCircuitsSPDTBase(Instrument):
 @deprecated(
     "Deprecated alias, use MiniCircuitsSPDTBase.",
     category=QCoDeSDeprecationWarning,
+    stacklevel=2,
 )
 class SPDT_Base(MiniCircuitsSPDTBase):
     pass

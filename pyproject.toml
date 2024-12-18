@@ -17,6 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
 ]
 license = {text = "MIT"}
@@ -62,10 +63,10 @@ file = "README.rst"
 content-type = "text/x-rst"
 
 [project.urls]
-Homepage = "https://github.com/QCoDeS/Qcodes"
+Homepage = "https://github.com/microsoft/Qcodes"
 Documentation = "https://microsoft.github.io/Qcodes/"
-Source = "https://github.com/qcodes/qcodes"
-Tracker = "https://github.com/QCoDeS/Qcodes/issues"
+Source = "https://github.com/microsoft/qcodes"
+Tracker = "https://github.com/microsoft/Qcodes/issues"
 Changelog = "https://microsoft.github.io/Qcodes/changes/index.html"
 
 [project.optional-dependencies]
@@ -108,14 +109,10 @@ docs = [
     "sphinx-jsonschema>=1.19.1",
     "furo>=2024.8.6",
     "sphinxcontrib-towncrier>=0.3.0a0",
-    "towncrier>=22.8.0",
+    "towncrier>=22.8.0,<24.0.0", #  sphinxcontrib-towncrier does not yet support latest
     "scipy>=1.8.0", # examples using scipy
     "qcodes_loop>=0.1.1", # legacy dataset import examples
     "jinja2>=3.1.3", # transitive dependency pin due to cve in earlier version
-]
-opencensus = [
-    "opencensus>=0.7.10",
-    "opencensus-ext-azure>=1.0.4, <2.0.0",
 ]
 refactor = [
     "libcst>=1.2.0"
@@ -133,7 +130,6 @@ log_exported_ds = "qcodes.extensions:log_dataset_export_info"
 omit = [
     "src/qcodes/__init__.py",
     "*/__init__.py",
-    "src/qcodes/tests/*",
 ]
 [tool.coverage.report]
 exclude_lines = [
@@ -175,7 +171,6 @@ strict_equality = true
 [[tool.mypy.overrides]]
 module = [
     "tests.*",
-    "qcodes.tests.*",
     "qcodes.instrument.mockers.ami430",
     "qcodes.instrument_drivers.Harvard.*",
     "qcodes.instrument_drivers.Keysight.keysightb1500.message_builder.*",
@@ -216,7 +211,7 @@ minversion = "7.2"
 junit_family = "legacy"
 testpaths = "tests"
 addopts = "-n auto --dist=loadfile"
-
+asyncio_default_fixture_loop_scope = "function"
 markers = "serial"
 
 # we ignore warnings
@@ -224,11 +219,10 @@ markers = "serial"
 # and error on all other warnings
 filterwarnings = [
     'error',
-    'ignore:Deprecated call to `pkg_resources\.declare_namespace:DeprecationWarning',  # google, sphinxcontrib
-    'ignore:pkg_resources is deprecated as an API:DeprecationWarning', # pyvisa-sim
     'ignore:open_binary is deprecated:DeprecationWarning', # pyvisa-sim
-    'ignore:datetime.datetime.utcfromtimestamp\(\) is deprecated and scheduled for removal in a future version:DeprecationWarning', # tqdm dateutil
-    'ignore:Jupyter is migrating its paths to use standard platformdirs:DeprecationWarning' # jupyter
+    'ignore:Jupyter is migrating its paths to use standard platformdirs:DeprecationWarning', # jupyter
+    'ignore:Parsing dates involving a day of month without a year specified is ambiguious:DeprecationWarning', # ipykernel 3.13+
+    'ignore:unclosed database in:ResourceWarning' # internal should be fixed
 ]
 
 [tool.ruff]
@@ -240,13 +234,19 @@ extend-exclude = ["typings"]
 # Enable Pyflakes `E` and `F` codes by default.
 # UP pyupgrade
 # PT025 invalid use of pytest fixtures in other fixtures
+# RUF100 101 Unused and renamed noqa pragmas
 # RUF200 validate pyproject.toml
 # I isort
 # ISC flake8-implicit-str-concat
 # TID253 banned-module-level-imports
 # W pydocstyle
 # PLx pylint
-select = ["E", "F", "PT025", "UP", "RUF010", "RUF012", "RUF200", "I", "G", "ISC", "TID253", "NPY", "PLE", "PLR", "PLC", "PLW", "W", "D417", "D416", "D410", "D411", "D412", "D405", "D214", "TCH"]
+select = [
+    "E", "F", "PT025", "UP", "RUF",
+    "I", "G", "ISC", "TID253", "NPY", "PLE",
+    "PLR", "PLC", "PLW", "W",
+    "D214", "D300", "D402", "D403", "D405", "D410", "D411", "D412", "D413", "D414", "D416", "D417", "D418", "D419",
+    "TC"]
 # G004 We have a lot of use of f strings in log messages
 # so disable that lint for now
 # NPY002 We have a lot of use of the legacy
@@ -296,14 +296,9 @@ known-first-party = ["qcodes"]
 "src/qcodes/instrument_drivers/Keysight/KtM960x.py" = ["F405"]
 "src/qcodes/instrument_drivers/Keysight/KtMAwg.py" = ["F405"]
 
-# This triggeres in notebooks even with a md cell at the top
-"*.ipynb" = ["E402"]
-
 # TID253 these imports are fine at module level
 # in tests and examples
-# D417 no need to fix in deprecated module
 "docs/*" = ["TID253"]
-"src/qcodes/tests/*" = ["TID253", "D417"]
 "tests/*" = ["TID253"]
 
 [tool.ruff.lint.flake8-tidy-imports]

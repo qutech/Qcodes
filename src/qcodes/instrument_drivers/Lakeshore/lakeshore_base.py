@@ -47,6 +47,7 @@ class LakeshoreBaseOutput(InstrumentChannel):
             has_pid: if True, then the output supports closed loop control,
               hence it will have three parameters to set it up: 'P', 'I', and 'D'
             **kwargs: Forwarded to baseclass.
+
         """
         super().__init__(parent, output_name, **kwargs)
 
@@ -275,7 +276,7 @@ class LakeshoreBaseOutput(InstrumentChannel):
                 self.setpoint_ramp_enabled,
                 self.setpoint_ramp_rate,
             ],
-            set_cmd=f"RAMP {output_index},{{setpoint_ramping_enabled}},{{setpoint_ramping_rate}}",
+            set_cmd=f"RAMP {output_index},{{setpoint_ramp_enabled}},{{setpoint_ramp_rate}}",
             get_cmd=f"RAMP? {output_index}",
         )
 
@@ -392,6 +393,7 @@ class LakeshoreBaseOutput(InstrumentChannel):
         Returns:
             the value of the resulting `output_range`, that is also available
             from the `output_range` parameter itself
+
         """
         if self.range_limits.get_latest() is None:
             raise RuntimeError(
@@ -426,6 +428,7 @@ class LakeshoreBaseOutput(InstrumentChannel):
 
         Args:
             temperature: temperature in K
+
         """
         self.set_range_from_temperature(temperature)
         self.setpoint(temperature)
@@ -460,6 +463,7 @@ class LakeshoreBaseOutput(InstrumentChannel):
                 return (same as `wait_equilibration_time` parameter);
                 if None, then the value of the corresponding
                 `wait_equilibration_time` parameter is used
+
         """
         wait_cycle_time = wait_cycle_time or self.wait_cycle_time.get_latest()
         assert wait_cycle_time is not None
@@ -502,7 +506,9 @@ class LakeshoreBaseOutput(InstrumentChannel):
 
 
 @deprecated(
-    "Base class renamed to LakeshoreBaseOutput", category=QCoDeSDeprecationWarning
+    "Base class renamed to LakeshoreBaseOutput",
+    category=QCoDeSDeprecationWarning,
+    stacklevel=2,
 )
 class BaseOutput(LakeshoreBaseOutput):
     pass
@@ -529,6 +535,7 @@ class LakeshoreBaseSensorChannel(InstrumentChannel):
             channel: string identifier of the channel as referenced in commands;
               for example, '1' or '6' for model 372, or 'A' and 'C' for model 336
             **kwargs: Forwarded to base class.
+
         """
 
         super().__init__(parent, name)
@@ -602,6 +609,7 @@ class LakeshoreBaseSensorChannel(InstrumentChannel):
                 sum of status codes, it is an integer value in the form of a
                 string (e.g. "32"), as returned by the corresponding
                 instrument command
+
         """
         codes = self._get_sum_terms(
             list(self.SENSOR_STATUSES.keys()), int(sum_of_codes)
@@ -628,6 +636,7 @@ class LakeshoreBaseSensorChannel(InstrumentChannel):
         >>> terms = [1, 16, 32, 64, 128]
         >>> get_sum_terms(terms, 96)
         ... [64, 32]  # This is correct because 96=64+32
+
         """
         terms_in_number: list[int] = []
 
@@ -662,6 +671,7 @@ class LakeshoreBaseSensorChannel(InstrumentChannel):
 @deprecated(
     "Base class renamed to LakeshoreBaseSensorChannel",
     category=QCoDeSDeprecationWarning,
+    stacklevel=2,
 )
 class BaseSensorChannel(LakeshoreBaseSensorChannel):
     pass

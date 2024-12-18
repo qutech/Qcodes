@@ -779,6 +779,7 @@ class KeysightPNABase(VisaInstrument):
 
         Returns:
             The trace number of the selected trace
+
         """
         self.write(f"CALC:PAR:SEL '{trace_name}'")
         return self.active_trace()
@@ -829,11 +830,11 @@ class KeysightPNAxBase(KeysightPNABase):
         """Parameter aux_frequency"""
 
 
-@deprecated("Use KeysightPNABase", category=QCoDeSDeprecationWarning)
+@deprecated("Use KeysightPNABase", category=QCoDeSDeprecationWarning, stacklevel=2)
 class PNABase(KeysightPNABase):
     pass
 
 
-@deprecated("Use KeysightPNAxBase", category=QCoDeSDeprecationWarning)
+@deprecated("Use KeysightPNAxBase", category=QCoDeSDeprecationWarning, stacklevel=2)
 class PNAxBase(KeysightPNAxBase):
     pass

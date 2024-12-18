@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import numpy as np
 from pyvisa import VisaIOError
@@ -102,7 +102,7 @@ class DSOTraceParam(ParameterWithSetpoints):
     def __init__(
         self,
         name: str,
-        instrument: Union["KeysightInfiniiumChannel", "KeysightInfiniiumFunction"],
+        instrument: "KeysightInfiniiumChannel | KeysightInfiniiumFunction",
         channel: str,
         **kwargs: Any,
     ):
@@ -170,7 +170,7 @@ class DSOTraceParam(ParameterWithSetpoints):
         """
         return
 
-    def update_setpoints(self, preamble: Optional["Sequence[str]"] = None) -> None:
+    def update_setpoints(self, preamble: "Sequence[str] | None" = None) -> None:
         """
         Update waveform parameters. Must be called before data
         acquisition if instr.cache_setpoints is False
@@ -466,7 +466,7 @@ class AbstractMeasurementSubsystem(InstrumentModule):
 class KeysightInfiniiumBoundMeasurement(AbstractMeasurementSubsystem):
     def __init__(
         self,
-        parent: Union["KeysightInfiniiumChannel", "KeysightInfiniiumFunction"],
+        parent: "KeysightInfiniiumChannel | KeysightInfiniiumFunction",
         name: str,
         **kwargs: "Unpack[InstrumentBaseKWArgs]",
     ):
@@ -839,6 +839,7 @@ class KeysightInfiniium(VisaInstrument):
             channels: The number of channels on the scope.
             silence_pyvisapy_warning: Don't warn about pyvisa-py at startup
             **kwargs: kwargs are forwarded to base class.
+
         """
         super().__init__(name, address, **kwargs)
         self.connect_message()
@@ -1263,7 +1264,7 @@ class KeysightInfiniium(VisaInstrument):
         time_fmt: str = "%Y-%m-%d_%H-%M-%S",
         divider: str = "_",
     ) -> np.ndarray | None:
-        """save screen to {path} with {image_type}: bmp, jpg, gif, tif, png
+        """Save screen to {path} with {image_type}: bmp, jpg, gif, tif, png
 
         return np.array if sucessfully saved, else return None
         """

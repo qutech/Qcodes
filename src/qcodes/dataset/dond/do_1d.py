@@ -104,6 +104,7 @@ def do1d(
 
     Returns:
         The QCoDeS dataset.
+
     """
     if do_plot is None:
         do_plot = cast(bool, config.dataset.dond_plot)
@@ -116,13 +117,13 @@ def do1d(
     else:
         meas._extra_log_info = "Using 'qcodes.dataset.do1d'"
 
-    all_setpoint_params = (param_set,) + tuple(s for s in additional_setpoints)
+    all_setpoint_params = (param_set, *tuple(s for s in additional_setpoints))
 
     measured_parameters = tuple(
         param for param in param_meas if isinstance(param, ParameterBase)
     )
     try:
-        loop_shape = (num_points,) + tuple(1 for _ in additional_setpoints)
+        loop_shape = (num_points, *tuple(1 for _ in additional_setpoints))
         shapes: Shapes | None = detect_shape_of_measurement(
             measured_parameters, loop_shape
         )

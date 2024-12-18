@@ -329,7 +329,7 @@ class DataSet(BaseDataSet):
         parent_datasets: Sequence[Mapping[Any, Any]] = (),
         write_in_background: bool = False,
     ) -> None:
-        self.add_snapshot(json.dumps({"station": snapshot}, cls=NumpyJSONEncoder))
+        self.add_snapshot(json.dumps(snapshot, cls=NumpyJSONEncoder))
 
         if interdeps == InterDependencies_():
             raise RuntimeError("No parameters supplied")
@@ -495,6 +495,7 @@ class DataSet(BaseDataSet):
 
         Args:
             links: The links to assign to this dataset
+
         """
         if not self.pristine:
             raise RuntimeError(
@@ -576,6 +577,7 @@ class DataSet(BaseDataSet):
         Args:
             tag: represents the key in the metadata dictionary
             metadata: actual metadata
+
         """
 
         self._metadata[tag] = metadata
@@ -593,6 +595,7 @@ class DataSet(BaseDataSet):
         Args:
             snapshot: the raw JSON dump of the snapshot
             overwrite: force overwrite an existing snapshot
+
         """
         if self.snapshot is None or overwrite:
             with atomic(self.conn) as conn:
@@ -652,6 +655,7 @@ class DataSet(BaseDataSet):
         Args:
             start_bg_writer: If True, the add_results method will write to the
                 database in a separate thread.
+
         """
         if not self._started:
             self._perform_start_actions(start_bg_writer=start_bg_writer)
@@ -740,6 +744,7 @@ class DataSet(BaseDataSet):
         the name of a parameter in this :class:`.DataSet`.
 
         It is an error to add results to a completed :class:`.DataSet`.
+
         """
 
         self._raise_if_not_writable()
@@ -822,7 +827,7 @@ class DataSet(BaseDataSet):
         If provided, the start and end arguments select a range of results
         by result count (index). If the range is empty - that is, if the end is
         less than or equal to the start, or if start is after the current end
-        of the :class:`.DataSet` – then a list of empty arrays is returned.
+        of the :class:`.DataSet` - then a list of empty arrays is returned.
 
         Args:
             *params: string parameter names, QCoDeS Parameter objects, and
@@ -840,6 +845,7 @@ class DataSet(BaseDataSet):
             Dictionary from requested parameters to Dict of parameter names
             to numpy arrays containing the data points of type numeric,
             array or string.
+
         """
         if len(params) == 0:
             valid_param_names = [
@@ -874,7 +880,7 @@ class DataSet(BaseDataSet):
         If provided, the start and end arguments select a range of results
         by result count (index). If the range is empty - that is, if the end is
         less than or equal to the start, or if start is after the current end
-        of the :class:`.DataSet` – then a dict of empty :py:class:`pandas.DataFrame` s is
+        of the :class:`.DataSet` - then a dict of empty :py:class:`pandas.DataFrame` s is
         returned.
 
         Args:
@@ -892,6 +898,7 @@ class DataSet(BaseDataSet):
             :py:class:`pandas.DataFrame` s with the requested parameter as
             a column and a indexed by a :py:class:`pandas.MultiIndex` formed
             by the dependencies.
+
         """
         datadict = self.get_parameter_data(*params, start=start, end=end)
         dfs_dict = load_to_dataframe_dict(datadict)
@@ -918,7 +925,7 @@ class DataSet(BaseDataSet):
         If provided, the start and end arguments select a range of results
         by result count (index). If the range is empty - that is, if the end is
         less than or equal to the start, or if start is after the current end
-        of the :class:`.DataSet` – then a dict of empty :py:class:`pandas.DataFrame` s is
+        of the :class:`.DataSet` - then a dict of empty :py:class:`pandas.DataFrame` s is
         returned.
 
         Args:
@@ -939,6 +946,7 @@ class DataSet(BaseDataSet):
         Example:
             Return a pandas DataFrame with
                 df = ds.to_pandas_dataframe()
+
         """
         datadict = self.get_parameter_data(*params, start=start, end=end)
         return load_to_concatenated_dataframe(datadict)
@@ -963,7 +971,7 @@ class DataSet(BaseDataSet):
         If provided, the start and end arguments select a range of results
         by result count (index). If the range is empty - that is, if the end is
         less than or equal to the start, or if start is after the current end
-        of the :class:`.DataSet` – then a dict of empty :py:class:`xr.DataArray` s is
+        of the :class:`.DataSet` - then a dict of empty :py:class:`xr.DataArray` s is
         returned.
 
         The dependent parameters of the Dataset are normally used as coordinates of the
@@ -1001,6 +1009,7 @@ class DataSet(BaseDataSet):
             Return a dict of xr.DataArray with
 
                 dataarray_dict = ds.to_xarray_dataarray_dict()
+
         """
         data = self.get_parameter_data(*params, start=start, end=end)
         datadict = load_to_xarray_dataarray_dict(
@@ -1027,7 +1036,7 @@ class DataSet(BaseDataSet):
         If provided, the start and end arguments select a range of results
         by result count (index). If the range is empty - that is, if the end is
         less than or equal to the start, or if start is after the current end
-        of the :class:`.DataSet` – then a empty :py:class:`xr.Dataset` s is
+        of the :class:`.DataSet` - then a empty :py:class:`xr.Dataset` s is
         returned.
 
         The dependent parameters of the Dataset are normally used as coordinates of the
@@ -1064,6 +1073,7 @@ class DataSet(BaseDataSet):
             Return a concatenated xr.Dataset with
 
                 xds = ds.to_xarray_dataset()
+
         """
         data = self.get_parameter_data(*params, start=start, end=end)
 
@@ -1106,6 +1116,7 @@ class DataSet(BaseDataSet):
                                  length and wanted to be merged in a single file.
             DataPathException: If the data of multiple parameters are wanted to be merged
                                in a single file but no filename provided.
+
         """
         dfdict = self.to_pandas_dataframe_dict()
         dataframe_to_csv(
@@ -1140,6 +1151,7 @@ class DataSet(BaseDataSet):
         Args:
             name: identifier of the subscriber. Equal to the key of the entry
                 in ``qcodesrc.json::subscription.subscribers``.
+
         """
         subscribers = qcodes.config.subscription.subscribers
         try:
@@ -1580,6 +1592,7 @@ def load_by_run_spec(
         :class:`qcodes.dataset.data_set.DataSet` or
         :class:`.DataSetInMemory` matching the provided
         specification.
+
     """
     internal_conn = conn or connect(get_DB_location())
     d: DataSetProtocol | None = None
@@ -1645,6 +1658,7 @@ def get_guids_by_run_spec(
 
     Returns:
         List of guids matching the run spec.
+
     """
     internal_conn = conn or connect(get_DB_location())
     try:
@@ -1689,6 +1703,7 @@ def load_by_id(run_id: int, conn: ConnectionPlus | None = None) -> DataSetProtoc
     Returns:
         :class:`qcodes.dataset.data_set.DataSet` or
         :class:`.DataSetInMemory` with the given run id
+
     """
     if run_id is None:
         raise ValueError("run_id has to be a positive integer, not None.")
@@ -1698,7 +1713,9 @@ def load_by_id(run_id: int, conn: ConnectionPlus | None = None) -> DataSetProtoc
     try:
         guid = get_guid_from_run_id(internal_conn, run_id)
         if guid is None:
-            raise ValueError(f"Run with run_id {run_id} does not exist in the database")
+            raise ValueError(
+                f"Run with run_id {run_id} does not exist in the database: {internal_conn.path_to_dbfile}"
+            )
         d = _get_datasetprotocol_from_guid(guid, internal_conn)
     finally:
         # dataset takes ownership of the connection but DataSetInMem does not
@@ -1731,6 +1748,7 @@ def load_by_guid(guid: str, conn: ConnectionPlus | None = None) -> DataSetProtoc
     Raises:
         NameError: if no run with the given GUID exists in the database
         RuntimeError: if several runs with the given GUID are found
+
     """
     internal_conn = conn or connect(get_DB_location())
     d: DataSetProtocol | None = None
@@ -1774,6 +1792,7 @@ def load_by_counter(
         :class:`DataSet` or
         :class:`.DataSetInMemory` of the given counter in
         the given experiment
+
     """
     internal_conn = conn or connect(get_DB_location())
     d: DataSetProtocol | None = None
@@ -1793,7 +1812,9 @@ def load_by_counter(
 def _get_datasetprotocol_from_guid(guid: str, conn: ConnectionPlus) -> DataSetProtocol:
     run_id = get_runid_from_guid(conn, guid)
     if run_id is None:
-        raise NameError("No run with GUID: %s found in database.", guid)
+        raise NameError(
+            "No run with GUID: %s found in database: %s", guid, conn.path_to_dbfile
+        )
 
     if qcodes.config.dataset.load_from_exported_file:
         export_info = _get_datasetprotocol_export_info(run_id=run_id, conn=conn)
@@ -1855,6 +1876,7 @@ def new_data_set(
 
     Return:
         the newly created :class:`qcodes.dataset.data_set.DataSet`
+
     """
     # note that passing `conn` is a secret feature that is unfortunately used
     # in `Runner` to pass a connection from an existing `Experiment`.
@@ -1885,6 +1907,7 @@ def generate_dataset_table(
         conn: A ConnectionPlus object with a connection to the database.
 
     Returns: ASCII art table of information about the supplied guids.
+
     """
     from tabulate import tabulate
 

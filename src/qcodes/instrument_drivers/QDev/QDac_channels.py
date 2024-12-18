@@ -3,7 +3,7 @@
 import logging
 import time
 from functools import partial
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import pyvisa
 import pyvisa.constants
@@ -53,6 +53,7 @@ class QDevQDacChannel(InstrumentChannel):
             name: The name of the channel
             channum: The number of the channel in question (1-48)
             **kwargs: Forwarded to base class.
+
         """
         super().__init__(parent, name, **kwargs)
 
@@ -141,7 +142,7 @@ class QDevQDacChannel(InstrumentChannel):
     def snapshot_base(
         self,
         update: bool | None = False,
-        params_to_skip_update: Optional["Sequence[str]"] = None,
+        params_to_skip_update: "Sequence[str] | None" = None,
     ) -> dict[Any, Any]:
         update_currents = self._parent._update_currents and update
         if update and not self._parent._get_status_performed:
@@ -236,6 +237,7 @@ class QDevQDac(VisaInstrument):
 
         Returns:
             QDac object
+
         """
         super().__init__(name, address, **kwargs)
         self._output_n_lines = 50
@@ -325,7 +327,7 @@ class QDevQDac(VisaInstrument):
     def snapshot_base(
         self,
         update: bool | None = False,
-        params_to_skip_update: Optional["Sequence[str]"] = None,
+        params_to_skip_update: "Sequence[str] | None" = None,
     ) -> dict[Any, Any]:
         update_currents = self._update_currents and update is True
         if update:
@@ -356,12 +358,13 @@ class QDevQDac(VisaInstrument):
 
         If a finite slope has been assigned, we assign a function generator to
         ramp the voltage.
+
         """
         channel = self.channels[chan - 1]
 
         slopechans = [sl[0] for sl in self._slopes]
         if chan in slopechans:
-            slope = [sl[1] for sl in self._slopes if sl[0] == chan][0]
+            slope = next(sl[1] for sl in self._slopes if sl[0] == chan)
             # find and assign fg
             fg = min(self._fgs.difference(set(self._assigned_fgs.values())))
             self._assigned_fgs[chan] = fg
@@ -384,6 +387,7 @@ class QDevQDac(VisaInstrument):
 
         Args:
             chan: The 1-indexed channel number
+
         """
         self._update_cache(readcurrents=False)
         return self.channels[chan - 1].v.cache()
@@ -435,6 +439,7 @@ class QDevQDac(VisaInstrument):
 
         Args:
             chan: The 1-indexed channel number
+
         """
         self._update_cache(readcurrents=False)
         return self.channels[chan - 1].vrange.cache()
@@ -547,6 +552,7 @@ class QDevQDac(VisaInstrument):
         Args:
             chan (int): The channel number (1-48)
             sync (int): The associated sync output. 0 means 'unassign'
+
         """
 
         if chan not in range(1, 49):
@@ -556,7 +562,7 @@ class QDevQDac(VisaInstrument):
             # try to remove the sync from internal bookkeeping
             try:
                 sc = self._syncoutputs
-                to_remove = [sc.index(syn) for syn in sc if syn[0] == chan][0]
+                to_remove = next(sc.index(syn) for syn in sc if syn[0] == chan)
                 self._syncoutputs.remove(sc[to_remove])
             except IndexError:
                 pass
@@ -567,11 +573,11 @@ class QDevQDac(VisaInstrument):
             return
 
         if sync in [syn[1] for syn in self._syncoutputs]:
-            oldchan = [syn[0] for syn in self._syncoutputs if syn[1] == sync][0]
+            oldchan = next(syn[0] for syn in self._syncoutputs if syn[1] == sync)
             self._syncoutputs.remove((oldchan, sync))
 
         if chan in [syn[0] for syn in self._syncoutputs]:
-            oldsyn = [syn[1] for syn in self._syncoutputs if syn[0] == chan][0]
+            oldsyn = next(syn[1] for syn in self._syncoutputs if syn[0] == chan)
             self._syncoutputs[self._syncoutputs.index((chan, oldsyn))] = (chan, sync)
             return
 
@@ -583,7 +589,7 @@ class QDevQDac(VisaInstrument):
         get_cmd of the chXX_sync parameter
         """
         if chan in [syn[0] for syn in self._syncoutputs]:
-            sync = [syn[1] for syn in self._syncoutputs if syn[0] == chan][0]
+            sync = next(syn[1] for syn in self._syncoutputs if syn[0] == chan)
             return sync
         else:
             return 0
@@ -596,6 +602,7 @@ class QDevQDac(VisaInstrument):
             chan: The channel number (1-48)
             slope: The slope in V/s. Write 'Inf' to allow
               arbitrary small rise times.
+
         """
         if chan not in range(1, 49):
             raise ValueError("Channel number must be 1-48.")
@@ -614,7 +621,7 @@ class QDevQDac(VisaInstrument):
                 self.channels[chan - 1].sync.set(0)
             try:
                 sls = self._slopes
-                to_remove = [sls.index(sl) for sl in sls if sl[0] == chan][0]
+                to_remove = next(sls.index(sl) for sl in sls if sl[0] == chan)
                 self._slopes.remove(sls[to_remove])
                 return
             # If the value was already 'Inf', the channel was not
@@ -623,7 +630,7 @@ class QDevQDac(VisaInstrument):
                 return
 
         if chan in [sl[0] for sl in self._slopes]:
-            oldslope = [sl[1] for sl in self._slopes if sl[0] == chan][0]
+            oldslope = next(sl[1] for sl in self._slopes if sl[0] == chan)
             self._slopes[self._slopes.index((chan, oldslope))] = (chan, slope)
             return
 
@@ -643,7 +650,7 @@ class QDevQDac(VisaInstrument):
         get_cmd of the chXX_slope parameter
         """
         if chan in [sl[0] for sl in self._slopes]:
-            slope = [sl[1] for sl in self._slopes if sl[0] == chan][0]
+            slope = next(sl[1] for sl in self._slopes if sl[0] == chan)
             return slope
         else:
             return "Inf"
@@ -668,6 +675,7 @@ class QDevQDac(VisaInstrument):
             v_start: The starting voltage
             setvoltage: The voltage to ramp to
             ramptime: The ramp time in seconds.
+
         """
 
         # Crazy stuff happens if the period is too small, e.g. the channel
@@ -688,7 +696,7 @@ class QDevQDac(VisaInstrument):
         chanmssg = f"wav {chan} {fg} {amplitude} {offset}"
 
         if chan in [syn[0] for syn in self._syncoutputs]:
-            sync = [syn[1] for syn in self._syncoutputs if syn[0] == chan][0]
+            sync = next(syn[1] for syn in self._syncoutputs if syn[0] == chan)
             sync_duration = 1000 * self.channels[chan - 1].sync_duration.get()
             sync_delay = 1000 * self.channels[chan - 1].sync_delay.get()
             self.write(f"syn {sync} {fg} {sync_delay} {sync_duration}")

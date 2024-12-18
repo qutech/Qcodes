@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from qcodes.instrument.base import InstrumentBase
+    from qcodes.logger.instrument_logger import InstrumentLoggerAdapter
 
 LOG = logging.getLogger(__name__)
 
@@ -187,6 +188,7 @@ class ParameterBase(MetadatableWithName):
 
         register_name: Specifies if the parameter should be registered in datasets
             using a different name than the parameter's full_name
+
     """
 
     def __init__(
@@ -262,11 +264,8 @@ class ParameterBase(MetadatableWithName):
         self.get_latest = GetLatest(self)
 
         self.get: Callable[..., ParamDataType]
-        implements_get_raw = hasattr(self, "get_raw") and not getattr(
-            self.get_raw, "__qcodes_is_abstract_method__", False
-        )
         self._gettable = False
-        if implements_get_raw:
+        if self._implements_get_raw:
             self.get = self._wrap_get(self.get_raw)
             self._gettable = True
         elif hasattr(self, "get"):
@@ -277,11 +276,8 @@ class ParameterBase(MetadatableWithName):
             )
 
         self.set: Callable[..., None]
-        implements_set_raw = hasattr(self, "set_raw") and not getattr(
-            self.set_raw, "__qcodes_is_abstract_method__", False
-        )
         self._settable: bool = False
-        if implements_set_raw:
+        if self._implements_set_raw:
             self.set = self._wrap_set(self.set_raw)
             self._settable = True
         elif hasattr(self, "set"):
@@ -346,6 +342,30 @@ class ParameterBase(MetadatableWithName):
 
             instrument.parameters[name] = self
 
+    @property
+    def _implements_get_raw(self) -> bool:
+        implements_get_raw = hasattr(self, "get_raw") and not getattr(
+            self.get_raw, "__qcodes_is_abstract_method__", False
+        )
+        return implements_get_raw
+
+    @property
+    def _implements_set_raw(self) -> bool:
+        implements_set_raw = hasattr(self, "set_raw") and not getattr(
+            self.set_raw, "__qcodes_is_abstract_method__", False
+        )
+        return implements_set_raw
+
+    def _get_logger(self) -> InstrumentLoggerAdapter | logging.Logger:
+        if self.root_instrument is not None:
+            mylogger: InstrumentLoggerAdapter | logging.Logger = (
+                self.root_instrument.log
+            )
+        else:
+            mylogger = LOG
+
+        return mylogger
+
     def _build__doc__(self) -> str | None:
         return self.__doc__
 
@@ -360,6 +380,7 @@ class ParameterBase(MetadatableWithName):
 
         Raises:
             RuntimeError: If removing the first validator when more than one validator is set.
+
         """
 
         if len(self._vals):
@@ -390,6 +411,7 @@ class ParameterBase(MetadatableWithName):
 
         Args:
             vals: Validator to add to the parameter.
+
         """
         self._vals.append(vals)
         self.__doc__ = self._build__doc__()
@@ -402,6 +424,7 @@ class ParameterBase(MetadatableWithName):
         Returns:
             The last validator added to the parameter or None if there are no
             validators associated with the parameter.
+
         """
         if len(self._vals) > 0:
             removed = self._vals.pop()
@@ -522,6 +545,7 @@ class ParameterBase(MetadatableWithName):
 
         Returns:
             base snapshot
+
         """
         if self.snapshot_exclude:
             warnings.warn(
@@ -532,7 +556,7 @@ class ParameterBase(MetadatableWithName):
 
         state: dict[str, Any] = {"__class__": full_class(self), "full_name": str(self)}
 
-        if self._snapshot_value:
+        if self.snapshot_value:
             has_get = self.gettable
             allowed_to_call_get_when_snapshotting = (
                 self._snapshot_get and update is not False
@@ -700,7 +724,7 @@ class ParameterBase(MetadatableWithName):
                 return value
 
             except Exception as e:
-                e.args = e.args + (f"getting {self}",)
+                e.args = (*e.args, f"getting {self}")
                 raise e
 
         return get_wrapper
@@ -753,7 +777,7 @@ class ParameterBase(MetadatableWithName):
                     self.cache._update_with(value=val_step, raw_value=raw_val_step)
 
             except Exception as e:
-                e.args = e.args + (f"setting {self} to {value}",)
+                e.args = (*e.args, f"setting {self} to {value}")
                 raise e
 
         return set_wrapper
@@ -772,6 +796,7 @@ class ParameterBase(MetadatableWithName):
 
         Returns:
             List of stepped values, including target value.
+
         """
         if step is None:
             return [value]
@@ -827,6 +852,7 @@ class ParameterBase(MetadatableWithName):
             TypeError: If the value is of the wrong type.
             ValueError: If the value is outside the bounds specified by the
                validator.
+
         """
         for validator in reversed(self._vals):
             if validator is not None:
@@ -852,6 +878,7 @@ class ParameterBase(MetadatableWithName):
             TypeError:  if step is set to not integer or None for an
                 integer parameter
             TypeError: if step is set to not a number on None
+
         """
         return self._step
 
@@ -895,6 +922,7 @@ class ParameterBase(MetadatableWithName):
         Raises:
             TypeError: If delay is not int nor float
             ValueError: If delay is negative
+
         """
         return self._post_delay
 
@@ -923,6 +951,7 @@ class ParameterBase(MetadatableWithName):
         Raises:
             TypeError: If delay is not int nor float
             ValueError: If delay is negative
+
         """
         return self._inter_delay
 
@@ -1006,6 +1035,7 @@ class ParameterBase(MetadatableWithName):
             >>> with p.set_to(3, allow_changes=True):
             ...     p.set(5)  # now this works
             >>> print(f"value after second block: {p.get()}")  # still prints 2
+
         """
         context_manager = _SetParamContext(self, value, allow_changes=allow_changes)
         return context_manager
@@ -1029,6 +1059,7 @@ class ParameterBase(MetadatableWithName):
             >>> print(f"value after with block: {p.get()}")  # prints 2
             >>> with p.restore_at_exit(allow_changes=False):
             ...     p.set(5)  # raises an exception
+
         """
         return self.set_to(self.cache(), allow_changes=allow_changes)
 
@@ -1115,6 +1146,7 @@ class GetLatest(DelegateAttributes):
 
     Args:
         parameter: Parameter to be wrapped.
+
     """
 
     def __init__(self, parameter: ParameterBase):

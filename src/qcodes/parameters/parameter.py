@@ -165,6 +165,7 @@ class Parameter(ParameterBase):
 
         bind_to_instrument: Should the parameter be registered as a delegate attribute
             on the instrument passed via the instrument argument.
+
     """
 
     def __init__(
@@ -200,12 +201,7 @@ class Parameter(ParameterBase):
         def _set_manual_parameter(
             self: Parameter, x: ParamRawDataType
         ) -> ParamRawDataType:
-            if self.root_instrument is not None:
-                mylogger: InstrumentLoggerAdapter | logging.Logger = (
-                    self.root_instrument.log
-                )
-            else:
-                mylogger = log
+            mylogger = self._get_logger()
             mylogger.debug(
                 "Setting raw value of parameter: %s to %s", self.full_name, x
             )
@@ -244,7 +240,9 @@ class Parameter(ParameterBase):
             **kwargs,
         )
 
-        no_instrument_get = not self.gettable and (get_cmd is None or get_cmd is False)
+        no_instrument_get = not self._implements_get_raw and (
+            get_cmd is None or get_cmd is False
+        )
         # TODO: a matching check should be in ParameterBase but
         #   due to the current limited design the ParameterBase cannot
         #   know if this subclass will supply a get_cmd
@@ -260,13 +258,13 @@ class Parameter(ParameterBase):
         # in the scope of this class.
         # (previous call to `super().__init__` wraps existing
         # get_raw/set_raw into get/set methods)
-        if self.gettable and get_cmd not in (None, False):
+        if self._implements_get_raw and get_cmd not in (None, False):
             raise TypeError(
                 "Supplying a not None or False `get_cmd` to a Parameter"
                 " that already implements"
                 " get_raw is an error."
             )
-        elif not self.gettable and get_cmd is not False:
+        elif not self._implements_get_raw and get_cmd is not False:
             if get_cmd is None:
                 # ignore typeerror since mypy does not allow setting a method dynamically
                 self.get_raw = MethodType(_get_manual_parameter, self)  # type: ignore[method-assign]
@@ -292,13 +290,13 @@ class Parameter(ParameterBase):
             # this may be resolvable if Command above is correctly wrapped in MethodType
             self.get = self._wrap_get(self.get_raw)  # type: ignore[arg-type]
 
-        if self.settable and set_cmd not in (None, False):
+        if self._implements_set_raw and set_cmd not in (None, False):
             raise TypeError(
                 "Supplying a not None or False `set_cmd` to a Parameter"
                 " that already implements"
                 " set_raw is an error."
             )
-        elif not self.settable and set_cmd is not False:
+        elif not self._implements_set_raw and set_cmd is not False:
             if set_cmd is None:
                 # ignore typeerror since mypy does not allow setting a method dynamically
                 self.set_raw = MethodType(_set_manual_parameter, self)  # type: ignore[method-assign]
@@ -404,6 +402,7 @@ class Parameter(ParameterBase):
 
         Args:
             value: Value to be added to the parameter.
+
         """
         self.set(self.get() + value)
 
@@ -436,6 +435,7 @@ class Parameter(ParameterBase):
             [5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
             >>> sweep(15, 10.5, step=1.5)
             >[15.0, 13.5, 12.0, 10.5]
+
         """
         return SweepFixedValues(self, start=start, stop=stop, step=step, num=num)
 

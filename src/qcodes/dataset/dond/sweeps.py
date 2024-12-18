@@ -71,7 +71,7 @@ class AbstractSweep(ABC, Generic[T]):
         return False
 
 
-class LinSweep(AbstractSweep[np.float64]):
+class LinSweep(AbstractSweep[np.floating]):
     """
     Linear sweep.
 
@@ -84,6 +84,7 @@ class LinSweep(AbstractSweep[np.float64]):
         post_actions: Actions to do after each sweep point.
         get_after_set: Should we perform a get on the parameter after setting it
             and store the value returned by get rather than the set value in the dataset.
+
     """
 
     def __init__(
@@ -104,7 +105,7 @@ class LinSweep(AbstractSweep[np.float64]):
         self._post_actions = post_actions
         self._get_after_set = get_after_set
 
-    def get_setpoints(self) -> npt.NDArray[np.float64]:
+    def get_setpoints(self) -> npt.NDArray[np.floating]:
         """
         Linear (evenly spaced) numpy array for supplied start, stop and
         num_points.
@@ -132,7 +133,7 @@ class LinSweep(AbstractSweep[np.float64]):
         return self._get_after_set
 
 
-class LogSweep(AbstractSweep[np.float64]):
+class LogSweep(AbstractSweep[np.floating]):
     """
     Logarithmic sweep.
 
@@ -145,6 +146,7 @@ class LogSweep(AbstractSweep[np.float64]):
         post_actions: Actions to do after each sweep point.
         get_after_set: Should we perform a get on the parameter after setting it
             and store the value returned by get rather than the set value in the dataset.
+
     """
 
     def __init__(
@@ -165,7 +167,7 @@ class LogSweep(AbstractSweep[np.float64]):
         self._post_actions = post_actions
         self._get_after_set = get_after_set
 
-    def get_setpoints(self) -> npt.NDArray[np.float64]:
+    def get_setpoints(self) -> npt.NDArray[np.floating]:
         """
         Logarithmically spaced numpy array for supplied start, stop and
         num_points.
@@ -204,6 +206,7 @@ class ArraySweep(AbstractSweep, Generic[T]):
         post_actions: Actions to do after each sweep point.
         get_after_set: Should we perform a get on the parameter after setting it
             and store the value returned by get rather than the set value in the dataset.
+
     """
 
     def __init__(

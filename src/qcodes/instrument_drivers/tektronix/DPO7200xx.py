@@ -362,6 +362,7 @@ class TektronixDPOWaveform(InstrumentChannel):
 @deprecated(
     "TekronixDPOWaveform is deprecated use TektronixDPOWaveform",
     category=QCoDeSDeprecationWarning,
+    stacklevel=2,
 )
 class TekronixDPOWaveform(TektronixDPOWaveform):
     """
@@ -505,6 +506,7 @@ class TektronixDPOChannel(InstrumentChannel):
 
         Args:
             value: The requested number of samples in the trace
+
         """
         if self.root_instrument.horizontal.record_length() < value:
             raise ValueError(
@@ -520,6 +522,7 @@ class TektronixDPOChannel(InstrumentChannel):
         """
         Args:
             value: The time over which a trace is desired.
+
         """
         sample_rate = self.root_instrument.horizontal.sample_rate()
         required_sample_count = int(sample_rate * value)
@@ -754,6 +757,7 @@ class TektronixDPOTrigger(InstrumentChannel):
 @deprecated(
     "TekronixDPOTrigger is deprecated use TektronixDPOTrigger",
     category=QCoDeSDeprecationWarning,
+    stacklevel=2,
 )
 class TekronixDPOTrigger(TektronixDPOTrigger):
     """
@@ -918,7 +922,7 @@ class TektronixDPOMeasurement(InstrumentChannel):
                 f"source{src}",
                 get_cmd=f"MEASUrement:MEAS{self._measurement_number}:SOUrce{src}?",
                 set_cmd=partial(self._set_source, src),
-                vals=Enum(*(TektronixDPOWaveform.valid_identifiers + ["HISTogram"])),
+                vals=Enum(*([*TektronixDPOWaveform.valid_identifiers, "HISTogram"])),
             )
 
     @property

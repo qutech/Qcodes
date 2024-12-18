@@ -12,7 +12,6 @@ from typing import (
     Any,
     Literal,
     Protocol,
-    Union,
     runtime_checkable,
 )
 
@@ -56,8 +55,8 @@ scalar_res_types: TypeAlias = (
     str | complex | np.integer | np.floating | np.complexfloating
 )
 values_type: TypeAlias = scalar_res_types | np.ndarray | Sequence[scalar_res_types]
-res_type: TypeAlias = tuple[Union["ParameterBase", str], values_type]
-setpoints_type: TypeAlias = Sequence[Union[str, "ParameterBase"]]
+res_type: TypeAlias = "tuple[ParameterBase | str, values_type]"
+setpoints_type: TypeAlias = "Sequence[str | ParameterBase]"
 SPECS: TypeAlias = list[ParamSpec]
 # Transition period type: SpecsOrInterDeps. We will allow both as input to
 # the DataSet constructor for a while, then deprecate SPECS and finally remove
@@ -278,6 +277,7 @@ class BaseDataSet(DataSetProtocol, Protocol):
 
         Args:
             other: the dataset to compare self to
+
         """
         if not isinstance(other, DataSetProtocol):
             return False
@@ -329,6 +329,7 @@ class BaseDataSet(DataSetProtocol, Protocol):
         Raises:
             ValueError: If the export data type is not specified or unknown,
                 raise an error
+
         """
         if isinstance(path, str):
             path = Path(path)
@@ -384,6 +385,7 @@ class BaseDataSet(DataSetProtocol, Protocol):
 
         Returns:
             str: Path file was saved to, returns None if no file was saved.
+
         """
         # Set defaults to values in config if the value was not set
         # (defaults to None)
@@ -495,7 +497,7 @@ class BaseDataSet(DataSetProtocol, Protocol):
         """
         param_data = np.atleast_1d(param_data)
         if param.type == "array":
-            new_data = np.reshape(param_data, (1,) + param_data.shape)
+            new_data = np.reshape(param_data, (1, *param_data.shape))
         else:
             new_data = param_data.ravel()
         return new_data

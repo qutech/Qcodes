@@ -82,6 +82,7 @@ class _DelegateMixin:
         Args:
             parent: Measurement station
             path: Relative path to parse
+
         """
 
         def _parse_path(parent: Any, elem: Sequence[str]) -> Any:
@@ -98,6 +99,7 @@ class _DelegateMixin:
         Args:
             dry_run: Dry run to test if defaults are set correctly.
                 Defaults to False.
+
         """
         _log.debug(f"Setting default values: {self._initial_values}")
         for path, value in self._initial_values.items():
@@ -393,6 +395,7 @@ class DelegateInstrument(_DelegateMixin, InstrumentBase):
             ``.set()`` method on the endpoint parameters. Defaults to None.
         units: Optional units to set for parameters.
         metadata: Optional metadata to pass to instrument. Defaults to None.
+
     """
 
     def __repr__(self) -> str:

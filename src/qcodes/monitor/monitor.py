@@ -36,12 +36,13 @@ from typing import TYPE_CHECKING, Any
 
 import websockets
 import websockets.exceptions
-import websockets.server
 
 from qcodes.parameters import Parameter
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
+
+    from websockets.asyncio.server import ServerConnection
 
 WEBSOCKET_PORT = 5678
 SERVER_PORT = 3000
@@ -84,8 +85,8 @@ def _get_metadata(
 
     # Create list of parameters, grouped by instrument
     parameters_out = []
-    for instrument in metas:
-        temp = {"instrument": instrument, "parameters": metas[instrument]}
+    for instrument, instrument_meta in metas.items():
+        temp = {"instrument": instrument, "parameters": instrument_meta}
         parameters_out.append(temp)
 
     state = {"ts": metadata_timestamp, "parameters": parameters_out}
@@ -94,12 +95,12 @@ def _get_metadata(
 
 def _handler(
     parameters: Sequence[Parameter], interval: float, use_root_instrument: bool = True
-) -> Callable[[websockets.server.WebSocketServerProtocol], Awaitable[None]]:
+) -> Callable[[ServerConnection], Awaitable[None]]:
     """
     Return the websockets server handler.
     """
 
-    async def server_func(websocket: websockets.server.WebSocketServerProtocol) -> None:
+    async def server_func(websocket: ServerConnection) -> None:
         """
         Create a websockets handler that sends parameter values to a listener
         every "interval" seconds.
@@ -147,6 +148,7 @@ class Monitor(Thread):
             interval: How often one wants to refresh the values.
             use_root_instrument: Defines if parameters are grouped according to
                                 parameter.root_instrument or parameter.instrument
+
         """
         super().__init__(daemon=True)
 
@@ -188,7 +190,7 @@ class Monitor(Thread):
             self.loop = asyncio.get_running_loop()
             self._stop_loop_future = self.loop.create_future()
 
-            async with websockets.server.serve(
+            async with websockets.serve(
                 self.handler, "127.0.0.1", WEBSOCKET_PORT, close_timeout=1
             ):
                 self.server_is_started.set()

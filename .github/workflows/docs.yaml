@@ -29,22 +29,24 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
         exclude:
           - os: windows-latest
             python-version: 3.10
           - os: windows-latest
             python-version: 3.11
+          - os: windows-latest
+            python-version: 3.13
     env:
       OS: ${{ matrix.os }}
       SPHINX_WARNINGS_AS_ERROR: true
       SPHINX_OPTS: "-v -j 2"
     steps:
     - name: Harden Runner
-      uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
+      uses: step-security/harden-runner@0080882f6c36860b6ba35c610c98ce87d4e2f26f # v2.10.2
       with:
         egress-policy: audit
-    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
         # we need full history with tags for the version number
         fetch-depth: '0'
@@ -61,7 +63,7 @@ jobs:
         sudo apt install pandoc
       if: runner.os == 'Linux'
     - name: Install pandoc on windows
-      uses: Wandalen/wretry.action@6feedb7dedadeb826de0f45ff482b53b379a7844 # v3.5.0
+      uses: Wandalen/wretry.action@ffdd254f4eaf1562b8a2c66aeaa37f1ff2231179 # v3.7.3
       with:
         action: crazy-max/ghaction-chocolatey@v1.6.0
         with: |
@@ -70,7 +72,7 @@ jobs:
         attempt_delay: 1000
       if: runner.os == 'Windows'
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@f677139bbe7f9c59b41e40162b753c062f5d49a3 # v5.2.0
+      uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
       with:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
@@ -96,7 +98,7 @@ jobs:
         ./make.bat html
       if: runner.os == 'Windows'
     - name: Upload build docs
-      uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a # v4.3.6
+      uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
       with:
         name: docs_${{ matrix.python-version }}_${{ matrix.os }}
         path: ${{ github.workspace }}/docs/_build/html
@@ -111,11 +113,11 @@ jobs:
     steps:
 
     - name: Harden Runner
-      uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
+      uses: step-security/harden-runner@0080882f6c36860b6ba35c610c98ce87d4e2f26f # v2.10.2
       with:
         egress-policy: audit
 
-    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
     - name: Download artifact
       uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
@@ -124,7 +126,7 @@ jobs:
         path: build_docs
 
     - name: Deploy to gh pages
-      uses: JamesIves/github-pages-deploy-action@94f3c658273cf92fb48ef99e5fbc02bd2dc642b2 # v4.6.3
+      uses: JamesIves/github-pages-deploy-action@15de0f09300eea763baee31dff6c6184995c5f6a # v4.7.2
       with:
         branch: gh-pages
         folder: ${{ github.workspace }}/build_docs/

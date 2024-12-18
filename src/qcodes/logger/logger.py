@@ -10,13 +10,12 @@ import json
 import logging
 import logging.handlers
 import os
-import platform
 import sys
 from collections import OrderedDict
 from contextlib import contextmanager
 from copy import copy
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 from typing_extensions import deprecated
 
@@ -67,7 +66,7 @@ FORMAT_STRING_DICT = OrderedDict(
 # console hander.
 console_handler: logging.Handler | None = None
 file_handler: logging.Handler | None = None
-telemetry_handler: Optional["AzureLogHandler"] = None
+telemetry_handler: AzureLogHandler | None = None
 
 
 _opencensus_filter = logging.Filter(name="opencensus")
@@ -77,6 +76,10 @@ _azure_monitor_opentelemetry_exporter_filter = logging.Filter(
 )
 
 
+@deprecated(
+    "filter_out_telemetry_log_records is deprecated and will be removed",
+    category=QCoDeSDeprecationWarning,
+)
 def filter_out_telemetry_log_records(record: logging.LogRecord) -> bool:
     """
     here we filter any message that is likely to be thrown from
@@ -212,72 +215,6 @@ def flush_telemetry_traces() -> None:
         telemetry_handler.flush()
 
 
-@deprecated(
-    "OpenCensus integration is deprecated. Please use your own telemetry integration as needed, we recommend OpenTelemetry",
-    category=QCoDeSDeprecationWarning,
-)
-def _create_telemetry_handler() -> "AzureLogHandler":
-    """
-    Configure, create, and return the telemetry handler
-    """
-    from opencensus.ext.azure.log_exporter import (  # type: ignore[import-not-found]
-        AzureLogHandler,
-    )
-
-    global telemetry_handler
-
-    # The default_custom_dimensions will appear in the "customDimensions"
-    # field in Azure log analytics for every log message alongside any
-    # custom dimensions that message may have. All messages additionally come
-    # with custom dimensions fileName, level, lineNumber, module, and process
-    default_custom_dimensions = {"pythonExecutable": sys.executable}
-
-    class CustomDimensionsFilter(logging.Filter):
-        """
-        Add application-wide properties to the customDimension field of
-        AzureLogHandler records
-        """
-
-        def __init__(self, custom_dimensions: dict[str, str]):
-            super().__init__()
-            self.custom_dimensions = custom_dimensions
-
-        def filter(self, record: logging.LogRecord) -> bool:
-            """
-            Add the default custom_dimensions into the current log record
-            """
-            cdim = self.custom_dimensions.copy()
-            cdim.update(getattr(record, "custom_dimensions", {}))
-            record.custom_dimensions = cdim
-
-            return True
-
-    # Transport module of opencensus-ext-azure logs info 'transmission
-    # succeeded' which is also exported to azure if AzureLogHandler is
-    # in root_logger. The following lines stops that.
-    logging.getLogger("opencensus.ext.azure.common.transport").setLevel(logging.WARNING)
-
-    loc = qc.config.GUID_components.location
-    stat = qc.config.GUID_components.work_station
-
-    def callback_function(envelope: "Envelope") -> bool:
-        envelope.tags["ai.user.accountId"] = platform.node()
-        envelope.tags["ai.user.id"] = f"{loc:02x}-{stat:06x}"
-        return True
-
-    telemetry_handler = AzureLogHandler(
-        connection_string=f"InstrumentationKey="
-        f"{qc.config.telemetry.instrumentation_key}"
-    )
-    assert telemetry_handler is not None
-    telemetry_handler.add_telemetry_processor(callback_function)
-    telemetry_handler.setLevel(logging.INFO)
-    telemetry_handler.addFilter(CustomDimensionsFilter(default_custom_dimensions))
-    telemetry_handler.setFormatter(get_formatter_for_telemetry())
-
-    return telemetry_handler
-
-
 def start_logger() -> None:
     """
     Start logging of messages passed through the python logging module.
@@ -312,7 +249,6 @@ def start_logger() -> None:
     console_handler = logging.StreamHandler()
     console_handler.setLevel(qc.config.logger.console_level)
     console_handler.setFormatter(get_formatter())
-    console_handler.addFilter(filter_out_telemetry_log_records)
     root_logger.addHandler(console_handler)
 
     # file
@@ -331,9 +267,7 @@ def start_logger() -> None:
     logging.captureWarnings(capture=True)
 
     if qc.config.telemetry.enabled:
-        root_logger.addHandler(
-            _create_telemetry_handler()  # pyright: ignore[reportDeprecated]
-        )
+        log.warning("Enabling telemetry in QCoDes config has no effect.")
 
     log.info("QCoDes logger setup completed")
 
@@ -351,6 +285,7 @@ def start_command_history_logger(log_dir: str | None = None) -> None:
     Args:
         log_dir: directory where log shall be stored to. If left out, defaults
             to ``~/.qcodes/logs/command_history.log``
+
     """
     # get_ipython is part of the public api but IPython does
     # not use __all__ to mark this
@@ -450,7 +385,7 @@ def conditionally_start_all_logging() -> None:
 
 @contextmanager
 def handler_level(
-    level: LevelType, handler: Union[logging.Handler, "Sequence[logging.Handler]"]
+    level: LevelType, handler: "logging.Handler | Sequence[logging.Handler]"
 ) -> "Iterator[None]":
     """
     Context manager to temporarily change the level of handlers.
@@ -462,6 +397,7 @@ def handler_level(
     Args:
         level: Level to set the handlers to.
         handler: Handle or sequence of handlers which to change.
+
     """
     if isinstance(handler, logging.Handler):
         handler = (handler,)
@@ -487,6 +423,7 @@ def console_level(level: LevelType) -> "Iterator[None]":
 
     Args:
         level: Level to set the console handler to.
+
     """
     global console_handler
     if console_handler is None:
@@ -532,7 +469,7 @@ class LogCapture:
         self,
         exception_type: type[BaseException] | None,
         exception_value: BaseException | None,
-        traceback: Optional["TracebackType"],
+        traceback: "TracebackType | None",
     ) -> None:
         self.logger.removeHandler(self.string_handler)
         self.value = self.log_capture.getvalue()

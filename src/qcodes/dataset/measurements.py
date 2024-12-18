@@ -155,6 +155,7 @@ class DataSaver:
             ValueError: If multiple results are given for the same parameter.
             ParameterTypeError: If a parameter is given a value not matching
                 its type.
+
         """
 
         # we iterate through the input twice. First we find any array and
@@ -548,6 +549,7 @@ class Runner:
         in_memory_cache: bool | None = None,
         dataset_class: DataSetType = DataSetType.DataSet,
         parent_span: trace.Span | None = None,
+        registered_parameters: Sequence[ParameterBase] | None = None,
     ) -> None:
         if in_memory_cache is None:
             in_memory_cache = qc.config.dataset.in_memory_cache
@@ -576,6 +578,7 @@ class Runner:
         self._in_memory_cache = in_memory_cache
         self._parent_span = parent_span
         self.ds: DataSetProtocol
+        self._registered_parameters = registered_parameters
 
     @staticmethod
     def _calculate_write_period(
@@ -660,9 +663,15 @@ class Runner:
             station = self.station
 
         if station is not None:
-            snapshot = station.snapshot()
+            snapshot = {"station": station.snapshot()}
         else:
             snapshot = {}
+        if self._registered_parameters is not None:
+            parameter_snapshot = {
+                param.short_name: param.snapshot()
+                for param in self._registered_parameters
+            }
+            snapshot["parameters"] = parameter_snapshot
 
         self.ds.prepare(
             snapshot=snapshot,
@@ -781,6 +790,7 @@ class Measurement:
         name: Name of the measurement. This will be passed down to the dataset
             produced by the measurement. If not given, a default value of
             'results' is used for the dataset.
+
     """
 
     def __init__(
@@ -801,6 +811,7 @@ class Measurement:
         self._shapes: Shapes | None = None
         self._parent_datasets: list[dict[str, str]] = []
         self._extra_log_info: str = ""
+        self._registered_parameters: list[ParameterBase] = []
 
     @property
     def parameters(self) -> dict[str, ParamSpecBase]:
@@ -837,6 +848,7 @@ class Measurement:
             setpoints: name(s) of the setpoint parameter(s)
             basis: name(s) of the parameter(s) that this parameter is
                 inferred from
+
         """
 
         idps = self._interdeps
@@ -879,6 +891,7 @@ class Measurement:
             parent: The parent dataset
             link_type: A name for the type of parent-child link
             description: A free-text description of the relationship
+
         """
         # we save the information in a way that is very compatible with the
         # Link object we will eventually make out of this information. We
@@ -915,13 +928,13 @@ class Measurement:
             paramtype: Type of the parameter, i.e. the SQL storage class,
                 If None the paramtype will be inferred from the parameter type
                 and the validator of the supplied parameter.
+
         """
         if not isinstance(parameter, ParameterBase):
             raise ValueError(
                 f"Can not register object of type {type(parameter)}. Can only "
                 "register a QCoDeS Parameter."
             )
-
         paramtype = self._infer_paramtype(parameter, paramtype)
         # default to numeric
         if paramtype is None:
@@ -976,6 +989,7 @@ class Measurement:
             raise RuntimeError(
                 f"Does not know how to register a parameter of type {type(parameter)}"
             )
+        self._registered_parameters.append(parameter)
 
         return self
 
@@ -1004,6 +1018,7 @@ class Measurement:
             The inferred parameter type. If a not None parameter type is
             supplied this will be preferred over any inferred type.
             Returns None if a parameter type could not be inferred
+
         """
         if paramtype is not None:
             return paramtype
@@ -1028,6 +1043,7 @@ class Measurement:
         setpoints: setpoints_type | None,
         basis: setpoints_type | None,
         paramtype: str,
+        metadata: dict[str, Any] | None = None,
     ) -> T:
         """
         Update the interdependencies object with a new group
@@ -1262,6 +1278,7 @@ class Measurement:
                 of parameters already registered in the measurement that
                 are the setpoints of this parameter
             paramtype: Type of the parameter, i.e. the SQL storage class
+
         """
         return self._register_parameter(name, label, unit, setpoints, basis, paramtype)
 
@@ -1271,9 +1288,9 @@ class Measurement:
         running this measurement
         """
         if isinstance(parameter, ParameterBase):
-            param = str_or_register_name(parameter)
+            param_name = str_or_register_name(parameter)
         elif isinstance(parameter, str):
-            param = parameter
+            param_name = parameter
         else:
             raise ValueError(
                 "Wrong input type. Must be a QCoDeS parameter or"
@@ -1281,13 +1298,27 @@ class Measurement:
             )
 
         try:
-            paramspec: ParamSpecBase = self._interdeps[param]
+            paramspec: ParamSpecBase = self._interdeps[param_name]
         except KeyError:
             return
 
         self._interdeps = self._interdeps.remove(paramspec)
 
-        log.info(f"Removed {param} from Measurement.")
+        # Must follow interdeps removal, because interdeps removal may error
+        if isinstance(parameter, ParameterBase):
+            try:
+                self._registered_parameters.remove(parameter)
+            except ValueError:
+                return
+        elif isinstance(parameter, str):
+            with_parameters_removed = [
+                param
+                for param in self._registered_parameters
+                if parameter not in (param.name, param.register_name)
+            ]
+            self._registered_parameters = with_parameters_removed
+
+        log.info(f"Removed {param_name} from Measurement.")
 
     def add_before_run(self: T, func: Callable[..., Any], args: Sequence[Any]) -> T:
         """
@@ -1296,6 +1327,7 @@ class Measurement:
         Args:
             func: Function to be performed
             args: The arguments to said function
+
         """
         # some tentative cheap checking
         nargs = len(signature(func).parameters)
@@ -1316,6 +1348,7 @@ class Measurement:
         Args:
             func: Function to be performed
             args: The arguments to said function
+
         """
         # some tentative cheap checking
         nargs = len(signature(func).parameters)
@@ -1342,6 +1375,7 @@ class Measurement:
                 tuples of parameter values, an integer, a mutable variable
                 (list or dict) to hold state/writes updates to.
             state: The variable to hold the state.
+
         """
         self.subscribers.append((func, state))
 
@@ -1355,6 +1389,7 @@ class Measurement:
         Args:
             shapes: Dictionary from names of dependent parameters to a tuple
                 of integers describing the shape of the measurement.
+
         """
         self._shapes = shapes
 
@@ -1381,6 +1416,7 @@ class Measurement:
                 with.
             parent_span: An optional opentelemetry span that this should be registered a
                 a child of if using opentelemetry.
+
         """
         if write_in_background is None:
             write_in_background = cast(bool, qc.config.dataset.write_in_background)
@@ -1400,6 +1436,7 @@ class Measurement:
             in_memory_cache=in_memory_cache,
             dataset_class=dataset_class,
             parent_span=parent_span,
+            registered_parameters=self._registered_parameters,
         )
 
 

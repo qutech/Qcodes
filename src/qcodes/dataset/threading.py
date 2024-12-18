@@ -9,21 +9,20 @@ import concurrent.futures
 import itertools
 import logging
 from collections import defaultdict
-from collections.abc import Callable
 from functools import partial
-from typing import TYPE_CHECKING, Protocol, TypeVar, Union
+from typing import TYPE_CHECKING, Protocol, TypeAlias, TypeVar
 
 from qcodes.utils import RespondingThread
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from types import TracebackType
 
     from qcodes.dataset.data_set_protocol import values_type
     from qcodes.parameters import ParamDataType, ParameterBase
 
-ParamMeasT = Union["ParameterBase", Callable[[], None]]
-OutType = list[tuple["ParameterBase", "values_type"]]
+ParamMeasT: TypeAlias = "ParameterBase | Callable[[], None]"
+OutType: TypeAlias = "list[tuple[ParameterBase, values_type]]"
 
 T = TypeVar("T")
 
@@ -173,6 +172,7 @@ class ThreadPoolParamsCaller(_ParamsCallerProtocol):
         max_workers: number of worker threads to create in the pool; if None,
             the number of worker threads will be equal to the number of
             unique "underlying instruments"
+
     """
 
     def __init__(self, *param_meas: ParamMeasT, max_workers: int | None = None):

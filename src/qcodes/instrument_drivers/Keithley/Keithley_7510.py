@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, ClassVar, Optional, TypedDict, cast
+from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, cast
 
 import numpy as np
 
@@ -36,7 +36,7 @@ class DataArray7510(MultiParameter):
         self,
         names: "Sequence[str]",
         shapes: "Sequence[Sequence[int]]",
-        setpoints: Optional["Sequence[Sequence[Any]]"],
+        setpoints: "Sequence[Sequence[Any]] | None",
         **kwargs: Any,
     ):
         super().__init__(
@@ -282,7 +282,7 @@ class Keithley7510Buffer(InstrumentChannel):
         self,
         exception_type: type[BaseException] | None,
         value: BaseException | None,
-        traceback: Optional["TracebackType"],
+        traceback: "TracebackType | None",
     ) -> None:
         self.delete()
 
@@ -479,6 +479,7 @@ class Keithley7510Sense(InstrumentChannel):
                 "resistance" is for two-wire measurement of resistance.
                 "Fresistance" is for Four-wire measurement of resistance.
             **kwargs: Forwarded to base class.
+
         """
         super().__init__(parent, name, **kwargs)
 
@@ -740,6 +741,7 @@ class Keithley7510(VisaInstrument):
             name: Name of the instrument instance
             address: Visa-resolvable instrument address
             **kwargs: kwargs are forwarded to base class.
+
         """
         super().__init__(name, address, **kwargs)
 

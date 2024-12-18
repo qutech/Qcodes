@@ -35,6 +35,7 @@ T = TypeVar("T")
 @deprecated(
     "qcodes.instrument_drivers.american_magnetics.AMI430 module is deprecated use AMI430Exception from qcodes.instrument_drivers.american_magnetics",
     category=QCoDeSDeprecationWarning,
+    stacklevel=2,
 )
 class AMI430Exception(Exception):
     pass
@@ -43,6 +44,7 @@ class AMI430Exception(Exception):
 @deprecated(
     "qcodes.instrument_drivers.american_magnetics.AMI430 module is deprecated use AMI430Warning from qcodes.instrument_drivers.american_magnetics",
     category=QCoDeSDeprecationWarning,
+    stacklevel=2,
 )
 class AMI430Warning(UserWarning):
     pass
@@ -51,6 +53,7 @@ class AMI430Warning(UserWarning):
 @deprecated(
     "qcodes.instrument_drivers.american_magnetics.AMI430 module is deprecated use AMI430SwitchHeater from qcodes.instrument_drivers.american_magnetics",
     category=QCoDeSDeprecationWarning,
+    stacklevel=2,
 )
 class AMI430SwitchHeater(InstrumentChannel):
     class _Decorators:
@@ -158,6 +161,7 @@ class AMI430SwitchHeater(InstrumentChannel):
 @deprecated(
     "qcodes.instrument_drivers.american_magnetics.AMI430 module is deprecated use AMIModel430 from qcodes.instrument_drivers.american_magnetics",
     category=QCoDeSDeprecationWarning,
+    stacklevel=2,
 )
 class AMI430(IPInstrument):
     """
@@ -172,6 +176,7 @@ class AMI430(IPInstrument):
         name: a name for the instrument
         address: IP address of the power supply programmer
         current_ramp_limit: A current ramp limit, in units of A/s
+
     """
 
     _SHORT_UNITS: ClassVar[dict[str, str]] = {
@@ -393,6 +398,7 @@ class AMI430(IPInstrument):
             perform_safety_check: Whether to set the field via a parent
                 driver (if present), which might perform additional safety
                 checks.
+
         """
         # Check we aren't violating field limits
         field_lim = float(self.ask("COIL?")) * self.current_limit()
@@ -554,6 +560,7 @@ class AMI430(IPInstrument):
 @deprecated(
     "qcodes.instrument_drivers.american_magnetics.AMI430 module is deprecated use AMIModel4303D from qcodes.instrument_drivers.american_magnetics",
     category=QCoDeSDeprecationWarning,
+    stacklevel=2,
 )
 class AMI430_3D(Instrument):
     def __init__(
@@ -585,6 +592,7 @@ class AMI430_3D(Instrument):
                 iterable of callable field limit functions that define
                 region(s) of allowed values in 3D magnetic field space
             **kwargs: kwargs are forwarded to base class.
+
         """
         super().__init__(name, **kwargs)
 
@@ -963,8 +971,8 @@ class AMI430_3D(Instrument):
                 f"{ramp_rate_units_of_instruments}"
             )
 
-        common_field_units = tuple(field_units_of_instruments.keys())[0]
-        common_ramp_rate_units = tuple(ramp_rate_units_of_instruments.keys())[0]
+        common_field_units = next(iter(field_units_of_instruments.keys()))
+        common_ramp_rate_units = next(iter(ramp_rate_units_of_instruments.keys()))
 
         return common_field_units, common_ramp_rate_units
 
@@ -988,6 +996,7 @@ class AMI430_3D(Instrument):
 
         Args:
             values: a tuple of cartesian coordinates (x, y, z).
+
         """
         self.log.debug("Checking whether fields can be set")
 

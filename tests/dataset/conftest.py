@@ -104,6 +104,7 @@ def temporarily_copied_DB(filepath: str, **kwargs):
     Args:
         filepath: path to the db-file
         **kwargs: to be passed to connect
+
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         dbname_new = os.path.join(tmpdir, "temp.db")
@@ -130,7 +131,7 @@ def _make_scalar_dataset(dataset):
         f"param_{n_params}", "numeric", label=f"param_{n_params}", unit="Ohm"
     )
 
-    all_params = params_indep + [param_dep]
+    all_params = [*params_indep, param_dep]
 
     idps = InterDependencies_(dependencies={param_dep: tuple(params_indep)})
 
@@ -160,7 +161,7 @@ def _make_scalar_datasets_parameterized(dataset, request: FixtureRequest):
         f"param_{n_params}", "numeric", label=f"param_{n_params}", unit="Ohm"
     )
 
-    all_params = params_indep + [param_dep]
+    all_params = [*params_indep, param_dep]
 
     idps = InterDependencies_(dependencies={param_dep: tuple(params_indep)})
 

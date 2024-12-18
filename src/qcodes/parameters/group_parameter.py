@@ -45,6 +45,7 @@ class GroupParameter(Parameter):
 
         **kwargs: All kwargs used by the :class:`.Parameter` class, except
              ``set_cmd`` and ``get_cmd``.
+
     """
 
     def __init__(
@@ -148,7 +149,10 @@ class Group:
         set_cmd: Format string of the command that is used for setting the
             values of the parameters; for example, ``CMD {a}, {b}``.
         get_cmd: String of the command that is used for getting the values
-            of the parameters; for example, ``CMD?``.
+            of the parameters; for example, ``CMD?``. Can also be a callable
+            that returns a command string, this is useful for the cases where
+            the command string is dynamic; for example,
+            ``lambda: f"CMD {get_id_that_specifies_the_command()} ?"``.
         separator: A separator that is used when parsing the output of the
             ``get_cmd`` in order to obtain the values of the parameters; it
             is ignored in case a custom ``get_parser`` is used.
@@ -160,13 +164,14 @@ class Group:
             individual parsing of their values).
         single_instrument: A flag to indicate that all parameters belong to a
         single instrument, which in turn does additional checks. Defaults to True.
+
     """
 
     def __init__(
         self,
         parameters: Sequence[GroupParameter],
         set_cmd: str | None = None,
-        get_cmd: str | None = None,
+        get_cmd: str | Callable[[], str] | None = None,
         get_parser: Callable[[str], Mapping[str, Any]] | None = None,
         separator: str = ",",
         single_instrument: bool = True,
@@ -239,6 +244,7 @@ class Group:
         Args:
             parameters_dict: The dictionary of one or more parameters within
             the group with the corresponding values to be set.
+
         """
         if not parameters_dict:
             raise RuntimeError(
@@ -264,6 +270,7 @@ class Group:
         Args:
             set_parameter: The parameter within the group to set.
             raw_value: The new raw_value for this parameter.
+
         """
         # TODO replace get latest with call to cache.invalid once that lands
         if any((p.get_latest() is None) for p in self.parameters.values()):
@@ -305,7 +312,10 @@ class Group:
                 f"parameters - {parameter_names} since it "
                 f"has no `get_cmd` defined."
             )
-        ret = self.get_parser(self.instrument.ask(self._get_cmd))
+        get_command = (
+            self._get_cmd if isinstance(self._get_cmd, str) else self._get_cmd()
+        )
+        ret = self.get_parser(self.instrument.ask(get_command))
         for name, p in list(self.parameters.items()):
             p.cache._set_from_raw_value(ret[name])
 
