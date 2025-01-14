@@ -30,7 +30,7 @@ class _DelegateMixin:
 
     def __init__(
         self,
-        *args,
+        *args: Any,
         station: Station,
         parameters: None | (Mapping[str, Sequence[str]] | Mapping[str, str]) = None,
         channels: None | (Mapping[str, Mapping[str, Any]] | Mapping[str, str]) = None,
@@ -42,7 +42,7 @@ class _DelegateMixin:
         setters: Mapping[str, MutableMapping[str, Any]] | None = None,
         units: Mapping[str, str] | None = None,
         metadata: Mapping[Any, Any] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         super().__init__(*args, metadata=metadata, **kwargs)
         if parameters is not None:
