@@ -163,9 +163,9 @@ class _DelegateMixin:
                 paths=path_list,
                 names=name_list,
                 grouped_parameter_class=grouped_parameter_class,
+                grouped_parameter_kwargs=grouped_parameter_kwargs,
                 setter=setters.get(param_name),
                 unit=units.get(param_name),
-                **grouped_parameter_kwargs,
             )
 
     @staticmethod
@@ -203,11 +203,11 @@ class _DelegateMixin:
         paths: Sequence[str],
         names: Sequence[str] | None,
         grouped_parameter_class: type[ParameterBase] | None = GroupedParameter,
+        grouped_parameter_kwargs: None | Mapping[str, Any] = None,
         setter: MutableMapping[str, Any] | None = None,
         getter: Callable[..., Any] | None = None,
         formatter: Callable[..., Any] | None = None,
         unit: str | None = None,
-        **kwargs: Any,
     ) -> None:
         """Create delegate parameter that links to a given set of paths
         (e.g. my_instrument.my_param) on the station"""
@@ -242,7 +242,7 @@ class _DelegateMixin:
                 parameter_class=grouped_parameter_class,
                 group=group,
                 unit=unit,
-                **kwargs,
+                **grouped_parameter_kwargs,
             )
         else:
             self.add_parameter(
@@ -250,7 +250,6 @@ class _DelegateMixin:
                 source=source_parameters[0],
                 parameter_class=DelegateParameter,
                 unit=unit,
-                **kwargs,
             )
 
     def _create_and_add_channels(
