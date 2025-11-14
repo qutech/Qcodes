@@ -1,22 +1,29 @@
 import contextlib
 import os
+import re
 import shutil
-import sqlite3
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import hypothesis.strategies as hst
 import numpy as np
 import pytest
 import xarray as xr
+from deepdiff import DeepDiff  # type: ignore[import-untyped]
 from hypothesis import HealthCheck, given, settings
 from numpy.testing import assert_almost_equal
 
 import qcodes
-from qcodes.dataset import load_by_id, load_by_run_spec
+from qcodes.dataset import Measurement, load_by_id, load_by_run_spec
 from qcodes.dataset.data_set_in_memory import DataSetInMem, load_from_file
 from qcodes.dataset.data_set_protocol import DataSetType
-from qcodes.dataset.sqlite.connection import ConnectionPlus, atomic_transaction
+from qcodes.dataset.descriptions.dependencies import InterDependencies_
+from qcodes.dataset.sqlite.connection import AtomicConnection, atomic_transaction
+from qcodes.parameters import ManualParameter, Parameter, ParamSpecBase
 from qcodes.station import Station
+
+if TYPE_CHECKING:
+    from qcodes.dataset.experiment_container import Experiment
 
 
 def test_dataset_in_memory_reload_from_db(
@@ -173,7 +180,9 @@ def test_dataset_in_memory_without_cache_raises(
 ) -> None:
     with pytest.raises(
         RuntimeError,
-        match="Cannot disable the in memory cache for a dataset that is only in memory.",
+        match=re.escape(
+            "Cannot disable the in memory cache for a dataset that is only in memory."
+        ),
     ):
         with meas_with_registered_param.run(
             dataset_class=DataSetType.DataSetInMem, in_memory_cache=False
@@ -362,7 +371,7 @@ def test_dataset_in_memory_does_not_create_runs_table(
     ds = datasaver.dataset
     dbfile = datasaver.dataset._path_to_db
 
-    conn = ConnectionPlus(sqlite3.connect(dbfile))
+    conn = AtomicConnection(dbfile)
 
     tables_query = 'SELECT * FROM sqlite_master WHERE TYPE = "table"'
     tables = list(atomic_transaction(conn, tables_query).fetchall())
@@ -512,6 +521,49 @@ def test_load_from_file_by_id(meas_with_registered_param, DMM, DAC, tmp_path) ->
     assert not isinstance(loaded_ds_from_db, DataSetInMem)
 
 
+def test_load_from_netcdf_non_completed_dataset(experiment, tmp_path) -> None:
+    """Test that non-completed datasets can be loaded from netcdf files."""
+    # Create a non-completed dataset by NOT using the measurement context manager
+    # which automatically completes the dataset on exit
+    ds = DataSetInMem._create_new_run(name="test-dataset")
+
+    # Set up interdependencies with simple parameters following the established pattern
+    x_param = ParamSpecBase("x", paramtype="numeric")
+    y_param = ParamSpecBase("y", paramtype="numeric")
+    idps = InterDependencies_(dependencies={y_param: (x_param,)})
+    ds.prepare(interdeps=idps, snapshot={})
+
+    # Add some data points
+    for x_val in np.linspace(0, 25, 5):
+        y_val = x_val**2  # simple function
+        ds._enqueue_results({x_param: np.array([x_val]), y_param: np.array([y_val])})
+
+    # Note: do NOT call ds.mark_completed() to keep it non-completed
+
+    # Verify that the dataset is not completed
+    assert ds.completed_timestamp_raw is None
+    assert not ds.completed
+
+    # Export the non-completed dataset to NetCDF
+    ds.export(export_type="netcdf", path=str(tmp_path))
+
+    # Load the dataset from NetCDF
+    loaded_ds = DataSetInMem._load_from_netcdf(
+        tmp_path / f"qcodes_{ds.captured_run_id}_{ds.guid}.nc"
+    )
+
+    # Verify that the loaded dataset is still non-completed
+    assert isinstance(loaded_ds, DataSetInMem)
+    assert loaded_ds.completed_timestamp_raw is None
+    assert not loaded_ds.completed
+
+    # Compare other properties
+    assert loaded_ds.captured_run_id == ds.captured_run_id
+    assert loaded_ds.guid == ds.guid
+    assert loaded_ds.name == ds.name
+    assert loaded_ds.run_timestamp_raw == ds.run_timestamp_raw
+
+
 def test_load_from_netcdf_legacy_version(non_created_db) -> None:
     # Qcodes 0.26 exported netcdf files did not contain
     # the parent dataset links and used a different engine to write data
@@ -629,3 +681,50 @@ def test_load_from_db_dataset_moved(
             not in new_xr_ds.attrs
         )
         assert new_xr_ds.attrs["metadata_added_after_set_new_netcdf_location"] == 6969
+
+
+@pytest.mark.parametrize("include_inferred_data", [True, False])
+def test_dataset_in_mem_with_inferred_parameters(
+    experiment: "Experiment", include_inferred_data: bool
+) -> None:
+    inferred1 = ManualParameter("inferred1", initial_value=0.0)
+    inferred2 = ManualParameter("inferred2", initial_value=0.0)
+    control1 = ManualParameter("control1", initial_value=0.0)
+    control2 = ManualParameter("control2", initial_value=0.0)
+    dependent = Parameter("dependent", get_cmd=lambda: control1(), set_cmd=False)
+    meas = Measurement(exp=experiment, name="via Measurement")
+
+    meas.register_parameter(control1)
+    meas.register_parameter(control2)
+    meas.register_parameter(inferred1, basis=(control1, control2))
+    meas.register_parameter(inferred2, basis=(control1, control2))
+    meas.register_parameter(dependent, setpoints=(control1, control2))
+    meas.set_shapes({dependent.register_name: (11, 11)})
+    with meas.run() as datasaver:
+        for i in range(11):
+            for j in range(11):
+                control1(float(i))
+                control2(float(j))
+                if include_inferred_data:
+                    datasaver.add_result(
+                        (inferred1, inferred1()),
+                        (inferred2, inferred2()),
+                        (control1, control1()),
+                        (control2, control2()),
+                        (dependent, dependent()),
+                    )
+                else:
+                    datasaver.add_result(
+                        (control1, control1()),
+                        (control2, control2()),
+                        (dependent, dependent()),
+                    )
+        ds = datasaver.dataset
+
+    param_data = ds.get_parameter_data()
+    cache_data = ds.cache.data()
+
+    assert set(param_data.keys()) == set(cache_data.keys())
+    assert set(param_data["dependent"].keys()) == set(cache_data["dependent"].keys())
+
+    assert DeepDiff(param_data, cache_data, ignore_nan_inequality=True) == {}

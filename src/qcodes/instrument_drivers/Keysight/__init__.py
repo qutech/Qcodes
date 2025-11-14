@@ -40,10 +40,14 @@ from .Keysight_N9030B import (
     KeysightN9030BPhaseNoiseMode,
     KeysightN9030BSpectrumAnalyzerMode,
 )
+from .Keysight_P5002B import KeysightP5002B
+from .Keysight_P5004B import KeysightP5004B
 from .Keysight_P9374A import KeysightP9374A
 from .KeysightAgilent_33XXX import (
     Keysight33xxx,
+    Keysight33xxxDualChannels,
     Keysight33xxxOutputChannel,
+    Keysight33xxxSingleChannel,
     Keysight33xxxSyncChannel,
 )
 from .keysightb1500.KeysightB1500_base import KeysightB1500
@@ -71,7 +75,9 @@ from .private.Keysight_344xxA_submodules import (
 
 __all__ = [
     "Keysight33xxx",
+    "Keysight33xxxDualChannels",
     "Keysight33xxxOutputChannel",
+    "Keysight33xxxSingleChannel",
     "Keysight33xxxSyncChannel",
     "Keysight344xxA",
     "Keysight344xxADisplay",
@@ -132,6 +138,8 @@ __all__ = [
     "KeysightN9030B",
     "KeysightN9030BPhaseNoiseMode",
     "KeysightN9030BSpectrumAnalyzerMode",
+    "KeysightP5002B",
+    "KeysightP5004B",
     "KeysightP9374A",
     "KeysightPNABase",
     "KeysightPNAPort",

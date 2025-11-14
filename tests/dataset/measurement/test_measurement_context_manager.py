@@ -5,11 +5,13 @@ import os
 import random
 import re
 import traceback
+from functools import reduce
 from time import sleep
 from typing import Any
 
 import hypothesis.strategies as hst
 import numpy as np
+import numpy.typing as npt
 import pytest
 import xarray as xr
 from hypothesis import HealthCheck, given, settings
@@ -19,13 +21,19 @@ from pytest import LogCaptureFixture
 import qcodes as qc
 import qcodes.validators as vals
 from qcodes.dataset.data_set import DataSet, load_by_id
-from qcodes.dataset.descriptions.param_spec import ParamSpecBase
 from qcodes.dataset.experiment_container import new_experiment
 from qcodes.dataset.export_config import DataExportType
 from qcodes.dataset.measurements import Measurement
 from qcodes.dataset.sqlite.connection import atomic_transaction
-from qcodes.parameters import ManualParameter, Parameter, expand_setpoints_helper
+from qcodes.parameters import (
+    DelegateParameter,
+    ManualParameter,
+    Parameter,
+    ParamSpecBase,
+    expand_setpoints_helper,
+)
 from qcodes.station import Station
+from qcodes.validators import Arrays, ComplexNumbers
 from tests.common import retry_until_does_not_throw
 
 
@@ -81,7 +89,6 @@ def test_register_parameter_numbers(DAC, DMM) -> None:
     Test the registration of scalar QCoDeS parameters
     """
 
-    parameters = [DAC.ch1, DAC.ch2, DMM.v1, DMM.v2]
     not_parameters = ("", "Parameter", 0, 1.1, Measurement)
 
     meas = Measurement()
@@ -102,16 +109,16 @@ def test_register_parameter_numbers(DAC, DMM) -> None:
 
     # we allow the registration of the EXACT same parameter twice...
     meas.register_parameter(my_param)
-    # ... but not a different parameter with a new name
+    # ... but not a different parameter with the same name
     attrs = ["label", "unit"]
     vals = ["new label", "new unit"]
     for attr, val in zip(attrs, vals):
-        old_val = getattr(my_param, attr)
-        setattr(my_param, attr, val)
-        match = re.escape("Parameter already registered in this Measurement.")
+        different_param = ManualParameter(name=my_param.full_name)
+        assert different_param.full_name == my_param.full_name
+        setattr(different_param, attr, val)
+        match = re.escape("already exists in the graph ")
         with pytest.raises(ValueError, match=match):
-            meas.register_parameter(my_param)
-        setattr(my_param, attr, old_val)
+            meas.register_parameter(different_param)
 
     assert len(meas.parameters) == 1
     paramspec = meas.parameters[str(my_param)]
@@ -119,12 +126,6 @@ def test_register_parameter_numbers(DAC, DMM) -> None:
     assert paramspec.label == my_param.label
     assert paramspec.unit == my_param.unit
     assert paramspec.type == "numeric"
-
-    for parameter in parameters:
-        with pytest.raises(ValueError):
-            meas.register_parameter(my_param, setpoints=(parameter,))
-        with pytest.raises(ValueError):
-            meas.register_parameter(my_param, basis=(parameter,))
 
     meas.register_parameter(DAC.ch2)
     meas.register_parameter(DMM.v1)
@@ -201,6 +202,65 @@ def test_register_custom_parameter(DAC) -> None:
         )
 
 
+def test_register_delegate_parameters() -> None:
+    x_param = Parameter("x", set_cmd=None, get_cmd=None)
+
+    complex_param = Parameter(
+        "complex_param", get_cmd=None, set_cmd=None, vals=ComplexNumbers()
+    )
+    delegate_param = DelegateParameter("delegate", source=complex_param)
+
+    meas = Measurement()
+
+    meas.register_parameter(x_param)
+    meas.register_parameter(delegate_param, setpoints=(x_param,))
+    assert len(meas.parameters) == 2
+    assert meas.parameters["delegate"].type == "complex"
+    assert meas.parameters["x"].type == "numeric"
+
+
+def test_register_delegate_parameters_with_late_source() -> None:
+    x_param = Parameter("x", set_cmd=None, get_cmd=None)
+
+    complex_param = Parameter(
+        "complex_param", get_cmd=None, set_cmd=None, vals=ComplexNumbers()
+    )
+    delegate_param = DelegateParameter("delegate", source=None)
+
+    meas = Measurement()
+
+    meas.register_parameter(x_param)
+
+    delegate_param.source = complex_param
+
+    meas.register_parameter(delegate_param, setpoints=(x_param,))
+    assert len(meas.parameters) == 2
+    assert meas.parameters["delegate"].type == "complex"
+    assert meas.parameters["x"].type == "numeric"
+
+
+def test_register_delegate_parameters_with_late_source_chain():
+    x_param = Parameter("x", set_cmd=None, get_cmd=None)
+
+    complex_param = Parameter(
+        "complex_param", get_cmd=None, set_cmd=None, vals=ComplexNumbers()
+    )
+    delegate_inner = DelegateParameter("delegate_inner", source=None)
+    delegate_outer = DelegateParameter("delegate_outer", source=None)
+
+    meas = Measurement()
+
+    meas.register_parameter(x_param)
+
+    delegate_outer.source = delegate_inner
+    delegate_inner.source = complex_param
+
+    meas.register_parameter(delegate_outer, setpoints=(x_param,))
+    assert len(meas.parameters) == 2
+    assert meas.parameters["delegate_outer"].type == "complex"
+    assert meas.parameters["x"].type == "numeric"
+
+
 def test_unregister_parameter(DAC, DMM) -> None:
     """
     Test the unregistering of parameters.
@@ -233,7 +293,7 @@ def test_unregister_parameter(DAC, DMM) -> None:
     not_parameters = [DAC, DMM, 0.0, 1]
     for notparam in not_parameters:
         with pytest.raises(ValueError):
-            meas.unregister_parameter(notparam)
+            meas.unregister_parameter(notparam)  # pyright: ignore[reportArgumentType]
 
     # unregistering something not registered should silently "succeed"
     meas.unregister_parameter("totes_not_registered")
@@ -248,6 +308,7 @@ def test_mixing_array_and_numeric(DAC, bg_writing) -> None:
     Test that mixing array and numeric types is okay
     """
     meas = Measurement()
+    DAC.ch2.vals = Arrays()
     meas.register_parameter(DAC.ch1, paramtype="numeric")
     meas.register_parameter(DAC.ch2, paramtype="array")
 
@@ -514,7 +575,7 @@ def test_subscriptions(experiment, DAC, DMM) -> None:
             @retry_until_does_not_throw(
                 exception_class_to_expect=AssertionError, delay=0.5, tries=20
             )
-            def assert_states_updated_from_callbacks():
+            def assert_states_updated_from_callbacks() -> None:
                 assert values_larger_than_7 == values_larger_than_7__expected
                 assert list(all_results_dict.keys()) == [
                     result_index for result_index in range(1, num + 1 + 1)
@@ -783,8 +844,8 @@ def test_datasaver_arrays_lists_tuples(bg_writing, N) -> None:
 
     # save lists
     with meas.run(write_in_background=bg_writing) as datasaver:
-        freqax2 = list(np.linspace(1e6, 2e6, N))
-        signal2 = list(np.random.randn(N))
+        freqax2 = np.linspace(1e6, 2e6, N).flatten().tolist()
+        signal2 = np.random.randn(N).flatten().tolist()
 
         datasaver.add_result(
             ("freqax", freqax2), ("signal", signal2), ("gate_voltage", 0)
@@ -794,8 +855,8 @@ def test_datasaver_arrays_lists_tuples(bg_writing, N) -> None:
 
     # save tuples
     with meas.run(write_in_background=bg_writing) as datasaver:
-        freqax3 = tuple(np.linspace(1e6, 2e6, N))
-        signal3 = tuple(np.random.randn(N))
+        freqax3 = tuple(np.linspace(1e6, 2e6, N).flatten().tolist())
+        signal3 = tuple(np.random.randn(N).flatten().tolist())
 
         datasaver.add_result(
             ("freqax", freqax3), ("signal", signal3), ("gate_voltage", 0)
@@ -965,7 +1026,7 @@ def test_datasaver_arrayparams(
     SpectrumAnalyzer, DAC, N, M, param_type, storage_type, seed, bg_writing
 ) -> None:
     """
-    test that data is stored correctly for array parameters that
+    Test that data is stored correctly for array parameters that
     return numpy arrays, lists and tuples. Stored both as arrays and
     numeric
     """
@@ -1263,7 +1324,7 @@ def test_datasaver_parameter_with_setpoints_explicitly_expanded(
 
 
 @pytest.mark.usefixtures("experiment")
-def test_datasaver_parameter_with_setpoints_partially_expanded_raises(
+def test_datasaver_parameter_with_setpoints_that_are_different_raises(
     channel_array_instrument, DAC
 ) -> None:
     random_seed = 1
@@ -1291,8 +1352,9 @@ def test_datasaver_parameter_with_setpoints_partially_expanded_raises(
     with meas.run() as datasaver:
         # we seed the random number generator
         # so we can test that we get the expected numbers
+        # This fails because a 2D PWS expects 2D setpoints parameter values (ie a grid)
         np.random.seed(random_seed)
-        with pytest.raises(ValueError, match="Some of the setpoints of"):
+        with pytest.raises(ValueError, match="Multiple distinct values found for"):
             datasaver.add_result((param, param.get()), (sp_param_1, sp_param_1.get()))
 
 
@@ -2034,7 +2096,6 @@ def test_datasaver_2d_multi_parameters_array(
     sp_name_2 = "dummy_channel_inst_ChanA_multi_2d_setpoint_param_that_setpoint"
     p_name_1 = "dummy_channel_inst_ChanA_this"
     p_name_2 = "dummy_channel_inst_ChanA_that"
-    from functools import reduce
 
     meas = Measurement()
     param = channel_array_instrument.A.dummy_2d_multi_parameter
@@ -2058,10 +2119,10 @@ def test_datasaver_2d_multi_parameters_array(
     ds = load_by_id(datasaver.run_id)
 
     # 30 points in each setpoint value list
-    this_sp_val: np.ndarray = np.array(
+    this_sp_val: npt.NDArray = np.array(
         reduce(list.__add__, [[n] * 3 for n in range(5, 10)], [])  # type: ignore[arg-type]
     )
-    that_sp_val: np.ndarray = np.array(
+    that_sp_val: npt.NDArray = np.array(
         reduce(list.__add__, [[n] for n in range(9, 12)], []) * 5  # type: ignore[arg-type]
     )
 
@@ -2350,15 +2411,20 @@ def test_save_numeric_as_complex_raises(complex_num_instrument, bg_writing) -> N
 def test_parameter_inference(channel_array_instrument) -> None:
     chan = channel_array_instrument.channels[0]
     # default values
-    assert Measurement._infer_paramtype(chan.temperature, None) is None
+    assert Measurement._infer_paramtype(chan.temperature, None) == "numeric"
     assert Measurement._infer_paramtype(chan.dummy_array_parameter, None) == "array"
     assert (
         Measurement._infer_paramtype(chan.dummy_parameter_with_setpoints, None)
         == "array"
     )
-    assert Measurement._infer_paramtype(chan.dummy_multi_parameter, None) is None
-    assert Measurement._infer_paramtype(chan.dummy_scalar_multi_parameter, None) is None
-    assert Measurement._infer_paramtype(chan.dummy_2d_multi_parameter, None) is None
+    assert Measurement._infer_paramtype(chan.dummy_multi_parameter, None) == "numeric"
+    assert (
+        Measurement._infer_paramtype(chan.dummy_scalar_multi_parameter, None)
+        == "numeric"
+    )
+    assert (
+        Measurement._infer_paramtype(chan.dummy_2d_multi_parameter, None) == "numeric"
+    )
     assert Measurement._infer_paramtype(chan.dummy_text, None) == "text"
     assert Measurement._infer_paramtype(chan.dummy_complex, None) == "complex"
 

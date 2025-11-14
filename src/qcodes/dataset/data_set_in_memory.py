@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+import numpy.typing as npt
+from typing_extensions import deprecated
 
 from qcodes.dataset.data_set_protocol import (
     SPECS,
@@ -23,7 +25,7 @@ from qcodes.dataset.descriptions.versioning.converters import new_to_old
 from qcodes.dataset.export_config import DataExportType
 from qcodes.dataset.guids import generate_guid
 from qcodes.dataset.linked_datasets.links import Link, links_to_str
-from qcodes.dataset.sqlite.connection import ConnectionPlus, atomic
+from qcodes.dataset.sqlite.connection import AtomicConnection, atomic
 from qcodes.dataset.sqlite.database import conn_from_dbpath_or_conn
 from qcodes.dataset.sqlite.queries import (
     RUNS_TABLE_COLUMNS,
@@ -39,7 +41,7 @@ from qcodes.dataset.sqlite.queries import (
     update_parent_datasets,
     update_run_description,
 )
-from qcodes.utils import NumpyJSONEncoder
+from qcodes.utils import NumpyJSONEncoder, QCoDeSDeprecationWarning
 
 from .data_set_cache import DataSetCacheDeferred, DataSetCacheInMem
 from .dataset_helpers import _add_run_to_runs_table
@@ -54,8 +56,9 @@ if TYPE_CHECKING:
     import pandas as pd
     import xarray as xr
 
-    from qcodes.dataset.descriptions.param_spec import ParamSpec, ParamSpecBase
+    from qcodes.dataset.descriptions.param_spec import ParamSpec
     from qcodes.dataset.descriptions.versioning.rundescribertypes import Shapes
+    from qcodes.parameters import ParamSpecBase
 
     from ..parameters import ParameterBase
 
@@ -139,7 +142,7 @@ class DataSetInMem(BaseDataSet):
         return run_id is not None
 
     def write_metadata_to_db(self, path_to_db: str | Path | None = None) -> None:
-        from .experiment_container import load_or_create_experiment
+        from .experiment_container import load_or_create_experiment  # noqa: PLC0415
 
         if path_to_db is None:
             path_to_db = self.path_to_db
@@ -278,6 +281,22 @@ class DataSetInMem(BaseDataSet):
                     data = data[0]
                 metadata[str(key)] = data
 
+            completed_timestamp_raw = getattr(
+                loaded_data, "completed_timestamp_raw", None
+            )
+            if completed_timestamp_raw is not None:
+                completed_timestamp_raw = float(completed_timestamp_raw)
+                # Convert sentinel value back to None
+                if completed_timestamp_raw == -1:
+                    completed_timestamp_raw = None
+
+            run_timestamp_raw = getattr(loaded_data, "run_timestamp_raw", None)
+            if run_timestamp_raw is not None:
+                run_timestamp_raw = float(run_timestamp_raw)
+                # Convert sentinel value back to None
+                if run_timestamp_raw == -1:
+                    run_timestamp_raw = None
+
             ds = cls(
                 run_id=run_id,
                 captured_run_id=int(loaded_data.captured_run_id),
@@ -289,8 +308,8 @@ class DataSetInMem(BaseDataSet):
                 sample_name=loaded_data.sample_name,
                 guid=loaded_data.guid,
                 path_to_db=path_to_db,
-                run_timestamp_raw=float(loaded_data.run_timestamp_raw),
-                completed_timestamp_raw=float(loaded_data.completed_timestamp_raw),
+                run_timestamp_raw=run_timestamp_raw,
+                completed_timestamp_raw=completed_timestamp_raw,
                 metadata=metadata,
                 rundescriber=serial.from_json_to_current(loaded_data.run_description),
                 parent_dataset_links=parent_dataset_links,
@@ -302,7 +321,7 @@ class DataSetInMem(BaseDataSet):
         return ds
 
     @classmethod
-    def _load_from_db(cls, conn: ConnectionPlus, guid: str) -> DataSetInMem:
+    def _load_from_db(cls, conn: AtomicConnection, guid: str) -> DataSetInMem:
         run_attributes = get_raw_run_attributes(conn, guid)
         if run_attributes is None:
             raise RuntimeError(
@@ -377,8 +396,8 @@ class DataSetInMem(BaseDataSet):
     @staticmethod
     def _from_xarray_dataset_to_qcodes_raw_data(
         xr_data: xr.Dataset,
-    ) -> dict[str, dict[str, np.ndarray]]:
-        output: dict[str, dict[str, np.ndarray]] = {}
+    ) -> dict[str, dict[str, npt.NDArray]]:
+        output: dict[str, dict[str, npt.NDArray]] = {}
         for datavar in xr_data.data_vars:
             output[str(datavar)] = {}
             data = xr_data[datavar]
@@ -639,7 +658,9 @@ class DataSetInMem(BaseDataSet):
 
         self._export_info = export_info
 
-    def _enqueue_results(self, result_dict: Mapping[ParamSpecBase, np.ndarray]) -> None:
+    def _enqueue_results(
+        self, result_dict: Mapping[ParamSpecBase, npt.NDArray]
+    ) -> None:
         """
         Enqueue the results, for this dataset directly into cache
 
@@ -655,12 +676,24 @@ class DataSetInMem(BaseDataSet):
         self._raise_if_not_writable()
         interdeps = self._rundescriber.interdeps
 
-        toplevel_params = set(interdeps.dependencies).intersection(set(result_dict))
-        new_results: dict[str, dict[str, np.ndarray]] = {}
+        result_parameters = set(result_dict.keys())
+        toplevel_params = set(interdeps.top_level_parameters).intersection(
+            result_parameters
+        )
+        new_results: dict[str, dict[str, npt.NDArray]] = {}
+
+        unused_results = result_parameters.copy()
+
         for toplevel_param in toplevel_params:
-            inff_params = set(interdeps.inferences.get(toplevel_param, ()))
-            deps_params = set(interdeps.dependencies.get(toplevel_param, ()))
-            all_params = inff_params.union(deps_params).union({toplevel_param})
+            # Transitively collect all parameters that are related to any parameter
+            # in the current tree, including parameters that dependencies are inferred from
+            all_params = interdeps.find_all_parameters_in_tree(toplevel_param)
+            # Only include parameters that are present in result_dict
+            # we keep track of results unused in any tree and raise a warning at the end
+            # if there are any
+            all_params = all_params.intersection(result_dict.keys())
+
+            unused_results = unused_results.difference(all_params)
 
             new_results[toplevel_param.name] = {}
             new_results[toplevel_param.name][toplevel_param.name] = (
@@ -674,15 +707,12 @@ class DataSetInMem(BaseDataSet):
                         self._reshape_array_for_cache(param, result_dict[param])
                     )
 
-        # Finally, handle standalone parameters
-
-        standalones = set(interdeps.standalones).intersection(set(result_dict))
-
-        if standalones:
-            for st in standalones:
-                new_results[st.name] = {
-                    st.name: self._reshape_array_for_cache(st, result_dict[st])
-                }
+        if len(unused_results) > 0:
+            log.warning(
+                f"Results for parameters {unused_results} were not added to the "
+                "DataSet because they are not part of the interdependencies. "
+                "This will be an error in a future version of QCoDeS. "
+            )
 
         self.cache.add_data(new_results)
 
@@ -702,8 +732,7 @@ class DataSetInMem(BaseDataSet):
         """
         if not self.pristine:
             raise RuntimeError(
-                "Can not set parent dataset links on a dataset "
-                "that has been started."
+                "Can not set parent dataset links on a dataset that has been started."
             )
 
         if not all(isinstance(link, Link) for link in links):
@@ -796,7 +825,7 @@ class DataSetInMem(BaseDataSet):
             subvals = tuple(val.size for val in sub_dataset.values() if val is not None)
             values.extend(subvals)
 
-        if len(values):
+        if len(values) > 0:
             return sum(values)
         else:
             return 0
@@ -821,6 +850,10 @@ class DataSetInMem(BaseDataSet):
         else:
             return None
 
+    @deprecated(
+        "to_xarray_dataarray_dict is deprecated, use to_xarray_dataset_dict instead",
+        category=QCoDeSDeprecationWarning,
+    )
     def to_xarray_dataarray_dict(
         self,
         *params: str | ParamSpec | ParameterBase,
@@ -829,7 +862,17 @@ class DataSetInMem(BaseDataSet):
         use_multi_index: Literal["auto", "always", "never"] = "auto",
     ) -> dict[str, xr.DataArray]:
         self._warn_if_set(*params, start=start, end=end)
-        return self.cache.to_xarray_dataarray_dict()
+        return self.cache.to_xarray_dataarray_dict()  # pyright: ignore[reportDeprecated]
+
+    def to_xarray_dataset_dict(
+        self,
+        *params: str | ParamSpec | ParameterBase,
+        start: int | None = None,
+        end: int | None = None,
+        use_multi_index: Literal["auto", "always", "never"] = "auto",
+    ) -> dict[str, xr.Dataset]:
+        self._warn_if_set(*params, start=start, end=end)
+        return self.cache.to_xarray_dataset_dict(use_multi_index=use_multi_index)
 
     def to_xarray_dataset(
         self,

@@ -7,6 +7,7 @@ import sys
 import threading
 from typing import TYPE_CHECKING
 
+import matplotlib
 import pytest
 from hypothesis import settings
 
@@ -14,10 +15,10 @@ import qcodes as qc
 from qcodes.configuration import Config
 from qcodes.dataset import initialise_database, new_data_set
 from qcodes.dataset.descriptions.dependencies import InterDependencies_
-from qcodes.dataset.descriptions.param_spec import ParamSpecBase
 from qcodes.dataset.experiment_container import Experiment, new_experiment
 from qcodes.instrument import Instrument
 from qcodes.monitor.monitor import Monitor
+from qcodes.parameters import ParamSpecBase
 from qcodes.station import Station
 
 settings.register_profile("ci", deadline=1000)
@@ -41,6 +42,16 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
     supported_platforms = ALL.intersection(mark.name for mark in item.iter_markers())
     if supported_platforms and sys.platform not in supported_platforms:
         pytest.skip(f"cannot run on platform {sys.platform}")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def matplotlib_set_backend() -> None:
+    """
+    Set the matplotlib backend to 'agg' for the test session.
+    This is to avoid issues with GUI backends in headless environments.
+    """
+
+    matplotlib.use("agg")
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -3,6 +3,7 @@
 # functions here
 import logging
 import re
+import sqlite3
 import time
 import unicodedata
 from contextlib import contextmanager
@@ -17,7 +18,6 @@ from pytest import LogCaptureFixture
 import qcodes.dataset.descriptions.versioning.serialization as serial
 from qcodes.dataset.data_set import DataSet
 from qcodes.dataset.descriptions.dependencies import InterDependencies_
-from qcodes.dataset.descriptions.param_spec import ParamSpecBase
 from qcodes.dataset.descriptions.rundescriber import RunDescriber
 from qcodes.dataset.experiment_container import load_or_create_experiment
 from qcodes.dataset.guids import generate_guid
@@ -29,6 +29,7 @@ from qcodes.dataset.sqlite import queries as mut_queries
 from qcodes.dataset.sqlite import query_helpers as mut_help
 from qcodes.dataset.sqlite.connection import atomic_transaction, path_to_dbfile
 from qcodes.dataset.sqlite.database import get_DB_location
+from qcodes.parameters import ParamSpecBase
 from tests.common import error_caused_by
 
 from .helper_functions import verify_data_dict
@@ -331,13 +332,13 @@ def test_get_parameter_data(scalar_dataset) -> None:
 
 
 def test_get_parameter_data_independent_parameters(
-    standalone_parameters_dataset,
+    standalone_parameters_dataset: DataSet,
 ) -> None:
     ds = standalone_parameters_dataset
 
-    paramspecs = ds.description.interdeps.non_dependencies
-    params = [ps.name for ps in paramspecs]
-    expected_toplevel_params = ["param_1", "param_2", "param_3"]
+    paramspecs = ds.description.interdeps.top_level_parameters
+    params = {ps.name for ps in paramspecs}
+    expected_toplevel_params = {"param_1", "param_2", "param_3"}
     assert params == expected_toplevel_params
 
     data = mut_queries.get_parameter_data(ds.conn, ds.table_name)
@@ -549,3 +550,28 @@ def test_mark_run_complete_explicit_time(dataset) -> None:
     assert dataset.completed_timestamp_raw == time_now
 
     mut_queries.mark_run_complete(dataset.conn, dataset.run_id)
+
+
+def test_connect_read_only_mode(tmp_path):
+    """
+    Test that connecting with read_only=True allows reading but not writing.
+    """
+
+    db_path = tmp_path / "test_readonly.db"
+    # Create DB and add data in write mode
+    conn_rw = mut_db.connect(db_path)
+    conn_rw.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
+    conn_rw.execute("INSERT INTO test (value) VALUES ('foo')")
+    conn_rw.commit()
+    conn_rw.close()
+
+    # Open DB in read_only mode and read data
+    conn_ro = mut_db.connect(db_path, read_only=True)
+    cursor = conn_ro.execute("SELECT value FROM test WHERE id=1")
+    result = cursor.fetchone()
+    assert result[0] == "foo"
+
+    # Attempt to write in read_only mode and expect an error
+    with pytest.raises(sqlite3.OperationalError):
+        conn_ro.execute("INSERT INTO test (value) VALUES ('bar')")
+    conn_ro.close()

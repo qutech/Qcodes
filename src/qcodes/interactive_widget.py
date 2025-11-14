@@ -23,7 +23,6 @@ from ipywidgets import (  # type: ignore[import-untyped]
     Textarea,
     VBox,
 )
-from ruamel.yaml import YAML
 
 from qcodes.dataset import experiments, initialise_or_create_database_at, plot_dataset
 
@@ -31,7 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
     from qcodes.dataset.data_set_protocol import DataSetProtocol
-    from qcodes.dataset.descriptions.param_spec import ParamSpecBase
+    from qcodes.parameters import ParamSpecBase
 
 _META_DATA_KEY = "widget_notes"
 
@@ -343,6 +342,8 @@ def editable_metadata(ds: DataSetProtocol) -> Box:
 
 
 def _yaml_dump(dct: dict[str, Any]) -> str:
+    from ruamel.yaml import YAML
+
     with io.StringIO() as f:
         YAML().dump(dct, f)
         return f.getvalue()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import warnings
 from collections.abc import Callable, Iterable, Iterator, MutableSequence, Sequence
 from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
@@ -14,15 +15,16 @@ from qcodes.parameters import (
     Parameter,
 )
 from qcodes.parameters.multi_channel_instrument_parameter import InstrumentModuleType
-from qcodes.utils import full_class
+from qcodes.utils import QCoDeSDeprecationWarning, full_class
 from qcodes.validators import Validator
 
 from .instrument_base import InstrumentBase
 
 if TYPE_CHECKING:
+    from typing import Self
+
     from typing_extensions import Unpack
 
-    from .instrument import Instrument
     from .instrument_base import InstrumentBaseKWArgs
 
 
@@ -153,10 +155,10 @@ class ChannelTuple(MetadatableWithName, Sequence[InstrumentModuleType]):
         self._parent = parent
         self._name = name
         if not isinstance(chan_type, type) or not issubclass(
-            chan_type, InstrumentChannel
+            chan_type, InstrumentModule
         ):
             raise ValueError(
-                "ChannelTuple can only hold instances of type InstrumentChannel"
+                "ChannelTuple can only hold instances of type InstrumentModule"
             )
         if not isinstance(multichan_paramclass, type) or not issubclass(
             multichan_paramclass, MultiChannelInstrumentParameter
@@ -166,7 +168,7 @@ class ChannelTuple(MetadatableWithName, Sequence[InstrumentModuleType]):
                 "MultiChannelInstrumentParameter"
             )
 
-        self._chan_type = chan_type
+        self._chan_type: type[InstrumentModuleType] = chan_type
         self._snapshotable = snapshotable
         self._paramclass = multichan_paramclass
 
@@ -192,11 +194,11 @@ class ChannelTuple(MetadatableWithName, Sequence[InstrumentModuleType]):
     def __getitem__(self, i: int) -> InstrumentModuleType: ...
 
     @overload
-    def __getitem__(self: T, i: slice | tuple[int, ...]) -> T: ...
+    def __getitem__(self: Self, i: slice | tuple[int, ...]) -> Self: ...
 
     def __getitem__(
-        self: T, i: int | slice | tuple[int, ...]
-    ) -> InstrumentModuleType | T:
+        self: Self, i: int | slice | tuple[int, ...]
+    ) -> InstrumentModuleType | Self:
         """
         Return either a single channel, or a new :class:`ChannelTuple`
         containing only the specified channels
@@ -244,7 +246,7 @@ class ChannelTuple(MetadatableWithName, Sequence[InstrumentModuleType]):
             f"{self._chan_type.__name__}, {self._channels!r})"
         )
 
-    def __add__(self: T, other: ChannelTuple) -> T:
+    def __add__(self: Self, other: ChannelTuple) -> Self:
         """
         Return a new ChannelTuple containing the channels from both
         :class:`ChannelTuple` self and r.
@@ -336,7 +338,27 @@ class ChannelTuple(MetadatableWithName, Sequence[InstrumentModuleType]):
         """
         return self._channels.count(obj)
 
-    def get_channel_by_name(self: T, *names: str) -> InstrumentModuleType | T:
+    def get_channels_by_name(self: Self, *names: str) -> Self:
+        """
+        Get a a ChannelTuple that only contains the selected names.
+
+        Args:
+            *names: channel names
+
+        """
+        if len(names) == 0:
+            raise TypeError("one or more names must be given")
+        selected_channels = tuple(self._channel_mapping[name] for name in names)
+        return type(self)(
+            self._parent,
+            self._name,
+            self._chan_type,
+            selected_channels,
+            self._snapshotable,
+            self._paramclass,
+        )
+
+    def get_channel_by_name(self: Self, *names: str) -> InstrumentModuleType | Self:
         """
         Get a channel by name, or a ChannelTuple if multiple names are given.
 
@@ -345,9 +367,15 @@ class ChannelTuple(MetadatableWithName, Sequence[InstrumentModuleType]):
 
         """
         if len(names) == 0:
-            raise Exception("one or more names must be given")
+            raise TypeError("one or more names must be given")
         if len(names) == 1:
             return self._channel_mapping[names[0]]
+
+        warnings.warn(
+            "Supplying more than one name to get_channel_by_name is deprecated, use get_channels_by_name instead",
+            category=QCoDeSDeprecationWarning,
+        )
+
         selected_channels = tuple(self._channel_mapping[name] for name in names)
         return type(self)(
             self._parent,
@@ -470,14 +498,14 @@ class ChannelTuple(MetadatableWithName, Sequence[InstrumentModuleType]):
                 "Slicing is currently not supported for MultiParameters"
             )
         parameters = cast(
-            list[Parameter | ArrayParameter],
+            "list[Parameter | ArrayParameter]",
             [chan.parameters[name] for chan in self._channels],
         )
         names = tuple(f"{chan.name}_{name}" for chan in self._channels)
         labels = tuple(parameter.label for parameter in parameters)
         units = tuple(parameter.unit for parameter in parameters)
         if isinstance(parameters[0], ArrayParameter):
-            arrayparameters = cast(list[ArrayParameter], parameters)
+            arrayparameters = cast("list[ArrayParameter]", parameters)
             shapes = tuple(parameter.shape for parameter in arrayparameters)
             if arrayparameters[0].setpoints:
                 setpoints = tuple(parameter.setpoints for parameter in arrayparameters)
@@ -535,10 +563,11 @@ class ChannelTuple(MetadatableWithName, Sequence[InstrumentModuleType]):
             chan.invalidate_cache()
 
 
-# we ignore a mypy error here since the __getitem__ signature above
-# taking a tuple is not compatible with MutableSequence
-# for some reason this does not happen with Sequence
-class ChannelList(ChannelTuple, MutableSequence[InstrumentModuleType]):  # type: ignore[misc]
+# in index method the parameter obj should be called value but that would
+# be an incompatible change
+class ChannelList(  #  pyright: ignore[reportIncompatibleMethodOverride]
+    ChannelTuple[InstrumentModuleType], MutableSequence[InstrumentModuleType]
+):
     """
     Mutable Container for channelized parameters that allows for sweeps over
     all channels, as well as addressing of individual channels.
@@ -636,7 +665,9 @@ class ChannelList(ChannelTuple, MutableSequence[InstrumentModuleType]):  # type:
         # asserts added to work around https://github.com/python/mypy/issues/7858
         if isinstance(index, int):
             assert isinstance(value, InstrumentModule)
-            self._channels[index] = value
+            self._channels[index] = value  # type: ignore[assignment]
+            # mypy does not know that InstrumentModuleType is a TypeVar bound to
+            # InstrumentModule so complains here
         else:
             assert not isinstance(value, InstrumentModule)
             self._channels[index] = value
@@ -760,7 +791,7 @@ class ChannelList(ChannelTuple, MutableSequence[InstrumentModuleType]):  # type:
             return
         self._locked = True
 
-    def to_channel_tuple(self) -> ChannelTuple:
+    def to_channel_tuple(self) -> ChannelTuple[InstrumentModuleType]:
         """
         Returns a ChannelTuple build from this ChannelList containing the
         same channels but without the ability to be modified.
@@ -848,10 +879,10 @@ class AutoLoadableInstrumentChannel(InstrumentChannel):
     @classmethod
     def load_from_instrument(
         cls,
-        parent: Instrument,
+        parent: InstrumentBase,
         channel_list: AutoLoadableChannelList | None = None,
         **kwargs: Any,
-    ) -> list[AutoLoadableInstrumentChannel]:
+    ) -> list[Self]:
         """
         Load channels that already exist on the instrument
 
@@ -877,7 +908,7 @@ class AutoLoadableInstrumentChannel(InstrumentChannel):
 
     @classmethod
     def _discover_from_instrument(
-        cls, parent: Instrument, **kwargs: Any
+        cls, parent: InstrumentBase, **kwargs: Any
     ) -> list[dict[Any, Any]]:
         """
         Discover channels on the instrument and return a list kwargs to create
@@ -900,11 +931,11 @@ class AutoLoadableInstrumentChannel(InstrumentChannel):
     @classmethod
     def new_instance(
         cls,
-        parent: Instrument,
+        parent: InstrumentBase,
         create_on_instrument: bool = True,
         channel_list: AutoLoadableChannelList | None = None,
         **kwargs: Any,
-    ) -> AutoLoadableInstrumentChannel:
+    ) -> Self:
         """
         Create a new instance of the channel on the instrument: This involves
         finding initialization arguments which will create a channel with a
@@ -952,7 +983,7 @@ class AutoLoadableInstrumentChannel(InstrumentChannel):
 
     @classmethod
     def _get_new_instance_kwargs(
-        cls, parent: Instrument | None = None, **kwargs: Any
+        cls, parent: InstrumentBase | None = None, **kwargs: Any
     ) -> dict[Any, Any]:
         """
         Returns a dictionary which is used as keyword args when instantiating a
@@ -984,7 +1015,7 @@ class AutoLoadableInstrumentChannel(InstrumentChannel):
 
     def __init__(
         self,
-        parent: Instrument | InstrumentChannel,
+        parent: InstrumentBase,
         name: str,
         exists_on_instrument: bool = False,
         channel_list: AutoLoadableChannelList | None = None,
@@ -1067,7 +1098,10 @@ class AutoLoadableInstrumentChannel(InstrumentChannel):
         return self._exists_on_instrument
 
 
-class AutoLoadableChannelList(ChannelList):
+TAUTORELOADCHANNEL = TypeVar("TAUTORELOADCHANNEL", bound=AutoLoadableInstrumentChannel)
+
+
+class AutoLoadableChannelList(ChannelList[TAUTORELOADCHANNEL]):
     """
     Extends the QCoDeS :class:`ChannelList` class to add the following features:
     - Automatically create channel objects on initialization
@@ -1111,10 +1145,10 @@ class AutoLoadableChannelList(ChannelList):
 
     def __init__(
         self,
-        parent: Instrument,
+        parent: InstrumentBase,
         name: str,
-        chan_type: type,
-        chan_list: Sequence[AutoLoadableInstrumentChannel] | None = None,
+        chan_type: type[TAUTORELOADCHANNEL],
+        chan_list: Sequence[TAUTORELOADCHANNEL] | None = None,
         snapshotable: bool = True,
         multichan_paramclass: type = MultiChannelInstrumentParameter,
         **kwargs: Any,
@@ -1122,13 +1156,13 @@ class AutoLoadableChannelList(ChannelList):
         super().__init__(
             parent, name, chan_type, chan_list, snapshotable, multichan_paramclass
         )
-        new_channels = self._chan_type.load_from_instrument(  # type: ignore[attr-defined]
+        new_channels = self._chan_type.load_from_instrument(
             self._parent, channel_list=self, **kwargs
         )
 
         self.extend(new_channels)
 
-    def add(self, **kwargs: Any) -> AutoLoadableInstrumentChannel:
+    def add(self, **kwargs: Any) -> TAUTORELOADCHANNEL:
         """
         Add a channel to the list
 
@@ -1140,7 +1174,7 @@ class AutoLoadableChannelList(ChannelList):
             Newly created instance of the channel class
 
         """
-        new_channel = self._chan_type.new_instance(  # type: ignore[attr-defined]
+        new_channel = self._chan_type.new_instance(
             self._parent, create_on_instrument=True, channel_list=self, **kwargs
         )
 

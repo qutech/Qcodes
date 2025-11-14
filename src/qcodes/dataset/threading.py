@@ -4,7 +4,6 @@ from __future__ import annotations
 # we want to happen simultaneously within one process (namely getting
 # several parameters in parallel), we can parallelize them with threads.
 # That way the things we call need not be rewritten explicitly async.
-import concurrent
 import concurrent.futures
 import itertools
 import logging
@@ -17,12 +16,13 @@ from qcodes.utils import RespondingThread
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from types import TracebackType
+    from typing import Self
 
-    from qcodes.dataset.data_set_protocol import values_type
+    from qcodes.dataset.data_set_protocol import ValuesType
     from qcodes.parameters import ParamDataType, ParameterBase
 
 ParamMeasT: TypeAlias = "ParameterBase | Callable[[], None]"
-OutType: TypeAlias = "list[tuple[ParameterBase, values_type]]"
+OutType: TypeAlias = "list[tuple[ParameterBase, ValuesType]]"
 
 T = TypeVar("T")
 
@@ -47,7 +47,7 @@ class _ParamCaller:
 def _instrument_to_param(
     params: Sequence[ParamMeasT],
 ) -> dict[str | None, tuple[ParameterBase, ...]]:
-    from qcodes.parameters import ParameterBase
+    from qcodes.parameters import ParameterBase  # noqa: PLC0415
 
     real_parameters = [param for param in params if isinstance(param, ParameterBase)]
 
@@ -92,7 +92,7 @@ def call_params_threaded(param_meas: Sequence[ParamMeasT]) -> OutType:
 
 
 def _call_params(param_meas: Sequence[ParamMeasT]) -> OutType:
-    from qcodes.parameters import ParameterBase
+    from qcodes.parameters import ParameterBase  # noqa: PLC0415
 
     output: OutType = []
 
@@ -108,7 +108,7 @@ def _call_params(param_meas: Sequence[ParamMeasT]) -> OutType:
 def process_params_meas(
     param_meas: Sequence[ParamMeasT], use_threads: bool | None = None
 ) -> OutType:
-    from qcodes import config
+    from qcodes import config  # noqa: PLC0415
 
     if use_threads is None:
         use_threads = config.dataset.use_threads
@@ -210,7 +210,7 @@ class ThreadPoolParamsCaller(_ParamsCallerProtocol):
 
         return output
 
-    def __enter__(self) -> ThreadPoolParamsCaller:
+    def __enter__(self) -> Self:
         self._thread_pool.__enter__()
         return self
 

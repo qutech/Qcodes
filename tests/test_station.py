@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import tempfile
 import warnings
 from contextlib import contextmanager
@@ -280,7 +281,7 @@ def _make_example_station_config():
     test_config = f"""
 instruments:
   lakeshore:
-    type: qcodes.instrument_drivers.Lakeshore.Model_336.Model_336
+    type: qcodes.instrument_drivers.Lakeshore.LakeshoreModel336
     enable_forced_reconnect: true
     address: GPIB::2::INSTR
     init:
@@ -453,8 +454,11 @@ def test_enable_force_reconnect() -> None:
 instruments:
   mock:
     type: qcodes.instrument_drivers.mock_instruments.DummyInstrument
-    {f'enable_forced_reconnect: {enable_forced_reconnect}'
-        if enable_forced_reconnect is not None else ''}
+    {
+            f"enable_forced_reconnect: {enable_forced_reconnect}"
+            if enable_forced_reconnect is not None
+            else ""
+        }
     init:
       gates: {{"ch1", "ch2"}}
          """
@@ -537,7 +541,7 @@ instruments:
         f"""
 instruments:
   lakeshore:
-    type: qcodes.instrument_drivers.Lakeshore.Model_336.Model_336
+    type: qcodes.instrument_drivers.Lakeshore.LakeshoreModel336
     enable_forced_reconnect: true
     address: GPIB::2::INSTR
     init:
@@ -799,8 +803,9 @@ def test_load_all_instruments_raises_on_both_only_names_and_only_types_passed(
 ) -> None:
     with pytest.raises(
         ValueError,
-        match="It is an error to supply both ``only_names`` "
-        "and ``only_types`` arguments.",
+        match=re.escape(
+            "It is an error to supply both ``only_names`` and ``only_types`` arguments."
+        ),
     ):
         example_station.load_all_instruments(only_names=(), only_types=())
 
@@ -926,14 +931,14 @@ def test_get_wrong_component_by_name_raises() -> None:
     with pytest.raises(
         KeyError,
         match=(
-            "Found component dummy_ChanA but could "
-            "not match temperature_parameter part"
+            "Found component dummy_ChanA but could not match temperature_parameter part"
         ),
     ):
         _ = station.get_component("dummy_ChanA_temperature_parameter")
 
     with pytest.raises(
-        KeyError, match="Found component param but this has no sub-component foo."
+        KeyError,
+        match=re.escape("Found component param but this has no sub-component foo."),
     ):
         _ = station.get_component("param_foo")
 

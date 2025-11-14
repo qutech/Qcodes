@@ -4,15 +4,28 @@ import collections.abc
 import logging
 import time
 import warnings
+from collections.abc import Iterator, MutableSet
 from contextlib import contextmanager
 from datetime import datetime
 from functools import cached_property, wraps
-from typing import TYPE_CHECKING, Any, ClassVar, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, overload
+
+import numpy as np
 
 from qcodes.metadatable import Metadatable, MetadatableWithName
+from qcodes.parameters import ParamSpecBase
 from qcodes.utils import DelegateAttributes, full_class, qcodes_abstractmethod
-from qcodes.validators import Enum, Ints, Validator
+from qcodes.validators import (
+    Arrays,
+    ComplexNumbers,
+    Enum,
+    Ints,
+    Numbers,
+    Strings,
+    Validator,
+)
 
+from ..utils.types import NumberType
 from .cache import _Cache, _CacheProtocol
 from .named_repr import named_repr
 from .permissive_range import permissive_range
@@ -25,7 +38,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Iterable, Mapping, Sequence, Sized
     from types import TracebackType
 
-    from qcodes.instrument.base import InstrumentBase
+    from qcodes.dataset.data_set_protocol import ValuesType
+    from qcodes.instrument import InstrumentBase
     from qcodes.logger.instrument_logger import InstrumentLoggerAdapter
 
 LOG = logging.getLogger(__name__)
@@ -191,6 +205,10 @@ class ParameterBase(MetadatableWithName):
 
     """
 
+    global_on_set_callback: ClassVar[
+        Callable[[ParameterBase, ParamDataType], None] | None
+    ] = None
+
     def __init__(
         self,
         name: str,
@@ -212,6 +230,7 @@ class ParameterBase(MetadatableWithName):
         abstract: bool | None = False,
         bind_to_instrument: bool = True,
         register_name: str | None = None,
+        on_set_callback: Callable[[ParameterBase, ParamDataType], None] | None = None,
     ) -> None:
         super().__init__(metadata)
         if not str(name).isidentifier():
@@ -227,7 +246,12 @@ class ParameterBase(MetadatableWithName):
         self._snapshot_get = snapshot_get
         self._snapshot_value = snapshot_value
         self.snapshot_exclude = snapshot_exclude
+        self.on_set_callback = on_set_callback
 
+        self._depends_on: ParameterSet = ParameterSet()
+        self._has_control_of: ParameterSet = ParameterSet()
+        self._is_controlled_by: ParameterSet = ParameterSet()
+        self._param_spec: ParamSpecBase | None = None
         if not isinstance(vals, (Validator, type(None))):
             raise TypeError("vals must be None or a Validator")
         elif val_mapping is not None:
@@ -382,9 +406,10 @@ class ParameterBase(MetadatableWithName):
             RuntimeError: If removing the first validator when more than one validator is set.
 
         """
+        validators = self.validators
 
-        if len(self._vals):
-            return self._vals[0]
+        if len(validators):
+            return validators[0]
         else:
             return None
 
@@ -746,7 +771,7 @@ class ParameterBase(MetadatableWithName):
                 # a list containing only `value`.
                 steps = self.get_ramp_values(value, step=self.step)
 
-                for step_index, val_step in enumerate(steps):
+                for val_step in steps:
                     # even if the final value is valid we may be generating
                     # steps that are not so validate them too
                     self.validate(val_step)
@@ -776,15 +801,30 @@ class ParameterBase(MetadatableWithName):
 
                     self.cache._update_with(value=val_step, raw_value=raw_val_step)
 
+                    self._call_on_set_callback(val_step)
+
             except Exception as e:
                 e.args = (*e.args, f"setting {self} to {value}")
                 raise e
 
         return set_wrapper
 
+    def _call_on_set_callback(self, value: ParamDataType) -> None:
+        try:
+            if self.on_set_callback is not None:
+                self.on_set_callback(self, value)
+            elif self.__class__.global_on_set_callback is not None:
+                self.__class__.global_on_set_callback(self, value)
+        except Exception as e:
+            LOG.warning(
+                f"Exception {e} in on set callback "
+                f"for {self.full_name} with value {value}",
+                exc_info=True,
+            )
+
     def get_ramp_values(
-        self, value: float | Sized, step: float | None = None
-    ) -> Sequence[float | Sized]:
+        self, value: NumberType | Sized, step: NumberType | None = None
+    ) -> Sequence[NumberType | Sized]:
         """
         Return values to sweep from current value to target value.
         This method can be overridden to have a custom sweep behaviour.
@@ -809,8 +849,7 @@ class ParameterBase(MetadatableWithName):
                 self.get()
             start_value = self.get_latest()
             if not (
-                isinstance(start_value, (int, float))
-                and isinstance(value, (int, float))
+                isinstance(start_value, NumberType) and isinstance(value, NumberType)
             ):
                 # parameter is numeric but either one of the endpoints
                 # is not or the starting point is unknown. The later
@@ -823,7 +862,7 @@ class ParameterBase(MetadatableWithName):
                 return [value]
 
             # drop the initial value, we're already there
-            return permissive_range(start_value, value, step)[1:] + [value]
+            return [*permissive_range(start_value, value, step)[1:], value]
 
     @cached_property
     def _validate_context(self) -> str:
@@ -859,7 +898,7 @@ class ParameterBase(MetadatableWithName):
                 validator.validate(value, self._validate_context)
 
     @property
-    def step(self) -> float | None:
+    def step(self) -> NumberType | None:
         """
         Stepsize that this Parameter uses during set operation.
         Stepsize must be a positive number or None.
@@ -883,12 +922,12 @@ class ParameterBase(MetadatableWithName):
         return self._step
 
     @step.setter
-    def step(self, step: float | None) -> None:
+    def step(self, step: NumberType | None) -> None:
         if step is None:
-            self._step: float | None = step
+            self._step: NumberType | None = step
         elif not all(getattr(vals, "is_numeric", True) for vals in self._vals):
             raise TypeError("you can only step numeric parameters")
-        elif not isinstance(step, (int, float)):
+        elif not isinstance(step, NumberType):
             raise TypeError("step must be a number")
         elif step == 0:
             self._step = None
@@ -928,7 +967,7 @@ class ParameterBase(MetadatableWithName):
 
     @post_delay.setter
     def post_delay(self, post_delay: float) -> None:
-        if not isinstance(post_delay, (int, float)):
+        if not isinstance(post_delay, NumberType):
             raise TypeError(f"post_delay ({post_delay}) must be a number")
         if post_delay < 0:
             raise ValueError(f"post_delay ({post_delay}) must not be negative")
@@ -957,7 +996,7 @@ class ParameterBase(MetadatableWithName):
 
     @inter_delay.setter
     def inter_delay(self, inter_delay: float) -> None:
-        if not isinstance(inter_delay, (int, float)):
+        if not isinstance(inter_delay, NumberType):
             raise TypeError(f"inter_delay ({inter_delay}) must be a number")
         if inter_delay < 0:
             raise ValueError(f"inter_delay ({inter_delay}) must not be negative")
@@ -1122,6 +1161,89 @@ class ParameterBase(MetadatableWithName):
     def abstract(self) -> bool | None:
         return self._abstract
 
+    @property
+    def param_spec(self) -> ParamSpecBase:
+        if self._param_spec is None:
+            match self.vals:
+                case Arrays():
+                    paramtype = "array"
+                case Strings():
+                    paramtype = "text"
+                case ComplexNumbers():
+                    paramtype = "complex"
+                case _:
+                    paramtype = "numeric"
+
+            self._param_spec = ParamSpecBase(
+                name=self.register_name,
+                paramtype=paramtype,
+                label=None,
+                unit=None,
+            )
+        return self._param_spec
+
+    @property
+    def paramtype(self) -> str:
+        return self.param_spec.type
+
+    @paramtype.setter
+    def paramtype(self, paramtype: str) -> None:
+        self._set_paramtype(paramtype)  # Indirected here, so subclasses can override
+
+    def _set_paramtype(self, paramtype: str) -> None:
+        paramtype = paramtype.lower()
+        if paramtype not in ["array", "text", "complex", "numeric"]:
+            raise ValueError(f"{paramtype} is not a valid paramtype")
+        if self.paramtype == paramtype:
+            return
+        new_vals: Validator
+        match paramtype:
+            case "array":
+                new_vals = Arrays()
+            case "text":
+                new_vals = Strings()
+            case "complex":
+                new_vals = ComplexNumbers()
+            case "numeric":
+                new_vals = Numbers()
+            case _:
+                raise NotImplementedError("This should not be possible")
+        if self.vals is None:
+            self.vals = new_vals
+        elif type(self.vals) is not type(new_vals):
+            logging.warning(
+                f"Tried to set a new paramtype {paramtype}, but this parameter already has paramtype {self.paramtype} which does not match"
+            )
+        self.param_spec.type = paramtype
+
+    @property
+    def depends_on(self) -> ParameterSet:
+        return self._depends_on
+
+    @property
+    def has_control_of(self) -> ParameterSet:
+        return self._has_control_of
+
+    @property
+    def is_controlled_by(self) -> ParameterSet:
+        # This is equivalent to the "inferred_from" relationship
+        return self._is_controlled_by
+
+    def unpack_self(self, value: ValuesType) -> list[tuple[ParameterBase, ValuesType]]:
+        if isinstance(self.vals, Arrays):
+            if not isinstance(value, np.ndarray):
+                raise TypeError(
+                    f"Expected data for Parameter with Array validator "
+                    f"to be a numpy array but got: {type(value)}"
+                )
+
+            if self.vals.shape is not None and value.shape != self.vals.shape:
+                raise TypeError(
+                    f"Expected data with shape {self.vals.shape}, "
+                    f"but got {value.shape} for parameter: {self.full_name}"
+                )
+        return [(self, value)]
+
 
 class GetLatest(DelegateAttributes):
     """
@@ -1189,3 +1311,125 @@ class GetLatest(DelegateAttributes):
         It is recommended to use ``parameter.cache()`` instead.
         """
         return self.cache()
+
+
+P = TypeVar("P", bound=ParameterBase)
+
+
+# Does not implement __hash__, not clear it needs to
+class ParameterSet(MutableSet, Generic[P]):  # noqa: PLW1641
+    """A set-like container that preserves the insertion order of its parameters.
+
+    This class implements the common set interface methods while maintaining
+    the order in which parameters were first added.
+    """
+
+    def __init__(self, parameters: Sequence[P] | None = None) -> None:
+        self._dict: dict[P, None] = {}
+        if parameters is not None:
+            for item in parameters:
+                self.add(item)
+
+    def add(self, value: P) -> None:
+        self._dict[value] = None
+
+    def remove(self, value: P) -> None:
+        self._dict.pop(value)
+
+    def discard(self, value: P) -> None:
+        if value in self._dict:
+            self._dict.pop(value)
+
+    def clear(self) -> None:
+        self._dict.clear()
+
+    def pop(self) -> ParameterBase:
+        if not self._dict:
+            raise KeyError("pop from an empty ParameterSet")
+        item = next(iter(self._dict))
+        self._dict.pop(item)
+        return item
+
+    def union(self, other: ParameterSet[P]) -> ParameterSet[P]:
+        result = ParameterSet(list(self._dict.keys()))
+        for item in other:
+            result.add(item)
+        return result
+
+    def intersection(self, other: ParameterSet[P]) -> ParameterSet[P]:
+        result: ParameterSet[P] = ParameterSet()
+        for item in self:
+            if item in other:
+                result.add(item)
+        return result
+
+    def difference(self, other: ParameterSet[P]) -> ParameterSet[P]:
+        result: ParameterSet[P] = ParameterSet()
+        for item in self:
+            if item not in other:
+                result.add(item)
+        return result
+
+    def issubset(self, other: ParameterSet[P] | set) -> bool:
+        return all(item in other for item in self)
+
+    def issuperset(self, other: ParameterSet[P] | set) -> bool:
+        return all(item in self for item in other)
+
+    def update(self, other: Iterable[P]) -> None:
+        for item in other:
+            self.add(item)
+
+    def __iter__(self) -> Iterator[P]:
+        return iter(self._dict)
+
+    def __contains__(self, item: object) -> bool:
+        return item in self._dict
+
+    def __len__(self) -> int:
+        return len(self._dict)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, ParameterSet):
+            return set(self._dict) == set(other._dict)
+        return False
+
+    def __repr__(self) -> str:
+        if not self:
+            return f"{self.__class__.__name__}()"
+        return f"{self.__class__.__name__}({list(self._dict.keys())})"
+
+    def __or__(self, other: object) -> ParameterSet[P]:
+        if isinstance(other, ParameterSet):
+            return self.union(other)
+        raise NotImplementedError(
+            f"OR operation is not defined between ParameterSet and {type(other)}"
+        )
+
+    def __and__(self, other: object) -> ParameterSet[P]:
+        if isinstance(other, ParameterSet):
+            return self.intersection(other)
+        raise NotImplementedError(
+            f"AND operation is not defined between ParameterSet and {type(other)}"
+        )
+
+    def __sub__(self, other: object) -> ParameterSet[P]:
+        if isinstance(other, ParameterSet):
+            return self.difference(other)
+        raise NotImplementedError(
+            f"Difference operation is not defined between ParameterSet and {type(other)}"
+        )
+
+    def __le__(self, other: object) -> bool:
+        if isinstance(other, ParameterSet):
+            return self.issubset(other)
+        raise NotImplementedError(
+            f"<= operation is not defined between ParameterSet and {type(other)}"
+        )
+
+    def __ge__(self, other: object) -> bool:
+        if isinstance(other, ParameterSet):
+            return self.issuperset(other)
+        raise NotImplementedError(
+            f">+ operation is not defined between ParameterSet and {type(other)}"
+        )

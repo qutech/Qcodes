@@ -4,9 +4,11 @@ import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
+import numpy.typing as npt
 
 from qcodes.instrument import (
     ChannelList,
+    ChannelTuple,
     InstrumentBaseKWArgs,
     InstrumentChannel,
     VisaInstrument,
@@ -53,9 +55,9 @@ class SR86xBufferReadout(ArrayParameter):
             **kwargs,
         )
 
-        self._capture_data: np.ndarray | None = None
+        self._capture_data: npt.NDArray | None = None
 
-    def prepare_readout(self, capture_data: np.ndarray) -> None:
+    def prepare_readout(self, capture_data: npt.NDArray) -> None:
         """
         Prepare this parameter for readout.
 
@@ -72,7 +74,7 @@ class SR86xBufferReadout(ArrayParameter):
         self.setpoint_labels = ("Sample number",)
         self.setpoints = (tuple(np.arange(0, data_len)),)
 
-    def get_raw(self) -> np.ndarray:
+    def get_raw(self) -> npt.NDArray:
         """
         Public method to access the capture data
         """
@@ -117,16 +119,14 @@ class SR86xBuffer(InstrumentChannel):
         # Maximum amount of kB that can be read per single CAPTUREGET command
         self.max_size_per_reading_in_kb = 64
 
-        self.capture_config: Parameter = (
-            self.add_parameter(  # Configure which parameters we want to capture
-                "capture_config",
-                label="capture configuration",
-                get_cmd="CAPTURECFG?",
-                set_cmd="CAPTURECFG {}",
-                val_mapping={"X": "0", "X,Y": "1", "R,T": "2", "X,Y,R,T": "3"},
-            )
+        self.capture_config: Parameter = self.add_parameter(
+            "capture_config",
+            label="capture configuration",
+            get_cmd="CAPTURECFG?",
+            set_cmd="CAPTURECFG {}",
+            val_mapping={"X": "0", "X,Y": "1", "R,T": "2", "X,Y,R,T": "3"},
         )
-        """Parameter capture_config"""
+        """Parameter capture_config configures which parameters we want to capture"""
 
         self.capture_rate_max: Parameter = self.add_parameter(
             "capture_rate_max",
@@ -149,12 +149,10 @@ class SR86xBuffer(InstrumentChannel):
         max_rate = self.capture_rate_max()
         self.available_frequencies = [max_rate / 2**i for i in range(20)]
 
-        self.capture_status: Parameter = (
-            self.add_parameter(  # Are we capturing at the moment?
-                "capture_status", label="capture status", get_cmd="CAPTURESTAT?"
-            )
+        self.capture_status: Parameter = self.add_parameter(
+            "capture_status", label="capture status", get_cmd="CAPTURESTAT?"
         )
-        """Parameter capture_status"""
+        """Parameter capture_status: Are we capturing at the moment?"""
 
         self.count_capture_bytes: Parameter = self.add_parameter(
             "count_capture_bytes",
@@ -186,8 +184,30 @@ class SR86xBuffer(InstrumentChannel):
         then the returned value is simply equal to the current capture length.
         """
 
-        for parameter_name in ["X", "Y", "R", "T"]:
-            self.add_parameter(parameter_name, parameter_class=SR86xBufferReadout)
+        self.X: SR86xBufferReadout = self.add_parameter(
+            "X", parameter_class=SR86xBufferReadout
+        )
+        """
+        X buffer readout.
+        """
+        self.Y: SR86xBufferReadout = self.add_parameter(
+            "Y", parameter_class=SR86xBufferReadout
+        )
+        """
+        Y buffer readout.
+        """
+        self.R: SR86xBufferReadout = self.add_parameter(
+            "R", parameter_class=SR86xBufferReadout
+        )
+        """
+        R buffer readout.
+        """
+        self.T: SR86xBufferReadout = self.add_parameter(
+            "T", parameter_class=SR86xBufferReadout
+        )
+        """
+        T buffer readout.
+        """
 
     def snapshot_base(
         self,
@@ -262,7 +282,7 @@ class SR86xBuffer(InstrumentChannel):
         """
         max_rate = self.capture_rate_max()
         n = np.log2(max_rate / capture_rate_hz)
-        n_round = int(round(n))
+        n_round = round(n)
 
         if not 0 <= n_round <= 20:
             raise ValueError(
@@ -368,7 +388,7 @@ class SR86xBuffer(InstrumentChannel):
         while n_captured_bytes < n_bytes_to_capture:
             n_captured_bytes = self.count_capture_bytes()
 
-    def get_capture_data(self, sample_count: int) -> dict[str, np.ndarray]:
+    def get_capture_data(self, sample_count: int) -> dict[str, npt.NDArray]:
         """
         Read the given number of samples of the capture data from the buffer.
 
@@ -404,7 +424,7 @@ class SR86xBuffer(InstrumentChannel):
 
         return data
 
-    def _get_raw_capture_data(self, size_in_kb: int) -> np.ndarray:
+    def _get_raw_capture_data(self, size_in_kb: int) -> npt.NDArray:
         """
         Read data from the buffer from its beginning avoiding the instrument
         limit of 64 kilobytes per reading.
@@ -427,7 +447,7 @@ class SR86xBuffer(InstrumentChannel):
                 f"buffer ({current_capture_length}kB)."
             )
 
-        values: np.ndarray = np.array([])
+        values: npt.NDArray = np.array([])
         data_size_to_read_in_kb = size_in_kb
         n_readings = 0
 
@@ -451,7 +471,7 @@ class SR86xBuffer(InstrumentChannel):
 
     def _get_raw_capture_data_block(
         self, size_in_kb: int, offset_in_kb: int = 0
-    ) -> np.ndarray:
+    ) -> npt.NDArray:
         """
         Read data from the buffer. The maximum amount of data that can be
         read with this function (size_in_kb) is 64kB (this limitation comes
@@ -522,7 +542,7 @@ class SR86xBuffer(InstrumentChannel):
 
     def capture_one_sample_per_trigger(
         self, trigger_count: int, start_triggers_pulsetrain: Callable[..., Any]
-    ) -> dict[str, np.ndarray]:
+    ) -> dict[str, npt.NDArray]:
         """
         Capture one sample per each trigger, and return when the specified
         number of triggers has been received.
@@ -549,7 +569,7 @@ class SR86xBuffer(InstrumentChannel):
 
     def capture_samples_after_trigger(
         self, sample_count: int, send_trigger: Callable[..., Any]
-    ) -> dict[str, np.ndarray]:
+    ) -> dict[str, npt.NDArray]:
         """
         Capture a number of samples after a trigger has been received.
         Please refer to page 135 of the manual for details.
@@ -574,7 +594,7 @@ class SR86xBuffer(InstrumentChannel):
         self.stop_capture()
         return self.get_capture_data(sample_count)
 
-    def capture_samples(self, sample_count: int) -> dict[str, np.ndarray]:
+    def capture_samples(self, sample_count: int) -> dict[str, npt.NDArray]:
         """
         Capture a number of samples at a capture rate, starting immediately.
         Unlike the "continuous" capture mode, here the buffer does not get
@@ -1045,6 +1065,7 @@ class SR86x(VisaInstrument):
             "P", label="Phase", get_cmd="OUTP? 3", get_parser=float, unit="deg"
         )
         """Parameter P"""
+
         self.complex_voltage: Parameter = self.add_parameter(
             "complex_voltage",
             label="Voltage",
@@ -1145,7 +1166,10 @@ class SR86x(VisaInstrument):
             data_channels.append(data_channel)
             self.add_submodule(ch_name, data_channel)
 
-        self.add_submodule("data_channels", data_channels.to_channel_tuple())
+        self.data_channels: ChannelTuple[SR86xDataChannel] = self.add_submodule(
+            "data_channels", data_channels.to_channel_tuple()
+        )
+        """Interface for the SR86x data channels"""
 
         # Interface
         self.add_function("reset", call_cmd="*RST")
@@ -1154,7 +1178,8 @@ class SR86x(VisaInstrument):
         self.add_function("enable_front_panel", call_cmd="OVRM 1")
 
         buffer = SR86xBuffer(self, f"{self.name}_buffer")
-        self.add_submodule("buffer", buffer)
+        self.buffer: SR86xBuffer = self.add_submodule("buffer", buffer)
+        """Interface for the SR86x buffer"""
 
         self.input_config()
         self.connect_message()
@@ -1219,8 +1244,7 @@ class SR86x(VisaInstrument):
         """
         if not 2 <= len(parameter_names) <= 3:
             raise KeyError(
-                "It is only possible to request values of 2 or 3 parameters "
-                "at a time."
+                "It is only possible to request values of 2 or 3 parameters at a time."
             )
 
         for name in parameter_names:
@@ -1232,7 +1256,7 @@ class SR86x(VisaInstrument):
                 )
 
         p_ids = [self.PARAMETER_NAMES[name] for name in parameter_names]
-        output = self.ask(f'SNAP? {",".join(p_ids)}')
+        output = self.ask(f"SNAP? {','.join(p_ids)}")
         return tuple(float(val) for val in output.split(","))
 
     def get_data_channels_values(self) -> tuple[float, ...]:

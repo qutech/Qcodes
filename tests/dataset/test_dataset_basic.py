@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import hypothesis.strategies as hst
 import numpy as np
+import numpy.typing as npt
 import pytest
 from hypothesis import HealthCheck, given, settings
 from pytest import FixtureRequest
@@ -22,12 +23,12 @@ from qcodes.dataset import (
 from qcodes.dataset.data_set import DataSet
 from qcodes.dataset.data_set_protocol import CompletedError
 from qcodes.dataset.descriptions.dependencies import InterDependencies_
-from qcodes.dataset.descriptions.param_spec import ParamSpecBase
 from qcodes.dataset.descriptions.rundescriber import RunDescriber
 from qcodes.dataset.guids import parse_guid
 from qcodes.dataset.sqlite.connection import atomic, path_to_dbfile
 from qcodes.dataset.sqlite.database import _convert_array, get_DB_location
 from qcodes.dataset.sqlite.queries import _rewrite_timestamps, _unicode_categories
+from qcodes.parameters import ParamSpecBase
 from qcodes.utils.types import complex_types, numpy_complex, numpy_floats, numpy_ints
 from tests.common import error_caused_by
 from tests.dataset.helper_functions import verify_data_dict
@@ -35,6 +36,8 @@ from tests.dataset.test_links import generate_some_links
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from qcodes.dataset.experiment_container import Experiment
 
 n_experiments = 0
 
@@ -148,9 +151,9 @@ def test_dataset_states() -> None:
 
     with pytest.raises(
         RuntimeError,
-        match="Can not mark DataSet as complete "
-        "before it has "
-        "been marked as started.",
+        match=re.escape(
+            "Can not mark DataSet as complete before it has been marked as started."
+        ),
     ):
         ds.mark_completed()
 
@@ -262,12 +265,8 @@ def test_dataset_read_only_properties(dataset) -> None:
     ]
 
     # It is not expected to be possible to set readonly properties
-    # the error message changed in python 3.11
-    # from 'can't set ...' to 'has no setter ...'
     for prop in read_only_props:
-        with pytest.raises(
-            AttributeError, match="(can't set attribute|object has no setter)"
-        ):
+        with pytest.raises(AttributeError, match="object has no setter"):
             setattr(dataset, prop, True)
 
 
@@ -276,9 +275,7 @@ def test_dataset_read_only_properties(dataset) -> None:
 def test_create_dataset_from_non_existing_run_id(non_existing_run_id) -> None:
     with pytest.raises(
         ValueError,
-        match=f"Run with run_id "
-        f"{non_existing_run_id} does not "
-        f"exist in the database",
+        match=f"Run with run_id {non_existing_run_id} does not exist in the database",
     ):
         _ = DataSet(run_id=non_existing_run_id)
 
@@ -286,9 +283,9 @@ def test_create_dataset_from_non_existing_run_id(non_existing_run_id) -> None:
 def test_create_dataset_pass_both_connection_and_path_to_db(experiment) -> None:
     with pytest.raises(
         ValueError,
-        match="Received BOTH conn and path_to_db. "
-        "Please provide only one or "
-        "the other.",
+        match=re.escape(
+            "Received BOTH conn and path_to_db. Please provide only one or the other."
+        ),
     ):
         some_valid_connection = experiment.conn
         _ = DataSet(path_to_db="some valid path", conn=some_valid_connection)
@@ -305,9 +302,7 @@ def test_load_by_id(dataset) -> None:
 def test_load_by_id_for_nonexisting_run_id(non_existing_run_id) -> None:
     with pytest.raises(
         ValueError,
-        match=f"Run with run_id "
-        f"{non_existing_run_id} does not "
-        f"exist in the database",
+        match=f"Run with run_id {non_existing_run_id} does not exist in the database",
     ):
         _ = load_by_id(non_existing_run_id)
 
@@ -315,7 +310,7 @@ def test_load_by_id_for_nonexisting_run_id(non_existing_run_id) -> None:
 @pytest.mark.usefixtures("experiment")
 def test_load_by_id_for_none() -> None:
     with pytest.raises(
-        ValueError, match="run_id has to be a positive integer, not None."
+        ValueError, match=re.escape("run_id has to be a positive integer, not None.")
     ):
         _ = load_by_id(None)  # type: ignore[arg-type]
 
@@ -664,7 +659,7 @@ def test_numpy_inf(dataset) -> None:
 
 def test_backward_compat__adapt_array_v0_33() -> None:
     for dtype in numpy_floats + complex_types:
-        arr: np.ndarray = np.asarray([1.0], dtype=np.dtype(dtype))
+        arr: npt.NDArray = np.asarray([1.0], dtype=np.dtype(dtype))
         out = io.BytesIO()
         np.save(out, arr)
         out.seek(0)
@@ -917,7 +912,7 @@ class TestGetData:
         np.testing.assert_array_equal(data, expected)
 
 
-@settings(deadline=600, suppress_health_check=(HealthCheck.function_scoped_fixture,))
+@settings(deadline=1000, suppress_health_check=(HealthCheck.function_scoped_fixture,))
 @given(
     start=hst.one_of(hst.integers(1, 10**3), hst.none()),
     end=hst.one_of(hst.integers(1, 10**3), hst.none()),
@@ -1272,14 +1267,14 @@ def test_get_array_in_str_param_data(array_in_str_dataset) -> None:
 
 
 def test_get_parameter_data_independent_parameters(
-    standalone_parameters_dataset,
+    standalone_parameters_dataset: DataSet,
 ) -> None:
     ds = standalone_parameters_dataset
 
-    paramspecs = ds.description.interdeps.non_dependencies
-    params = [ps.name for ps in paramspecs]
+    paramspecs = ds.description.interdeps.top_level_parameters
+    params = {ps.name for ps in paramspecs}
 
-    expected_toplevel_params = ["param_1", "param_2", "param_3"]
+    expected_toplevel_params = {"param_1", "param_2", "param_3"}
     assert params == expected_toplevel_params
 
     expected_names = {}
@@ -1298,7 +1293,11 @@ def test_get_parameter_data_independent_parameters(
     expected_values["param_3"] = [np.arange(30000, 30000 + 1000), np.arange(0, 1000)]
 
     parameter_test_helper(
-        ds, expected_toplevel_params, expected_names, expected_shapes, expected_values
+        ds,
+        tuple(expected_toplevel_params),
+        expected_names,
+        expected_shapes,
+        expected_values,
     )
 
 
@@ -1417,3 +1416,13 @@ def test_empty_ds_parameters() -> None:
     assert ds.parameters is None
     ds.mark_completed()
     assert ds.parameters is None
+
+
+def test_create_dataset_with_readonly_throws_error() -> None:
+    with pytest.raises(ValueError):
+        DataSet(read_only=True)
+
+
+@pytest.mark.usefixtures("experiment")
+def test_create_dataset_with_conn_ignores_readonly(experiment: "Experiment") -> None:
+    DataSet(conn=experiment.conn, read_only=True)

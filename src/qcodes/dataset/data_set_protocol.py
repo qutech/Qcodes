@@ -16,9 +16,10 @@ from typing import (
 )
 
 import numpy as np
+import numpy.typing as npt
 
 from qcodes.dataset.descriptions.dependencies import InterDependencies_
-from qcodes.dataset.descriptions.param_spec import ParamSpec, ParamSpecBase
+from qcodes.dataset.descriptions.param_spec import ParamSpec
 from qcodes.dataset.export_config import (
     DataExportType,
     get_data_export_name_elements,
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
     from qcodes.dataset.descriptions.rundescriber import RunDescriber
     from qcodes.dataset.descriptions.versioning.rundescribertypes import Shapes
     from qcodes.dataset.linked_datasets.links import Link
-    from qcodes.parameters import ParameterBase
+    from qcodes.parameters import ParameterBase, ParamSpecBase
 
     from .data_set_cache import DataSetCache
     from .exporters.export_info import ExportInfo
@@ -50,19 +51,27 @@ if TYPE_CHECKING:
 # twice here convert to set to ensure no duplication.
 _EXPORT_CALLBACKS = set(entry_points(group="qcodes.dataset.on_export"))
 
-array_like_types = (tuple, list, np.ndarray)
-scalar_res_types: TypeAlias = (
+ScalarResTypes: TypeAlias = (
     str | complex | np.integer | np.floating | np.complexfloating
 )
-values_type: TypeAlias = scalar_res_types | np.ndarray | Sequence[scalar_res_types]
-res_type: TypeAlias = "tuple[ParameterBase | str, values_type]"
-setpoints_type: TypeAlias = "Sequence[str | ParameterBase]"
+ValuesType: TypeAlias = ScalarResTypes | npt.NDArray | Sequence[ScalarResTypes]
+ResType: TypeAlias = "tuple[ParameterBase | str, ValuesType]"
+SetpointsType: TypeAlias = "Sequence[str | ParameterBase]"
+
+# deprecated alias left for backwards compatibility
+array_like_types = (tuple, list, npt.NDArray)
+scalar_res_types: TypeAlias = ScalarResTypes  # noqa PYI042
+values_type: TypeAlias = ValuesType  # noqa PYI042
+res_type: TypeAlias = ResType  # noqa PYI042
+setpoints_type: TypeAlias = SetpointsType  # noqa PYI042
+
+
 SPECS: TypeAlias = list[ParamSpec]
 # Transition period type: SpecsOrInterDeps. We will allow both as input to
 # the DataSet constructor for a while, then deprecate SPECS and finally remove
 # the ParamSpec class
 SpecsOrInterDeps: TypeAlias = SPECS | InterDependencies_
-ParameterData: TypeAlias = dict[str, dict[str, np.ndarray]]
+ParameterData: TypeAlias = dict[str, dict[str, npt.NDArray]]
 
 LOG = logging.getLogger(__name__)
 
@@ -224,6 +233,14 @@ class DataSetProtocol(Protocol):
         use_multi_index: Literal["auto", "always", "never"] = "auto",
     ) -> dict[str, xr.DataArray]: ...
 
+    def to_xarray_dataset_dict(
+        self,
+        *params: str | ParamSpec | ParameterBase,
+        start: int | None = None,
+        end: int | None = None,
+        use_multi_index: Literal["auto", "always", "never"] = "auto",
+    ) -> dict[str, xr.Dataset]: ...
+
     def to_xarray_dataset(
         self,
         *params: str | ParamSpec | ParameterBase,
@@ -249,7 +266,7 @@ class DataSetProtocol(Protocol):
     # private members called by various other parts or the api
 
     def _enqueue_results(
-        self, result_dict: Mapping[ParamSpecBase, np.ndarray]
+        self, result_dict: Mapping[ParamSpecBase, npt.NDArray]
     ) -> None: ...
 
     def _flush_data_to_database(self, block: bool = False) -> None: ...
@@ -486,8 +503,8 @@ class BaseDataSet(DataSetProtocol, Protocol):
 
     @staticmethod
     def _reshape_array_for_cache(
-        param: ParamSpecBase, param_data: np.ndarray
-    ) -> np.ndarray:
+        param: ParamSpecBase, param_data: npt.NDArray
+    ) -> npt.NDArray:
         """
         Shape cache data so it matches data read from database.
         This means:

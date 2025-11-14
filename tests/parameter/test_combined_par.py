@@ -100,7 +100,7 @@ def test_aggregator(
     )
 
     results = []
-    for i, value in enumerate(sweep_values):
+    for value in sweep_values:
         res = sweep_values.set(value)
         results.append(sweep_values._aggregate(*res))
 
@@ -123,7 +123,7 @@ def test_meta(parameters: list[ManualParameter]) -> None:
     out["full_name"] = name
     out["aggregator"] = repr(linear)
     for param in sweep_values.parameters:
-        out[param.full_name] = param.snapshot()  # type: ignore[assignment]
+        out[param.full_name] = param.snapshot()
     assert out == snap
 
 
