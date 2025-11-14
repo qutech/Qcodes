@@ -144,8 +144,7 @@ class _DelegateMixin:
                 path_list = paths
             else:
                 raise ValueError(
-                    "Parameter paths should be either a string "
-                    "or Sequence of strings."
+                    "Parameter paths should be either a string or Sequence of strings."
                 )
             if isinstance(names, str):
                 name_list: Sequence[str] = [names]
@@ -153,8 +152,7 @@ class _DelegateMixin:
                 name_list = names
             else:
                 raise ValueError(
-                    "Parameter names should be either a string "
-                    "or Sequence of strings."
+                    "Parameter names should be either a string or Sequence of strings."
                 )
 
             self._create_and_add_parameter(
@@ -208,6 +206,7 @@ class _DelegateMixin:
         getter: Callable[..., Any] | None = None,
         formatter: Callable[..., Any] | None = None,
         unit: str | None = None,
+        **kwargs: Any,
     ) -> None:
         """Create delegate parameter that links to a given set of paths
         (e.g. my_instrument.my_param) on the station"""
@@ -250,6 +249,7 @@ class _DelegateMixin:
                 source=source_parameters[0],
                 parameter_class=DelegateParameter,
                 unit=unit,
+                **kwargs,
             )
 
     def _create_and_add_channels(
