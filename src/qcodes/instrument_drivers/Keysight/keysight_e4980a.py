@@ -1,7 +1,8 @@
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from packaging import version
 from pyvisa.errors import VisaIOError
+from typing_extensions import deprecated
 
 from qcodes.instrument import (
     InstrumentBaseKWArgs,
@@ -19,6 +20,7 @@ from qcodes.parameters import (
     create_on_off_val_mapping,
 )
 from qcodes.utils import convert_legacy_version_to_supported_version
+from qcodes.utils.deprecate import QCoDeSDeprecationWarning
 from qcodes.validators import Bool, Enum, Ints, Numbers
 
 if TYPE_CHECKING:
@@ -73,8 +75,15 @@ class KeysightE4980AMeasurementPair(MultiParameter):
         return self.value
 
 
-MeasurementPair = KeysightE4980AMeasurementPair
-"Alias for backwards compatibility"
+@deprecated(
+    "MeasurementPair is deprecated. Please use qcodes.instrument_drivers.Keysight.KeysightE4980AMeasurementPair instead.",
+    category=QCoDeSDeprecationWarning,
+    stacklevel=1,
+)
+class MeasurementPair(KeysightE4980AMeasurementPair):
+    """Alias for backwards compatibility"""
+
+    pass
 
 
 class KeysightE4980AMeasurements:
@@ -145,8 +154,15 @@ class KeysightE4980AMeasurements:
     VDID = KeysightE4980AMeasurementPair("VDID", ("voltage", "current"), ("V", "A"))
 
 
-E4980AMeasurements = KeysightE4980AMeasurements
-"Alias for backwards compatibility"
+@deprecated(
+    "E4980AMeasurements is deprecated. Please use qcodes.instrument_drivers.Keysight.KeysightE4980AMeasurements instead.",
+    category=QCoDeSDeprecationWarning,
+    stacklevel=1,
+)
+class E4980AMeasurements(KeysightE4980AMeasurements):
+    """Alias for backwards compatibility"""
+
+    pass
 
 
 class KeysightE4980ACorrection(InstrumentChannel):
@@ -195,8 +211,15 @@ class KeysightE4980ACorrection(InstrumentChannel):
         """Enables or disable SHORT correction."""
 
 
-Correction4980A = KeysightE4980ACorrection
-"Alias for backwards compatibility"
+@deprecated(
+    "Correction4980A is deprecated. Please use qcodes.instrument_drivers.Keysight.KeysightE4980ACorrection instead.",
+    category=QCoDeSDeprecationWarning,
+    stacklevel=1,
+)
+class Correction4980A(KeysightE4980ACorrection):
+    """Alias for backwards compatibility"""
+
+    pass
 
 
 class KeysightE4980A(VisaInstrument):
@@ -371,14 +394,13 @@ class KeysightE4980A(VisaInstrument):
         )
         """This parameter tracks the signal mode which is being set."""
 
-        self.add_submodule("_correction", KeysightE4980ACorrection(self, "correction"))
+        self.correction: KeysightE4980ACorrection = self.add_submodule(
+            "correction", KeysightE4980ACorrection(self, "correction")
+        )
+        """Correction submodule"""
+
         self._set_signal_mode_on_driver_initialization()
         self.connect_message()
-
-    @property
-    def correction(self) -> KeysightE4980ACorrection:
-        submodule = self.submodules["_correction"]
-        return cast("KeysightE4980ACorrection", submodule)
 
     @property
     def measure_impedance(self) -> KeysightE4980AMeasurementPair:

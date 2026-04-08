@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -45,7 +45,7 @@ class ParameterWithSetpointsCustomized(ParameterWithSetpoints):
         return self._user_selected_data
 
 
-class Keithley2450Buffer(InstrumentChannel):
+class Keithley2450Buffer(InstrumentChannel["Keithley2450"]):
     """
     Treat the reading buffer as a submodule, similar to Sense and Source
     """
@@ -132,7 +132,7 @@ class Keithley2450Buffer(InstrumentChannel):
             return []
         return [self.inverted_buffer_elements[element] for element in element_scpis]
 
-    def __enter__(self) -> "Keithley2450Buffer":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(
@@ -213,7 +213,7 @@ class _FunctionMode(TypedDict):
     range_vals: Numbers
 
 
-class Keithley2450Sense(InstrumentChannel):
+class Keithley2450Sense(InstrumentChannel["Keithley2450"]):
     """
     The sense module of the Keithley 2450 SMU.
 
@@ -340,7 +340,7 @@ class Keithley2450Sense(InstrumentChannel):
         return float(self.ask(f":MEASure? '{buffer_name}'"))
 
     def _measure_sweep(self) -> npt.NDArray:
-        source = cast("Keithley2450Source", self.parent.source)
+        source = self.parent.source
         source.sweep_start()
         buffer_name = self.parent.buffer_name()
         buffer = cast(
@@ -379,7 +379,7 @@ class Keithley2450Sense(InstrumentChannel):
         self.write(set_cmd)
 
 
-class Keithley2450Source(InstrumentChannel):
+class Keithley2450Source(InstrumentChannel["Keithley2450"]):
     """
     The source module of the Keithley 2450 SMU.
 

@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 
 from qcodes import validators as vals
 from qcodes.instrument import (
-    Instrument,
     InstrumentBaseKWArgs,
     InstrumentChannel,
     VisaInstrument,
@@ -26,14 +25,14 @@ log = logging.getLogger(__name__)
 # 33200, 33500, and 33600
 
 
-class Keysight33xxxOutputChannel(InstrumentChannel):
+class Keysight33xxxOutputChannel(InstrumentChannel["Keysight33xxx"]):
     """
     Class to hold the output channel of a Keysight 33xxxx waveform generator.
     """
 
     def __init__(
         self,
-        parent: Instrument,
+        parent: "Keysight33xxx",
         name: str,
         channum: int,
         **kwargs: "Unpack[InstrumentBaseKWArgs]",
@@ -317,7 +316,7 @@ class Keysight33xxxOutputChannel(InstrumentChannel):
 OutputChannel = Keysight33xxxOutputChannel
 
 
-class Keysight33xxxSyncChannel(InstrumentChannel):
+class Keysight33xxxSyncChannel(InstrumentChannel["Keysight33xxx"]):
     """
     Class to hold the sync output of a Keysight 33xxxx waveform generator.
     Has very few parameters for single channel instruments.
@@ -325,7 +324,7 @@ class Keysight33xxxSyncChannel(InstrumentChannel):
 
     def __init__(
         self,
-        parent: Instrument,
+        parent: "Keysight33xxx",
         name: str,
         **kwargs: "Unpack[InstrumentBaseKWArgs]",
     ):
@@ -406,6 +405,7 @@ class Keysight33xxx(KeysightErrorQueueMixin, VisaInstrument):
             "33511B": 1,
             "33512B": 2,
             "33522B": 2,
+            "33611A": 1,
             "33622A": 2,
             "33510B": 2,
         }
@@ -416,6 +416,7 @@ class Keysight33xxx(KeysightErrorQueueMixin, VisaInstrument):
             "33512B": 20e6,
             "33250A": 80e6,
             "33522B": 30e6,
+            "33611A": 80e6,
             "33622A": 120e6,
             "33510B": 20e6,
         }

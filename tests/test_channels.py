@@ -18,7 +18,6 @@ from qcodes.instrument_drivers.mock_instruments import (
 from qcodes.parameters import (
     MultiChannelInstrumentParameter,
 )
-from qcodes.utils import QCoDeSDeprecationWarning
 
 if TYPE_CHECKING:
     import pytest_mock
@@ -515,8 +514,8 @@ def test_access_channels_by_name_empty_raises(dci: DummyChannelInstrument) -> No
 
 
 def test_access_channel_by_name_empty_raises(dci: DummyChannelInstrument) -> None:
-    with pytest.raises(TypeError, match="one or more names must be given"):
-        dci.channels.get_channel_by_name()
+    with pytest.raises(TypeError, match="missing 1 required positional argument"):
+        dci.channels.get_channel_by_name()  # pyright: ignore[reportCallIssue]
 
 
 def test_delete_from_channel_list(dci_with_list: DCIWithList) -> None:
@@ -577,23 +576,6 @@ def test_set_element_locked_raises(dci_with_list: DCIWithList) -> None:
     ):
         dci_with_list.channels[0] = dci_with_list.channels[1]
     assert dci_with_list.channels[0] is not dci_with_list.channels[1]
-
-
-@settings(suppress_health_check=(HealthCheck.function_scoped_fixture,), deadline=1000)
-@given(myindexs=hst.lists(elements=hst.integers(0, 7), min_size=2))
-def test_access_channels_by_name_deprecated(
-    dci: DummyChannelInstrument, myindexs: list[int]
-) -> None:
-    names = ("A", "B", "C", "D", "E", "F", "G", "H")
-    channels = tuple(DummyChannel(dci, "Chan" + name, name) for name in names)
-    chlist = ChannelList(dci, "channels", DummyChannel, channels)
-
-    channel_names = (f"Chan{names[i]}" for i in myindexs)
-
-    with pytest.warns(QCoDeSDeprecationWarning, match="get_channel_by_name"):
-        mychans = chlist.get_channel_by_name(*channel_names)
-        for chan, chanindex in zip(mychans, myindexs):  # pyright: ignore[reportArgumentType]
-            assert chan.name == f"dci_Chan{names[chanindex]}"
 
 
 @settings(suppress_health_check=(HealthCheck.function_scoped_fixture,), deadline=1000)
@@ -751,6 +733,98 @@ def test_channel_tuple_call_method_called_as_expected(
 def test_channel_tuple_names(dci: DummyChannelInstrument) -> None:
     assert dci.channels.short_name == "TempSensors"
     assert dci.channels.full_name == "dci_TempSensors"
+
+
+def test_multi_parameter_returns_multichannel_parameter(
+    dci: DummyChannelInstrument,
+) -> None:
+    """Test that multi_parameter returns a MultiChannelInstrumentParameter for valid parameter name."""
+    temp_multi_param = dci.channels.multi_parameter("temperature")
+    assert isinstance(temp_multi_param, MultiChannelInstrumentParameter)
+
+    temperatures = temp_multi_param.get()
+    assert len(temperatures) == 6
+
+
+def test_multi_parameter_invalid_name_raises(dci: DummyChannelInstrument) -> None:
+    """Test that multi_parameter raises AttributeError for invalid parameter name."""
+    with pytest.raises(
+        AttributeError,
+        match="'ChannelTuple' object has no parameter 'nonexistent_param'",
+    ):
+        dci.channels.multi_parameter("nonexistent_param")
+
+
+def test_multi_parameter_on_empty_channel_tuple_raises(
+    empty_instrument: Instrument,
+) -> None:
+    """Test that multi_parameter raises AttributeError on empty channel tuple."""
+    channels = ChannelTuple(empty_instrument, "channels", chan_type=DummyChannel)
+    empty_instrument.add_submodule("channels", channels)
+
+    with pytest.raises(
+        AttributeError,
+        match="'ChannelTuple' object has no parameter 'temperature'",
+    ):
+        channels.multi_parameter("temperature")
+
+
+def test_multi_function_returns_callable(dci: DummyChannelInstrument) -> None:
+    """Test that multi_function returns a callable for valid function name."""
+    multi_func = dci.channels.multi_function("log_my_name")
+    assert callable(multi_func)
+
+
+def test_multi_function_calls_function_on_all_channels(
+    dci: DummyChannelInstrument, caplog: LogCaptureFixture
+) -> None:
+    """Test that the returned callable calls the function on all channels."""
+    with caplog.at_level(
+        logging.DEBUG, logger="qcodes.instrument_drivers.mock_instruments"
+    ):
+        caplog.clear()
+        multi_func = dci.channels.multi_function("log_my_name")
+        multi_func()
+        mssgs = [rec.message for rec in caplog.records]
+        names = [ch.name.replace("dci_", "") for ch in dci.channels]
+        assert mssgs == names
+
+
+def test_multi_function_with_callable_method(
+    dci: DummyChannelInstrument, mocker: "pytest_mock.MockerFixture"
+) -> None:
+    """Test that multi_function works with callable methods on channels."""
+    for channel in dci.channels:
+        channel.turn_on = mocker.MagicMock(return_value=1)
+
+    multi_func = dci.channels.multi_function("turn_on")
+    result = multi_func("bar")
+    assert result is None
+    for channel in dci.channels:
+        channel.turn_on.assert_called_with("bar")  # type: ignore[union-attr]
+
+
+def test_multi_function_invalid_name_raises(dci: DummyChannelInstrument) -> None:
+    """Test that multi_function raises AttributeError for invalid function/callable name."""
+    with pytest.raises(
+        AttributeError,
+        match="'ChannelTuple' object has no callable or function 'nonexistent_func'",
+    ):
+        dci.channels.multi_function("nonexistent_func")
+
+
+def test_multi_function_on_empty_channel_tuple_raises(
+    empty_instrument: Instrument,
+) -> None:
+    """Test that multi_function raises AttributeError on empty channel tuple."""
+    channels = ChannelTuple(empty_instrument, "channels", chan_type=DummyChannel)
+    empty_instrument.add_submodule("channels", channels)
+
+    with pytest.raises(
+        AttributeError,
+        match="'ChannelTuple' object has no callable or function 'temperature'",
+    ):
+        channels.multi_function("temperature")
 
 
 def _verify_multiparam_data(data) -> None:

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import sys
-import warnings
 from collections.abc import Callable, Iterable, Iterator, MutableSequence, Sequence
-from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Generic, Self, cast, overload
+
+from typing_extensions import TypeVar
 
 from qcodes.metadatable import MetadatableWithName
 from qcodes.parameters import (
@@ -15,7 +16,7 @@ from qcodes.parameters import (
     Parameter,
 )
 from qcodes.parameters.multi_channel_instrument_parameter import InstrumentModuleType
-from qcodes.utils import QCoDeSDeprecationWarning, full_class
+from qcodes.utils import full_class
 from qcodes.validators import Validator
 
 from .instrument_base import InstrumentBase
@@ -28,7 +29,12 @@ if TYPE_CHECKING:
     from .instrument_base import InstrumentBaseKWArgs
 
 
-class InstrumentModule(InstrumentBase):
+_TIB_co = TypeVar(
+    "_TIB_co", bound="InstrumentBase", default=InstrumentBase, covariant=True
+)
+
+
+class InstrumentModule(InstrumentBase, Generic[_TIB_co]):
     """
     Base class for a module in an instrument.
     This could be in the form of a channel (e.g. something that
@@ -45,7 +51,7 @@ class InstrumentModule(InstrumentBase):
     """
 
     def __init__(
-        self, parent: InstrumentBase, name: str, **kwargs: Unpack[InstrumentBaseKWArgs]
+        self, parent: _TIB_co, name: str, **kwargs: Unpack[InstrumentBaseKWArgs]
     ) -> None:
         # need to specify parent before `super().__init__` so that the right
         # `full_name` is available in that scope. `full_name` is used for
@@ -76,7 +82,7 @@ class InstrumentModule(InstrumentBase):
         return self._parent.ask_raw(cmd)
 
     @property
-    def parent(self) -> InstrumentBase:
+    def parent(self) -> _TIB_co:
         return self._parent
 
     @property
@@ -90,7 +96,7 @@ class InstrumentModule(InstrumentBase):
         return name_parts
 
 
-class InstrumentChannel(InstrumentModule):
+class InstrumentChannel(InstrumentModule[_TIB_co], Generic[_TIB_co]):
     pass
 
 
@@ -358,33 +364,15 @@ class ChannelTuple(MetadatableWithName, Sequence[InstrumentModuleType]):
             self._paramclass,
         )
 
-    def get_channel_by_name(self: Self, *names: str) -> InstrumentModuleType | Self:
+    def get_channel_by_name(self: Self, name: str) -> InstrumentModuleType:
         """
-        Get a channel by name, or a ChannelTuple if multiple names are given.
+        Get a channel by name.
 
         Args:
-            *names: channel names
+            name: channel name
 
         """
-        if len(names) == 0:
-            raise TypeError("one or more names must be given")
-        if len(names) == 1:
-            return self._channel_mapping[names[0]]
-
-        warnings.warn(
-            "Supplying more than one name to get_channel_by_name is deprecated, use get_channels_by_name instead",
-            category=QCoDeSDeprecationWarning,
-        )
-
-        selected_channels = tuple(self._channel_mapping[name] for name in names)
-        return type(self)(
-            self._parent,
-            self._name,
-            self._chan_type,
-            selected_channels,
-            self._snapshotable,
-            self._paramclass,
-        )
+        return self._channel_mapping[name]
 
     def get_validator(self) -> ChannelTupleValidator:
         """
@@ -434,15 +422,92 @@ class ChannelTuple(MetadatableWithName, Sequence[InstrumentModuleType]):
             }
         return snap
 
-    def __getattr__(
-        self, name: str
-    ) -> MultiChannelInstrumentParameter | Callable[..., None] | InstrumentModuleType:
+    def multi_parameter(
+        self: Self, name: str
+    ) -> MultiChannelInstrumentParameter[InstrumentModuleType]:
+        """
+        Look up a parameter by name. If this is the name of a parameter on the
+        channel type contained in this container return a multi-channel parameter
+        that controls this parameter on all channels in the Sequence.
+
+        Args:
+            name: The name of the parameter that we want to
+                operate on.
+
+        Returns:
+            MultiChannelInstrumentParameter: The multi-channel parameter
+                that can be used to get or set all items in a channel list
+                simultaneously.
+
+        Raises:
+            AttributeError: If no parameter with the given name exists.
+
+        """
+        if len(self) > 0:
+            # Check if this is a valid parameter
+            if name in self._channels[0].parameters:
+                param = self._construct_multiparam(name)
+                return param
+        raise AttributeError(
+            f"'{self.__class__.__name__}' object has no parameter '{name}'"
+        )
+
+    def multi_function(self, name: str) -> Callable[..., None]:
+        """
+        Look up a callable or QCoDeS function by name. If this is the name of a callable or function
+        on the channel type contained in this container return a callable that calls this callable on
+        all channels in the Sequence
+
+        Args:
+            name: The name of the callable/function that we want to
+                operate on.
+
+        Returns:
+            Callable that calls the functions/callables on all channels in the Sequence.
+
+        Raises:
+            AttributeError: If no callable with the given name exists.
+
+        """
+        if len(self) == 0:
+            raise AttributeError(
+                f"'{self.__class__.__name__}' object has no callable or function '{name}'"
+            )
+        # Check if this is a valid function
+        if name in self._channels[0].functions:
+            # We want to return a reference to a function that would call the
+            # function for each of the channels in turn.
+            def multi_func(*args: Any) -> None:
+                for chan in self._channels:
+                    chan.functions[name](*args)
+
+            return multi_func
+
+        # check if this is a method on the channels in the
+        # sequence
+        maybe_callable = getattr(self._channels[0], name, None)
+        if callable(maybe_callable):
+
+            def multi_callable(*args: Any) -> None:
+                for chan in self._channels:
+                    getattr(chan, name)(*args)
+
+            return multi_callable
+        raise AttributeError(
+            f"'{self.__class__.__name__}' object has no callable or function '{name}'"
+        )
+
+    def __getattr__(self, name: str) -> Any:
         """
         Look up an attribute by name. If this is the name of a parameter or
         a function on the channel type contained in this container return a
         multi-channel function or parameter that can be used to get or
         set all items in a channel list simultaneously. If this is the
-        name of a channel, return that channel.
+        name of a channel, return that channel. This interface is not
+        type safe as it will return any matching attribute. To get a channel
+        by name use ``get_channels_by_name`` instead. To get a parameter use
+        ``multi_parameter``. To get a a callable or a qcodes function use
+        ``multi_function``
 
         Args:
             name: The name of the parameter, function or channel that we want to
@@ -524,7 +589,7 @@ class ChannelTuple(MetadatableWithName, Sequence[InstrumentModuleType]):
         else:
             shapes = tuple(() for _ in self._channels)
         param = self._paramclass(
-            self._channels,
+            channels=self._channels,
             param_name=name,
             name=f"Multi_{name}",
             names=names,
