@@ -10,22 +10,317 @@ from typing import TYPE_CHECKING, Any
 from qcodes.parameters import (
     DelegateGroup,
     DelegateGroupParameter,
+    DelegateParameter,
     GroupedParameter,
     Parameter,
+    ParameterBase,
 )
 
+from ..channel import InstrumentChannel
 from ..instrument_base import InstrumentBase
 
 if TYPE_CHECKING:
     from qcodes.station import Station
 
-    from ..channel import InstrumentChannel
-
-
 _log = logging.getLogger(__name__)
 
 
-class DelegateInstrument(InstrumentBase):
+class _DelegateMixin:
+    param_cls = DelegateGroupParameter
+
+    def __init__(
+        self,
+        *args: Any,
+        station: Station,
+        parameters: None | (Mapping[str, Sequence[str]] | Mapping[str, str]) = None,
+        channels: None | (Mapping[str, Mapping[str, Any]] | Mapping[str, str]) = None,
+        grouped_parameter_names: None | Mapping[str, Sequence[str] | str | None] = None,
+        grouped_parameter_class: None | type[ParameterBase] = GroupedParameter,
+        grouped_parameter_kwargs: None | Mapping[str, Any] = None,
+        initial_values: Mapping[str, Any] | None = None,
+        set_initial_values_on_load: bool = False,
+        setters: Mapping[str, MutableMapping[str, Any]] | None = None,
+        units: Mapping[str, str] | None = None,
+        metadata: Mapping[Any, Any] | None = None,
+        **kwargs: Any,
+    ):
+        super().__init__(*args, metadata=metadata, **kwargs)
+        if parameters is not None:
+            if grouped_parameter_names is None:
+                grouped_parameter_names = {
+                    param_name: None for param_name in parameters
+                }
+            self._create_and_add_parameters(
+                station=station,
+                parameters=parameters,
+                grouped_parameter_names=grouped_parameter_names,
+                grouped_parameter_class=grouped_parameter_class,
+                grouped_parameter_kwargs=grouped_parameter_kwargs or {},
+                setters=setters or {},
+                units=units or {},
+            )
+
+        if channels is not None:
+            self._create_and_add_channels(
+                station=station,
+                channels=channels,
+            )
+
+        self._initial_values = initial_values or {}
+        if set_initial_values_on_load:
+            self.set_initial_values()
+
+    @staticmethod
+    def parse_instrument_path(
+        parent: Station | InstrumentBase,
+        path: str,
+    ) -> Any:
+        """Parse a string path and return the object relative to a station or
+        instrument, e.g. "my_instrument.my_param" returns
+        station.my_instrument.my_param
+
+        Args:
+            parent: Measurement station
+            path: Relative path to parse
+
+        """
+
+        def _parse_path(parent: Any, elem: Sequence[str]) -> Any:
+            child = getattr(parent, elem[0])
+            if len(elem) == 1:
+                return child
+            return _parse_path(child, elem[1:])
+
+        return _parse_path(parent, path.split("."))
+
+    def set_initial_values(self, dry_run: bool = False) -> None:
+        """Set parameter initial values on delegate instrument
+
+        Args:
+            dry_run: Dry run to test if defaults are set correctly.
+                Defaults to False.
+
+        """
+        _log.debug(f"Setting default values: {self._initial_values}")
+        for path, value in self._initial_values.items():
+            param = self.parse_instrument_path(parent=self, path=path)
+            msg = f"Setting parameter {self.name}.{path} to {value}."
+            if not dry_run:
+                _log.debug(msg)
+                if hasattr(param, "set"):
+                    param.set(value)
+                else:
+                    _log.debug("No set method found, trying to assign value.")
+                    if "." in path:
+                        name = path.split(".")[-1]
+                        parent_path = ".".join(path.split(".")[:-1])
+                        parent = self.parse_instrument_path(
+                            parent=self, path=parent_path
+                        )
+                    else:
+                        parent, name = self, path
+                    setattr(parent, name, value)
+            else:
+                print(f"Dry run: {msg}")
+
+    def _create_and_add_parameters(
+        self,
+        station: Station,
+        parameters: Mapping[str, Sequence[str]] | Mapping[str, str],
+        grouped_parameter_names: Mapping[str, Sequence[str] | str | None],
+        grouped_parameter_class: type[ParameterBase] | None,
+        grouped_parameter_kwargs: Mapping[str, Any],
+        setters: Mapping[str, MutableMapping[str, Any]],
+        units: Mapping[str, str],
+    ) -> None:
+        """Add parameters to delegate instrument based on specified aliases,
+        endpoints and setter methods"""
+        for (param_name, paths), (_, names) in zip(
+            parameters.items(), grouped_parameter_names.items()
+        ):
+            if isinstance(paths, str):
+                path_list: Sequence[str] = [paths]
+            elif isinstance(paths, abc.Sequence):
+                path_list = paths
+            else:
+                raise ValueError(
+                    "Parameter paths should be either a string or Sequence of strings."
+                )
+            if isinstance(names, str):
+                name_list: Sequence[str] = [names]
+            elif isinstance(names, (Sequence, type(None))):
+                name_list = names
+            else:
+                raise ValueError(
+                    "Parameter names should be either a string or Sequence of strings."
+                )
+
+            self._create_and_add_parameter(
+                group_name=param_name,
+                station=station,
+                paths=path_list,
+                names=name_list,
+                grouped_parameter_class=grouped_parameter_class,
+                grouped_parameter_kwargs=grouped_parameter_kwargs,
+                setter=setters.get(param_name),
+                unit=units.get(param_name),
+            )
+
+    @staticmethod
+    def _parameter_names(parameters: Sequence[Parameter]) -> list[str]:
+        """Get the endpoint names"""
+        parameter_names = [_e.name for _e in parameters]
+        if len(parameter_names) != len(set(parameter_names)):
+            parameter_names = [f"{_e}{n}" for n, _e in enumerate(parameter_names)]
+        return parameter_names
+
+    def _add_parameter(
+        self,
+        group_name: str,
+        name: str,
+        source: Parameter,
+    ) -> DelegateGroupParameter:
+        param_name = f"{group_name}_{name}"
+        if param_name in self.parameters:
+            raise KeyError(f"Duplicate parameter name {param_name} on {self.name}")
+
+        self.add_parameter(
+            parameter_class=self.param_cls,
+            name=param_name,
+            source=source,
+        )
+        param = self.parameters[param_name]
+        assert isinstance(param, DelegateGroupParameter)
+
+        return param
+
+    def _create_and_add_parameter(
+        self,
+        group_name: str,
+        station: Station,
+        paths: Sequence[str],
+        names: Sequence[str] | None,
+        grouped_parameter_class: type[ParameterBase] | None = GroupedParameter,
+        grouped_parameter_kwargs: None | Mapping[str, Any] = None,
+        setter: MutableMapping[str, Any] | None = None,
+        getter: Callable[..., Any] | None = None,
+        formatter: Callable[..., Any] | None = None,
+        unit: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Create delegate parameter that links to a given set of paths
+        (e.g. my_instrument.my_param) on the station"""
+        source_parameters = [
+            self.parse_instrument_path(station, path) for path in paths
+        ]
+        if names is None:
+            names = self._parameter_names(source_parameters)
+
+        setter_fn = None
+        if setter is not None:
+            setter_method = self.parse_instrument_path(station, setter.pop("method"))
+            setter_fn = partial(setter_method, **setter)
+
+        if len(source_parameters) > 1 or setter is not None:
+            params = [
+                self._add_parameter(group_name, name, source)
+                for name, source in zip(names, source_parameters)
+            ]
+
+            group = DelegateGroup(
+                name=group_name,
+                parameters=params,
+                parameter_names=names,
+                setter=setter_fn,
+                getter=getter,
+                formatter=formatter,
+            )
+
+            self.add_parameter(
+                name=group_name,
+                parameter_class=grouped_parameter_class,
+                group=group,
+                unit=unit,
+                **grouped_parameter_kwargs,
+            )
+        else:
+            self.add_parameter(
+                name=group_name,
+                source=source_parameters[0],
+                parameter_class=DelegateParameter,
+                unit=unit,
+                **kwargs,
+            )
+
+    def _create_and_add_channels(
+        self,
+        station: Station,
+        channels: Mapping[str, str | Mapping[str, Any]],
+    ) -> None:
+        """Add channels to the instrument."""
+        channel_wrapper = None
+        chnnls_dict: dict[str, str | Mapping[str, Any]] = dict(channels)
+        channel_type_global = chnnls_dict.pop("type", None)
+        if channel_type_global is not None and not isinstance(channel_type_global, str):
+            raise ValueError("Wrong channel type.")
+        channel_wrapper_global = _get_channel_wrapper_class(channel_type_global)
+
+        for channel_name, input_params in chnnls_dict.items():
+            if isinstance(input_params, Mapping):
+                input_params = dict(input_params)
+                channel_type_individual = input_params.pop("type", None)
+                channel_wrapper_individual = _get_channel_wrapper_class(
+                    channel_type_individual
+                )
+                if channel_wrapper_individual is None:
+                    channel_wrapper = channel_wrapper_global
+                else:
+                    channel_wrapper = channel_wrapper_individual
+            else:
+                channel_wrapper = channel_wrapper_global
+
+            self._create_and_add_channel(
+                channel_name=channel_name,
+                station=station,
+                input_params=input_params,
+                channel_wrapper=channel_wrapper,
+            )
+
+    def _create_and_add_channel(
+        self,
+        channel_name: str,
+        station: Station,
+        input_params: str | Mapping[str, Any],
+        channel_wrapper: type[InstrumentChannel] | None,
+        **kwargs: Any,
+    ) -> None:
+        """Adds a channel to the instrument."""
+        if isinstance(input_params, str):
+            try:
+                channel = self.parse_instrument_path(station, input_params)
+            except ValueError as v_err:
+                msg = "Unknown channel path."
+                raise ValueError(msg) from v_err
+
+        elif isinstance(input_params, Mapping) and channel_wrapper is not None:
+            channel = self.parse_instrument_path(station, input_params["channel"])
+            wrapper_kwargs = dict(**kwargs, **input_params)
+
+            channel = channel_wrapper(
+                parent=channel.parent, name=channel_name, **wrapper_kwargs
+            )
+        else:
+            raise ValueError(
+                "Channels can only be created from existing channels, "
+                "or using a wrapper channel class; "
+                f"instead got {input_params!r} inputs with "
+                f"{channel_wrapper!r} channel wrapper."
+            )
+
+        self.add_submodule(channel_name, channel)
+
+
+class DelegateInstrument(_DelegateMixin, InstrumentBase):
     """DelegateInstrument is an instrument driver with one or more
     parameters that connect to instrument parameters.
 
@@ -102,264 +397,18 @@ class DelegateInstrument(InstrumentBase):
 
     """
 
-    param_cls = DelegateGroupParameter
-
-    def __init__(
-        self,
-        name: str,
-        station: Station,
-        parameters: None | (Mapping[str, Sequence[str]] | Mapping[str, str]) = None,
-        channels: None | (Mapping[str, Mapping[str, Any]] | Mapping[str, str]) = None,
-        initial_values: Mapping[str, Any] | None = None,
-        set_initial_values_on_load: bool = False,
-        setters: Mapping[str, MutableMapping[str, Any]] | None = None,
-        units: Mapping[str, str] | None = None,
-        metadata: Mapping[Any, Any] | None = None,
-    ):
-        super().__init__(name=name, metadata=metadata)
-        if parameters is not None:
-            self._create_and_add_parameters(
-                station=station,
-                parameters=parameters,
-                setters=setters or {},
-                units=units or {},
-            )
-
-        if channels is not None:
-            self._create_and_add_channels(
-                station=station,
-                channels=channels,
-            )
-
-        self._initial_values = initial_values or {}
-        if set_initial_values_on_load:
-            self.set_initial_values()
-
-    @staticmethod
-    def parse_instrument_path(
-        parent: Station | InstrumentBase,
-        path: str,
-    ) -> Any:
-        """Parse a string path and return the object relative to a station or
-        instrument, e.g. "my_instrument.my_param" returns
-        station.my_instrument.my_param
-
-        Args:
-            parent: Measurement station
-            path: Relative path to parse
-
-        """
-
-        def _parse_path(parent: Any, elem: Sequence[str]) -> Any:
-            child = getattr(parent, elem[0])
-            if len(elem) == 1:
-                return child
-            return _parse_path(child, elem[1:])
-
-        return _parse_path(parent, path.split("."))
-
-    def set_initial_values(self, dry_run: bool = False) -> None:
-        """Set parameter initial values on delegate instrument
-
-        Args:
-            dry_run: Dry run to test if defaults are set correctly.
-                Defaults to False.
-
-        """
-        _log.debug(f"Setting default values: {self._initial_values}")
-        for path, value in self._initial_values.items():
-            param = self.parse_instrument_path(parent=self, path=path)
-            msg = f"Setting parameter {self.name}.{path} to {value}."
-            if not dry_run:
-                _log.debug(msg)
-                if hasattr(param, "set"):
-                    param.set(value)
-                else:
-                    _log.debug("No set method found, trying to assign value.")
-                    if "." in path:
-                        name = path.split(".")[-1]
-                        parent_path = ".".join(path.split(".")[:-1])
-                        parent = self.parse_instrument_path(
-                            parent=self, path=parent_path
-                        )
-                    else:
-                        parent, name = self, path
-                    setattr(parent, name, value)
-            else:
-                print(f"Dry run: {msg}")
-
-    def _create_and_add_parameters(
-        self,
-        station: Station,
-        parameters: Mapping[str, Sequence[str]] | Mapping[str, str],
-        setters: Mapping[str, MutableMapping[str, Any]],
-        units: Mapping[str, str],
-    ) -> None:
-        """Add parameters to delegate instrument based on specified aliases,
-        endpoints and setter methods"""
-        for param_name, paths in parameters.items():
-            if isinstance(paths, str):
-                path_list: Sequence[str] = [paths]
-
-            elif isinstance(paths, abc.Sequence):
-                path_list = paths
-            else:
-                raise ValueError(
-                    "Parameter paths should be either a string or Sequence of \
-                        strings."
-                )
-
-            self._create_and_add_parameter(
-                group_name=param_name,
-                station=station,
-                paths=path_list,
-                setter=setters.get(param_name),
-                unit=units.get(param_name),
-            )
-
-    @staticmethod
-    def _parameter_names(parameters: Sequence[Parameter]) -> list[str]:
-        """Get the endpoint names"""
-        parameter_names = [_e.name for _e in parameters]
-        if len(parameter_names) != len(set(parameter_names)):
-            parameter_names = [f"{_e}{n}" for n, _e in enumerate(parameter_names)]
-        return parameter_names
-
-    def _add_parameter(
-        self,
-        group_name: str,
-        name: str,
-        source: Parameter,
-    ) -> DelegateGroupParameter:
-        param_name = f"{group_name}_{name}"
-        if param_name in self.parameters:
-            raise KeyError(f"Duplicate parameter name {param_name} on {self.name}")
-
-        self.add_parameter(
-            parameter_class=self.param_cls,
-            name=param_name,
-            source=source,
-        )
-        param = self.parameters[param_name]
-        assert isinstance(param, DelegateGroupParameter)
-
-        return param
-
-    def _create_and_add_parameter(
-        self,
-        group_name: str,
-        station: Station,
-        paths: Sequence[str],
-        setter: MutableMapping[str, Any] | None = None,
-        getter: Callable[..., Any] | None = None,
-        formatter: Callable[..., Any] | None = None,
-        unit: str | None = None,
-        **kwargs: Any,
-    ) -> None:
-        """Create delegate parameter that links to a given set of paths
-        (e.g. my_instrument.my_param) on the station"""
-        source_parameters = [
-            self.parse_instrument_path(station, path) for path in paths
-        ]
-        parameter_names = self._parameter_names(source_parameters)
-
-        setter_fn = None
-        if setter is not None:
-            setter_method = self.parse_instrument_path(station, setter.pop("method"))
-            setter_fn = partial(setter_method, **setter)
-
-        params = [
-            self._add_parameter(group_name, name, source)
-            for name, source in zip(parameter_names, source_parameters)
-        ]
-
-        group = DelegateGroup(
-            name=group_name,
-            parameters=params,
-            parameter_names=parameter_names,
-            setter=setter_fn,
-            getter=getter,
-            formatter=formatter,
-        )
-
-        self.add_parameter(
-            name=group_name,
-            parameter_class=GroupedParameter,
-            group=group,
-            unit=unit,
-            **kwargs,
-        )
-
-    def _create_and_add_channels(
-        self,
-        station: Station,
-        channels: Mapping[str, str | Mapping[str, Any]],
-    ) -> None:
-        """Add channels to the instrument."""
-        channel_wrapper = None
-        chnnls_dict: dict[str, str | Mapping[str, Any]] = dict(channels)
-        channel_type_global = chnnls_dict.pop("type", None)
-        if channel_type_global is not None and not isinstance(channel_type_global, str):
-            raise ValueError("Wrong channel type.")
-        channel_wrapper_global = _get_channel_wrapper_class(channel_type_global)
-
-        for channel_name, input_params in chnnls_dict.items():
-            if isinstance(input_params, Mapping):
-                input_params = dict(input_params)
-                channel_type_individual = input_params.pop("type", None)
-                channel_wrapper_individual = _get_channel_wrapper_class(
-                    channel_type_individual
-                )
-                if channel_wrapper_individual is None:
-                    channel_wrapper = channel_wrapper_global
-                else:
-                    channel_wrapper = channel_wrapper_individual
-            else:
-                channel_wrapper = channel_wrapper_global
-
-            self._create_and_add_channel(
-                channel_name=channel_name,
-                station=station,
-                input_params=input_params,
-                channel_wrapper=channel_wrapper,
-            )
-
-    def _create_and_add_channel(
-        self,
-        channel_name: str,
-        station: Station,
-        input_params: str | Mapping[str, Any],
-        channel_wrapper: type[InstrumentChannel] | None,
-        **kwargs: Any,
-    ) -> None:
-        """Adds a channel to the instrument."""
-        if isinstance(input_params, str):
-            try:
-                channel = self.parse_instrument_path(station, input_params)
-            except ValueError as v_err:
-                msg = "Unknown channel path."
-                raise ValueError(msg) from v_err
-
-        elif isinstance(input_params, Mapping) and channel_wrapper is not None:
-            channel = self.parse_instrument_path(station, input_params["channel"])
-            wrapper_kwargs = dict(**kwargs, **input_params)
-
-            channel = channel_wrapper(
-                parent=channel.parent, name=channel_name, **wrapper_kwargs
-            )
-        else:
-            raise ValueError(
-                "Channels can only be created from existing channels, "
-                "or using a wrapper channel class; "
-                f"instead got {input_params!r} inputs with "
-                f"{channel_wrapper!r} channel wrapper."
-            )
-
-        self.add_submodule(channel_name, channel)
-
     def __repr__(self) -> str:
         params = ", ".join(self.parameters.keys())
-        return f"DelegateInstrument(name={self.name}, parameters={params})"
+        return f"{self.__class__.__name__}(name={self.name}, parameters={params})"
+
+
+class DelegateInstrumentChannel(_DelegateMixin, InstrumentChannel):
+    def __repr__(self) -> str:
+        params = ", ".join(self.parameters.keys())
+        return (
+            f"{self.__class__.__name__}(name={self.name}, parent={self.parent}, "
+            f"parameters={params})"
+        )
 
 
 def _get_channel_wrapper_class(
